@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.29.3
-// source: pkg/nodegrpc/node.proto
+// source: node.proto
 
 package nodegrpc
 
@@ -21,8 +21,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Node_Execute_FullMethodName             = "/ycgp.node.v1.Node/Execute"
-	Node_GetObserverEndpoint_FullMethodName = "/ycgp.node.v1.Node/GetObserverEndpoint"
+	Node_Execute_FullMethodName              = "/ycgp.node.v1.Node/Execute"
+	Node_GetObserverEndpoint_FullMethodName  = "/ycgp.node.v1.Node/GetObserverEndpoint"
+	Node_GetGostServiceStatus_FullMethodName = "/ycgp.node.v1.Node/GetGostServiceStatus"
+	Node_RestartGostService_FullMethodName   = "/ycgp.node.v1.Node/RestartGostService"
+	Node_GetGostLogs_FullMethodName          = "/ycgp.node.v1.Node/GetGostLogs"
 )
 
 // NodeClient is the client API for Node service.
@@ -31,6 +34,9 @@ const (
 type NodeClient interface {
 	Execute(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandReply, error)
 	GetObserverEndpoint(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ObserverEndpoint, error)
+	GetGostServiceStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
+	RestartGostService(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
+	GetGostLogs(ctx context.Context, in *GostLogsRequest, opts ...grpc.CallOption) (*GostLogsReply, error)
 }
 
 type nodeClient struct {
@@ -61,12 +67,45 @@ func (c *nodeClient) GetObserverEndpoint(ctx context.Context, in *emptypb.Empty,
 	return out, nil
 }
 
+func (c *nodeClient) GetGostServiceStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GostServiceStatus)
+	err := c.cc.Invoke(ctx, Node_GetGostServiceStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeClient) RestartGostService(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GostServiceStatus)
+	err := c.cc.Invoke(ctx, Node_RestartGostService_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeClient) GetGostLogs(ctx context.Context, in *GostLogsRequest, opts ...grpc.CallOption) (*GostLogsReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GostLogsReply)
+	err := c.cc.Invoke(ctx, Node_GetGostLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServer is the server API for Node service.
 // All implementations must embed UnimplementedNodeServer
 // for forward compatibility.
 type NodeServer interface {
 	Execute(context.Context, *CommandRequest) (*CommandReply, error)
 	GetObserverEndpoint(context.Context, *emptypb.Empty) (*ObserverEndpoint, error)
+	GetGostServiceStatus(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
+	RestartGostService(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
+	GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error)
 	mustEmbedUnimplementedNodeServer()
 }
 
@@ -82,6 +121,15 @@ func (UnimplementedNodeServer) Execute(context.Context, *CommandRequest) (*Comma
 }
 func (UnimplementedNodeServer) GetObserverEndpoint(context.Context, *emptypb.Empty) (*ObserverEndpoint, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetObserverEndpoint not implemented")
+}
+func (UnimplementedNodeServer) GetGostServiceStatus(context.Context, *emptypb.Empty) (*GostServiceStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGostServiceStatus not implemented")
+}
+func (UnimplementedNodeServer) RestartGostService(context.Context, *emptypb.Empty) (*GostServiceStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RestartGostService not implemented")
+}
+func (UnimplementedNodeServer) GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGostLogs not implemented")
 }
 func (UnimplementedNodeServer) mustEmbedUnimplementedNodeServer() {}
 func (UnimplementedNodeServer) testEmbeddedByValue()              {}
@@ -140,6 +188,60 @@ func _Node_GetObserverEndpoint_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Node_GetGostServiceStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).GetGostServiceStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_GetGostServiceStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).GetGostServiceStatus(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Node_RestartGostService_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).RestartGostService(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_RestartGostService_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).RestartGostService(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Node_GetGostLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GostLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).GetGostLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_GetGostLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).GetGostLogs(ctx, req.(*GostLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Node_ServiceDesc is the grpc.ServiceDesc for Node service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -155,9 +257,21 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetObserverEndpoint",
 			Handler:    _Node_GetObserverEndpoint_Handler,
 		},
+		{
+			MethodName: "GetGostServiceStatus",
+			Handler:    _Node_GetGostServiceStatus_Handler,
+		},
+		{
+			MethodName: "RestartGostService",
+			Handler:    _Node_RestartGostService_Handler,
+		},
+		{
+			MethodName: "GetGostLogs",
+			Handler:    _Node_GetGostLogs_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pkg/nodegrpc/node.proto",
+	Metadata: "node.proto",
 }
 
 const (
@@ -297,5 +411,5 @@ var Panel_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pkg/nodegrpc/node.proto",
+	Metadata: "node.proto",
 }

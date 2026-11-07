@@ -152,6 +152,12 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 执行 `bash scripts/install_node.sh uninstall --node-id <ID>` 可卸载实例并保留配置。在同一台服务器重新注册同一节点前，先卸载原实例并移走保留的目录。
 
+### 查看和重启 Gost 服务
+
+在 **节点管理 → 更多 → Gost 服务** 查看 `yagp-gost-<ID>.service` 的状态和最近 100 条日志，也可重启该实例。重启会中断该实例的活动转发连接。
+
+该功能使用节点上的 `libsystemd.so.0`。新发布包包含 systemd 和通用构建，安装脚本会按服务管理器选择。在 Linux glibc 主机可用 `make build-node-systemd` 构建 systemd 版本。升级已有实例时，停止 `yagp-node-<ID>`，替换 `/etc/yagp-node/<ID>/yagp-node`，再启动该服务即可沿用现有注册配置。
+
 ---
 
 ## 📦 预编译下载

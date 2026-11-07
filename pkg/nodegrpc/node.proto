@@ -23,9 +23,33 @@ message ObserverEndpoint {
   string address = 1;
 }
 
+message GostServiceStatus {
+  string unit = 1;
+  string load_state = 2;
+  string active_state = 3;
+  string sub_state = 4;
+}
+
+message GostLogsRequest {
+  uint32 lines = 1;
+}
+
+message GostLogEntry {
+  int64 timestamp_unix_micros = 1;
+  string message = 2;
+  int32 priority = 3;
+}
+
+message GostLogsReply {
+  repeated GostLogEntry entries = 1;
+}
+
 service Node {
   rpc Execute(CommandRequest) returns (CommandReply);
   rpc GetObserverEndpoint(google.protobuf.Empty) returns (ObserverEndpoint);
+  rpc GetGostServiceStatus(google.protobuf.Empty) returns (GostServiceStatus);
+  rpc RestartGostService(google.protobuf.Empty) returns (GostServiceStatus);
+  rpc GetGostLogs(GostLogsRequest) returns (GostLogsReply);
 }
 
 message ReportRequest {

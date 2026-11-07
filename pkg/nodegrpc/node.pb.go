@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.6
 // 	protoc        v5.29.3
-// source: pkg/nodegrpc/node.proto
+// source: node.proto
 
 package nodegrpc
 
@@ -34,7 +34,7 @@ type CommandRequest struct {
 
 func (x *CommandRequest) Reset() {
 	*x = CommandRequest{}
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[0]
+	mi := &file_node_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +46,7 @@ func (x *CommandRequest) String() string {
 func (*CommandRequest) ProtoMessage() {}
 
 func (x *CommandRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[0]
+	mi := &file_node_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +59,7 @@ func (x *CommandRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandRequest.ProtoReflect.Descriptor instead.
 func (*CommandRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{0}
+	return file_node_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CommandRequest) GetMethod() string {
@@ -93,7 +93,7 @@ type CommandReply struct {
 
 func (x *CommandReply) Reset() {
 	*x = CommandReply{}
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[1]
+	mi := &file_node_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -105,7 +105,7 @@ func (x *CommandReply) String() string {
 func (*CommandReply) ProtoMessage() {}
 
 func (x *CommandReply) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[1]
+	mi := &file_node_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -118,7 +118,7 @@ func (x *CommandReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandReply.ProtoReflect.Descriptor instead.
 func (*CommandReply) Descriptor() ([]byte, []int) {
-	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{1}
+	return file_node_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CommandReply) GetStatusCode() int32 {
@@ -144,7 +144,7 @@ type ObserverEndpoint struct {
 
 func (x *ObserverEndpoint) Reset() {
 	*x = ObserverEndpoint{}
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[2]
+	mi := &file_node_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -156,7 +156,7 @@ func (x *ObserverEndpoint) String() string {
 func (*ObserverEndpoint) ProtoMessage() {}
 
 func (x *ObserverEndpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[2]
+	mi := &file_node_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -169,7 +169,7 @@ func (x *ObserverEndpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObserverEndpoint.ProtoReflect.Descriptor instead.
 func (*ObserverEndpoint) Descriptor() ([]byte, []int) {
-	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{2}
+	return file_node_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ObserverEndpoint) GetAddress() string {
@@ -177,6 +177,222 @@ func (x *ObserverEndpoint) GetAddress() string {
 		return x.Address
 	}
 	return ""
+}
+
+type GostServiceStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Unit          string                 `protobuf:"bytes,1,opt,name=unit,proto3" json:"unit,omitempty"`
+	LoadState     string                 `protobuf:"bytes,2,opt,name=load_state,json=loadState,proto3" json:"load_state,omitempty"`
+	ActiveState   string                 `protobuf:"bytes,3,opt,name=active_state,json=activeState,proto3" json:"active_state,omitempty"`
+	SubState      string                 `protobuf:"bytes,4,opt,name=sub_state,json=subState,proto3" json:"sub_state,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GostServiceStatus) Reset() {
+	*x = GostServiceStatus{}
+	mi := &file_node_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GostServiceStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GostServiceStatus) ProtoMessage() {}
+
+func (x *GostServiceStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GostServiceStatus.ProtoReflect.Descriptor instead.
+func (*GostServiceStatus) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GostServiceStatus) GetUnit() string {
+	if x != nil {
+		return x.Unit
+	}
+	return ""
+}
+
+func (x *GostServiceStatus) GetLoadState() string {
+	if x != nil {
+		return x.LoadState
+	}
+	return ""
+}
+
+func (x *GostServiceStatus) GetActiveState() string {
+	if x != nil {
+		return x.ActiveState
+	}
+	return ""
+}
+
+func (x *GostServiceStatus) GetSubState() string {
+	if x != nil {
+		return x.SubState
+	}
+	return ""
+}
+
+type GostLogsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Lines         uint32                 `protobuf:"varint,1,opt,name=lines,proto3" json:"lines,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GostLogsRequest) Reset() {
+	*x = GostLogsRequest{}
+	mi := &file_node_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GostLogsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GostLogsRequest) ProtoMessage() {}
+
+func (x *GostLogsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GostLogsRequest.ProtoReflect.Descriptor instead.
+func (*GostLogsRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *GostLogsRequest) GetLines() uint32 {
+	if x != nil {
+		return x.Lines
+	}
+	return 0
+}
+
+type GostLogEntry struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	TimestampUnixMicros int64                  `protobuf:"varint,1,opt,name=timestamp_unix_micros,json=timestampUnixMicros,proto3" json:"timestamp_unix_micros,omitempty"`
+	Message             string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Priority            int32                  `protobuf:"varint,3,opt,name=priority,proto3" json:"priority,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *GostLogEntry) Reset() {
+	*x = GostLogEntry{}
+	mi := &file_node_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GostLogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GostLogEntry) ProtoMessage() {}
+
+func (x *GostLogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GostLogEntry.ProtoReflect.Descriptor instead.
+func (*GostLogEntry) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GostLogEntry) GetTimestampUnixMicros() int64 {
+	if x != nil {
+		return x.TimestampUnixMicros
+	}
+	return 0
+}
+
+func (x *GostLogEntry) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *GostLogEntry) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
+}
+
+type GostLogsReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Entries       []*GostLogEntry        `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GostLogsReply) Reset() {
+	*x = GostLogsReply{}
+	mi := &file_node_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GostLogsReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GostLogsReply) ProtoMessage() {}
+
+func (x *GostLogsReply) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GostLogsReply.ProtoReflect.Descriptor instead.
+func (*GostLogsReply) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GostLogsReply) GetEntries() []*GostLogEntry {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
 }
 
 type ReportRequest struct {
@@ -189,7 +405,7 @@ type ReportRequest struct {
 
 func (x *ReportRequest) Reset() {
 	*x = ReportRequest{}
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[3]
+	mi := &file_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -201,7 +417,7 @@ func (x *ReportRequest) String() string {
 func (*ReportRequest) ProtoMessage() {}
 
 func (x *ReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[3]
+	mi := &file_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -214,7 +430,7 @@ func (x *ReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportRequest.ProtoReflect.Descriptor instead.
 func (*ReportRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{3}
+	return file_node_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReportRequest) GetNodeId() uint64 {
@@ -241,7 +457,7 @@ type RegisterNodeRequest struct {
 
 func (x *RegisterNodeRequest) Reset() {
 	*x = RegisterNodeRequest{}
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[4]
+	mi := &file_node_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -253,7 +469,7 @@ func (x *RegisterNodeRequest) String() string {
 func (*RegisterNodeRequest) ProtoMessage() {}
 
 func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[4]
+	mi := &file_node_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -266,7 +482,7 @@ func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeRequest.ProtoReflect.Descriptor instead.
 func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{4}
+	return file_node_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RegisterNodeRequest) GetToken() string {
@@ -295,7 +511,7 @@ type RegisterNodeReply struct {
 
 func (x *RegisterNodeReply) Reset() {
 	*x = RegisterNodeReply{}
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[5]
+	mi := &file_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -307,7 +523,7 @@ func (x *RegisterNodeReply) String() string {
 func (*RegisterNodeReply) ProtoMessage() {}
 
 func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_nodegrpc_node_proto_msgTypes[5]
+	mi := &file_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -320,7 +536,7 @@ func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeReply.ProtoReflect.Descriptor instead.
 func (*RegisterNodeReply) Descriptor() ([]byte, []int) {
-	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{5}
+	return file_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RegisterNodeReply) GetNodeId() uint64 {
@@ -351,11 +567,12 @@ func (x *RegisterNodeReply) GetControlPort() uint32 {
 	return 0
 }
 
-var File_pkg_nodegrpc_node_proto protoreflect.FileDescriptor
+var File_node_proto protoreflect.FileDescriptor
 
-const file_pkg_nodegrpc_node_proto_rawDesc = "" +
+const file_node_proto_rawDesc = "" +
 	"\n" +
-	"\x17pkg/nodegrpc/node.proto\x12\fycgp.node.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x0eobserver.proto\"P\n" +
+	"\n" +
+	"node.proto\x12\fycgp.node.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x0eobserver.proto\"P\n" +
 	"\x0eCommandRequest\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
@@ -365,7 +582,21 @@ const file_pkg_nodegrpc_node_proto_rawDesc = "" +
 	"statusCode\x12\x12\n" +
 	"\x04body\x18\x02 \x01(\fR\x04body\",\n" +
 	"\x10ObserverEndpoint\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"a\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x86\x01\n" +
+	"\x11GostServiceStatus\x12\x12\n" +
+	"\x04unit\x18\x01 \x01(\tR\x04unit\x12\x1d\n" +
+	"\n" +
+	"load_state\x18\x02 \x01(\tR\tloadState\x12!\n" +
+	"\factive_state\x18\x03 \x01(\tR\vactiveState\x12\x1b\n" +
+	"\tsub_state\x18\x04 \x01(\tR\bsubState\"'\n" +
+	"\x0fGostLogsRequest\x12\x14\n" +
+	"\x05lines\x18\x01 \x01(\rR\x05lines\"x\n" +
+	"\fGostLogEntry\x122\n" +
+	"\x15timestamp_unix_micros\x18\x01 \x01(\x03R\x13timestampUnixMicros\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
+	"\bpriority\x18\x03 \x01(\x05R\bpriority\"E\n" +
+	"\rGostLogsReply\x124\n" +
+	"\aentries\x18\x01 \x03(\v2\x1a.ycgp.node.v1.GostLogEntryR\aentries\"a\n" +
 	"\rReportRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x127\n" +
 	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"]\n" +
@@ -376,75 +607,89 @@ const file_pkg_nodegrpc_node_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x03 \x01(\tR\bpassword\x12!\n" +
-	"\fcontrol_port\x18\x04 \x01(\rR\vcontrolPort2\x9a\x01\n" +
+	"\fcontrol_port\x18\x04 \x01(\rR\vcontrolPort2\x85\x03\n" +
 	"\x04Node\x12C\n" +
 	"\aExecute\x12\x1c.ycgp.node.v1.CommandRequest\x1a\x1a.ycgp.node.v1.CommandReply\x12M\n" +
-	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.ycgp.node.v1.ObserverEndpoint2\x97\x01\n" +
+	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.ycgp.node.v1.ObserverEndpoint\x12O\n" +
+	"\x14GetGostServiceStatus\x12\x16.google.protobuf.Empty\x1a\x1f.ycgp.node.v1.GostServiceStatus\x12M\n" +
+	"\x12RestartGostService\x12\x16.google.protobuf.Empty\x1a\x1f.ycgp.node.v1.GostServiceStatus\x12I\n" +
+	"\vGetGostLogs\x12\x1d.ycgp.node.v1.GostLogsRequest\x1a\x1b.ycgp.node.v1.GostLogsReply2\x97\x01\n" +
 	"\x05Panel\x12:\n" +
 	"\x06Report\x12\x1b.ycgp.node.v1.ReportRequest\x1a\x13.proto.ObserveReply\x12R\n" +
 	"\fRegisterNode\x12!.ycgp.node.v1.RegisterNodeRequest\x1a\x1f.ycgp.node.v1.RegisterNodeReplyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var (
-	file_pkg_nodegrpc_node_proto_rawDescOnce sync.Once
-	file_pkg_nodegrpc_node_proto_rawDescData []byte
+	file_node_proto_rawDescOnce sync.Once
+	file_node_proto_rawDescData []byte
 )
 
-func file_pkg_nodegrpc_node_proto_rawDescGZIP() []byte {
-	file_pkg_nodegrpc_node_proto_rawDescOnce.Do(func() {
-		file_pkg_nodegrpc_node_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pkg_nodegrpc_node_proto_rawDesc), len(file_pkg_nodegrpc_node_proto_rawDesc)))
+func file_node_proto_rawDescGZIP() []byte {
+	file_node_proto_rawDescOnce.Do(func() {
+		file_node_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)))
 	})
-	return file_pkg_nodegrpc_node_proto_rawDescData
+	return file_node_proto_rawDescData
 }
 
-var file_pkg_nodegrpc_node_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_pkg_nodegrpc_node_proto_goTypes = []any{
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_node_proto_goTypes = []any{
 	(*CommandRequest)(nil),       // 0: ycgp.node.v1.CommandRequest
 	(*CommandReply)(nil),         // 1: ycgp.node.v1.CommandReply
 	(*ObserverEndpoint)(nil),     // 2: ycgp.node.v1.ObserverEndpoint
-	(*ReportRequest)(nil),        // 3: ycgp.node.v1.ReportRequest
-	(*RegisterNodeRequest)(nil),  // 4: ycgp.node.v1.RegisterNodeRequest
-	(*RegisterNodeReply)(nil),    // 5: ycgp.node.v1.RegisterNodeReply
-	(*proto.ObserveRequest)(nil), // 6: proto.ObserveRequest
-	(*emptypb.Empty)(nil),        // 7: google.protobuf.Empty
-	(*proto.ObserveReply)(nil),   // 8: proto.ObserveReply
+	(*GostServiceStatus)(nil),    // 3: ycgp.node.v1.GostServiceStatus
+	(*GostLogsRequest)(nil),      // 4: ycgp.node.v1.GostLogsRequest
+	(*GostLogEntry)(nil),         // 5: ycgp.node.v1.GostLogEntry
+	(*GostLogsReply)(nil),        // 6: ycgp.node.v1.GostLogsReply
+	(*ReportRequest)(nil),        // 7: ycgp.node.v1.ReportRequest
+	(*RegisterNodeRequest)(nil),  // 8: ycgp.node.v1.RegisterNodeRequest
+	(*RegisterNodeReply)(nil),    // 9: ycgp.node.v1.RegisterNodeReply
+	(*proto.ObserveRequest)(nil), // 10: proto.ObserveRequest
+	(*emptypb.Empty)(nil),        // 11: google.protobuf.Empty
+	(*proto.ObserveReply)(nil),   // 12: proto.ObserveReply
 }
-var file_pkg_nodegrpc_node_proto_depIdxs = []int32{
-	6, // 0: ycgp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
-	0, // 1: ycgp.node.v1.Node.Execute:input_type -> ycgp.node.v1.CommandRequest
-	7, // 2: ycgp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
-	3, // 3: ycgp.node.v1.Panel.Report:input_type -> ycgp.node.v1.ReportRequest
-	4, // 4: ycgp.node.v1.Panel.RegisterNode:input_type -> ycgp.node.v1.RegisterNodeRequest
-	1, // 5: ycgp.node.v1.Node.Execute:output_type -> ycgp.node.v1.CommandReply
-	2, // 6: ycgp.node.v1.Node.GetObserverEndpoint:output_type -> ycgp.node.v1.ObserverEndpoint
-	8, // 7: ycgp.node.v1.Panel.Report:output_type -> proto.ObserveReply
-	5, // 8: ycgp.node.v1.Panel.RegisterNode:output_type -> ycgp.node.v1.RegisterNodeReply
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+var file_node_proto_depIdxs = []int32{
+	5,  // 0: ycgp.node.v1.GostLogsReply.entries:type_name -> ycgp.node.v1.GostLogEntry
+	10, // 1: ycgp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	0,  // 2: ycgp.node.v1.Node.Execute:input_type -> ycgp.node.v1.CommandRequest
+	11, // 3: ycgp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
+	11, // 4: ycgp.node.v1.Node.GetGostServiceStatus:input_type -> google.protobuf.Empty
+	11, // 5: ycgp.node.v1.Node.RestartGostService:input_type -> google.protobuf.Empty
+	4,  // 6: ycgp.node.v1.Node.GetGostLogs:input_type -> ycgp.node.v1.GostLogsRequest
+	7,  // 7: ycgp.node.v1.Panel.Report:input_type -> ycgp.node.v1.ReportRequest
+	8,  // 8: ycgp.node.v1.Panel.RegisterNode:input_type -> ycgp.node.v1.RegisterNodeRequest
+	1,  // 9: ycgp.node.v1.Node.Execute:output_type -> ycgp.node.v1.CommandReply
+	2,  // 10: ycgp.node.v1.Node.GetObserverEndpoint:output_type -> ycgp.node.v1.ObserverEndpoint
+	3,  // 11: ycgp.node.v1.Node.GetGostServiceStatus:output_type -> ycgp.node.v1.GostServiceStatus
+	3,  // 12: ycgp.node.v1.Node.RestartGostService:output_type -> ycgp.node.v1.GostServiceStatus
+	6,  // 13: ycgp.node.v1.Node.GetGostLogs:output_type -> ycgp.node.v1.GostLogsReply
+	12, // 14: ycgp.node.v1.Panel.Report:output_type -> proto.ObserveReply
+	9,  // 15: ycgp.node.v1.Panel.RegisterNode:output_type -> ycgp.node.v1.RegisterNodeReply
+	9,  // [9:16] is the sub-list for method output_type
+	2,  // [2:9] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_pkg_nodegrpc_node_proto_init() }
-func file_pkg_nodegrpc_node_proto_init() {
-	if File_pkg_nodegrpc_node_proto != nil {
+func init() { file_node_proto_init() }
+func file_node_proto_init() {
+	if File_node_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_nodegrpc_node_proto_rawDesc), len(file_pkg_nodegrpc_node_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_pkg_nodegrpc_node_proto_goTypes,
-		DependencyIndexes: file_pkg_nodegrpc_node_proto_depIdxs,
-		MessageInfos:      file_pkg_nodegrpc_node_proto_msgTypes,
+		GoTypes:           file_node_proto_goTypes,
+		DependencyIndexes: file_node_proto_depIdxs,
+		MessageInfos:      file_node_proto_msgTypes,
 	}.Build()
-	File_pkg_nodegrpc_node_proto = out.File
-	file_pkg_nodegrpc_node_proto_goTypes = nil
-	file_pkg_nodegrpc_node_proto_depIdxs = nil
+	File_node_proto = out.File
+	file_node_proto_goTypes = nil
+	file_node_proto_depIdxs = nil
 }

@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestNodeBridgeControlAndReport(t *testing.T) {
@@ -99,8 +100,12 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 	command := &nodegrpc.CommandRequest{Method: "GET", Path: "/config"}
-	if _, err = nodegrpc.NewNodeClient(controlConn).Execute(timeout, command, grpc.WaitForReady(true)); status.Code(err) != codes.Unauthenticated {
+	controlClient := nodegrpc.NewNodeClient(controlConn)
+	if _, err = controlClient.Execute(timeout, command, grpc.WaitForReady(true)); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated control request: %v", err)
+	}
+	if _, err = controlClient.RestartGostService(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("unauthenticated restart request: %v", err)
 	}
 	client := gost.NewClient(&gost.Config{Address: controlAddress, CAFile: certFile, Username: username, Password: password})
 	if err = client.HealthCheck(); err != nil {

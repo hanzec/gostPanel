@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.24.11
 
 require (
+	github.com/ebitengine/purego v0.9.1
 	github.com/gin-gonic/gin v1.10.1
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-gost/plugin v0.2.1

@@ -2,7 +2,7 @@
 VERSION ?= $(shell git describe --tags --always)
 LDFLAGS := -s -w -X 'yagp/internal/config.Version=$(VERSION)'
 
-.PHONY: all build build-web build-server build-node clean dev help release
+.PHONY: all build build-web build-server build-node build-node-systemd clean dev help release
 
 # 默认目标
 all: build
@@ -14,6 +14,7 @@ help:
 	@echo "  make build-web      - Build web frontend only"
 	@echo "  make build-server   - Build server backend only"
 	@echo "  make build-node     - Build the Gost node bridge"
+	@echo "  make build-node-systemd - Build the Linux glibc bridge with libsystemd support"
 	@echo "  make dev            - Run in development mode"
 	@echo "  make run            - Build web and run server"
 	@echo "  make clean          - Clean build artifacts"
@@ -40,6 +41,9 @@ build-server:
 build-node:
 	go build -ldflags="-s -w" -o yagp-node ./cmd/yagp-node
 
+build-node-systemd:
+	CGO_ENABLED=0 go build -tags libsystemd -ldflags="-s -w" -o yagp-node ./cmd/yagp-node
+
 # 运行（构建前端并启动后端）
 run: build-web
 	@echo "Starting server..."
@@ -53,8 +57,10 @@ release: build-web
 	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-amd64 cmd/server/main.go
 	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-arm64 cmd/server/main.go
 	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-windows-amd64.exe cmd/server/main.go
-	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o yagp-node-linux-amd64 ./cmd/yagp-node
-	GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o yagp-node-linux-arm64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o yagp-node-linux-amd64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o yagp-node-linux-arm64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags libsystemd -ldflags="-s -w" -o yagp-node-systemd-linux-amd64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags libsystemd -ldflags="-s -w" -o yagp-node-systemd-linux-arm64 ./cmd/yagp-node
 	@echo "Release build complete"
 
 # 清理构建产物

@@ -111,6 +111,9 @@ if [[ -z "$bridge_bin" ]]; then
         -o "$tmp_dir/bridge.tar.gz"
     tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
     bridge_bin="$tmp_dir/bridge/yagp-node-linux-$arch"
+    if [[ "$manager" == systemd && -f "$tmp_dir/bridge/yagp-node-systemd-linux-$arch" ]]; then
+        bridge_bin="$tmp_dir/bridge/yagp-node-systemd-linux-$arch"
+    fi
 fi
 [[ -f "$bridge_bin" ]] || die "安装包缺少 yagp-node 程序"
 

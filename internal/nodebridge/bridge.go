@@ -115,9 +115,16 @@ type controlServer struct {
 	client *http.Client
 }
 
-func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
+func (s *controlServer) authenticate(ctx context.Context) error {
 	if !nodegrpc.MatchCredentials(ctx, s.config.Username, s.config.Password) {
-		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
+		return status.Error(codes.Unauthenticated, "invalid node credentials")
+	}
+	return nil
+}
+
+func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
+	if err := s.authenticate(ctx); err != nil {
+		return nil, err
 	}
 	method, path := command.GetMethod(), command.GetPath()
 	if !allowedCommand(method, path) {
@@ -146,8 +153,8 @@ func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRe
 }
 
 func (s *controlServer) GetObserverEndpoint(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.ObserverEndpoint, error) {
-	if !nodegrpc.MatchCredentials(ctx, s.config.Username, s.config.Password) {
-		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
+	if err := s.authenticate(ctx); err != nil {
+		return nil, err
 	}
 	return &nodegrpc.ObserverEndpoint{Address: s.config.ObserverListen}, nil
 }

@@ -86,6 +86,9 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.PUT("/nodes/:id", nodeHandler.Update)
 		authRoutes.DELETE("/nodes/:id", nodeHandler.Delete)
 		authRoutes.GET("/nodes/:id/config", nodeHandler.GetConfig)
+		authRoutes.GET("/nodes/:id/gost/service", nodeHandler.GostServiceStatus)
+		authRoutes.POST("/nodes/:id/gost/restart", nodeHandler.RestartGostService)
+		authRoutes.GET("/nodes/:id/gost/logs", nodeHandler.GostLogs)
 
 		// 规则管理
 		authRoutes.GET("/rules", ruleHandler.List)

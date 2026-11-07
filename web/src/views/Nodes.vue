@@ -99,6 +99,7 @@
                     </el-button>
                     <template #dropdown>
                       <el-dropdown-menu>
+                        <el-dropdown-item command="gost">Gost 服务</el-dropdown-item>
                         <el-dropdown-item command="edit">编辑节点</el-dropdown-item>
                         <el-dropdown-item command="copy">复制节点</el-dropdown-item>
                         <el-dropdown-item command="delete" divided class="inventory-danger">删除节点</el-dropdown-item>
@@ -184,6 +185,8 @@
       </template>
     </el-dialog>
 
+    <NodeGostDialog v-if="gostNode" v-model="gostDialogVisible" :node="gostNode" @closed="gostNode = null" />
+
     <el-dialog
       v-model="installDialogVisible"
       :title="'安装节点 · ' + (currentInstallNode?.name || '')"
@@ -234,7 +237,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, defineAsyncComponent, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, CircleCheck, CircleClose, CopyDocument, Monitor, Plus, Refresh, Search, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
@@ -242,6 +245,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import { getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
 
+const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/gostPanel/master/scripts/install_node.sh'
 const nodeStates = {
   online: { label: '在线', icon: CircleCheck, tone: 'success' },
@@ -291,6 +295,9 @@ const configNode = ref(null)
 const nodeConfig = ref(null)
 const configLoading = ref(false)
 const configError = ref(false)
+
+const gostNode = ref(null)
+const gostDialogVisible = ref(false)
 
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
@@ -458,6 +465,10 @@ const handleDelete = async (row) => {
 }
 
 const handleNodeAction = (action, row) => {
+  if (action === 'gost') {
+    gostNode.value = row
+    gostDialogVisible.value = true
+  }
   if (action === 'edit') openDialog(row)
   if (action === 'delete') handleDelete(row)
   if (action === 'copy') {

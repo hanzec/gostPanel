@@ -255,12 +255,16 @@ func (s *NodeService) List(req *dto.NodeListReq) ([]model.GostNode, int64, error
 
 // CreateGostClient 创建节点的 Gost 客户端
 func (s *NodeService) CreateGostClient(id uint) (*gost.Client, error) {
-	node, err := s.nodeRepo.FindByID(id)
+	node, err := s.GetByID(id)
 	if err != nil {
 		return nil, err
 	}
 
 	return utils.GetGostClient(node), nil
+}
+
+func (s *NodeService) RecordOperation(id uint, details, username, ip, userAgent string) {
+	s.logService.Record(username, model.ActionUpdate, model.ResourceTypeNode, id, details, ip, userAgent)
 }
 
 // GetConfig 获取节点配置

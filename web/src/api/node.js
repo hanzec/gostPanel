@@ -72,3 +72,15 @@ export function getNodeConfig(id) {
         method: 'get'
     })
 }
+
+export function getGostService(id) {
+    return request.get(`/nodes/${id}/gost/service`)
+}
+
+export function restartGostService(id) {
+    return request.post(`/nodes/${id}/gost/restart`, null, { timeout: 25000 })
+}
+
+export function getGostLogs(id) {
+    return request.get(`/nodes/${id}/gost/logs`)
+}
