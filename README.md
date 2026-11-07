@@ -10,6 +10,8 @@
 
 </div>
 
+ycgp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证。[上游项目](https://github.com/code-gopher/gostPanel) · [许可证](./LICENSE)
+
 
 ---
 # 推广 🚀 高速 Hysteria2 接入服务 | 极致性价比

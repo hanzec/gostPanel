@@ -43,6 +43,7 @@ ENV TZ=Asia/Shanghai
 # 复制程序和配置
 COPY --from=backend-builder /app/ycgp .
 COPY --from=backend-builder /app/config ./config
+COPY LICENSE ./LICENSE
 
 # 创建目录
 RUN mkdir -p /app/data /app/logs

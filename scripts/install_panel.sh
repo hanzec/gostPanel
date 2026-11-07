@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ycgp Binary Installation Script
-# Author: code-gopher
+# Original author: code-gopher
 # Upstream project: https://github.com/code-gopher/gostPanel
 
 set -e
@@ -78,13 +78,14 @@ function install_panel() {
         error "无法解压发布包"
     fi
     EXTRACTED_BIN="$TEMP_DIR/$APP_NAME-$PLATFORM"
-    if [ ! -f "$EXTRACTED_BIN" ]; then
+    if [ ! -f "$EXTRACTED_BIN" ] || [ ! -f "$TEMP_DIR/LICENSE" ]; then
         rm -rf "$TEMP_DIR"
-        error "发布包缺少二进制文件"
+        error "发布包缺少二进制文件或许可证"
     fi
 
     # 处理配置目录
     mkdir -p "$CONFIG_DIR/config" "$CONFIG_DIR/data"
+    cp "$TEMP_DIR/LICENSE" "$CONFIG_DIR/LICENSE"
     chmod +x "$EXTRACTED_BIN"
     mv "$EXTRACTED_BIN" "$INSTALL_DIR/$APP_NAME"
 

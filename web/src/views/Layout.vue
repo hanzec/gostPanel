@@ -85,9 +85,9 @@
         
         <!-- 底部版权 (Footer) -->
         <div class="footer">
-          <span>Copyright © 2023-2026 Gost Panel · </span>
-          <a href="https://github.com/code-gopher/gostPanel" target="_blank">
-            https://github.com/code-gopher/gostPanel
+          <span>ycgp · 原作者 code-gopher · </span>
+          <a href="https://github.com/code-gopher/gostPanel" target="_blank" rel="noopener noreferrer">
+            上游 Gost Panel
           </a>
         </div>
       </div>

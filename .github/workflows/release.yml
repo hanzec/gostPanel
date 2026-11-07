@@ -34,15 +34,15 @@ jobs:
       - name: Package binaries
         run: |
           # 打包 Linux amd64
-          tar -czvf ycgp-linux-amd64.tar.gz ycgp-linux-amd64 config/config.yaml
+          tar -czvf ycgp-linux-amd64.tar.gz ycgp-linux-amd64 config/config.yaml LICENSE
           # 打包 Linux arm64
-          tar -czvf ycgp-linux-arm64.tar.gz ycgp-linux-arm64 config/config.yaml
+          tar -czvf ycgp-linux-arm64.tar.gz ycgp-linux-arm64 config/config.yaml LICENSE
           # 打包 macOS amd64
-          tar -czvf ycgp-darwin-amd64.tar.gz ycgp-darwin-amd64 config/config.yaml
+          tar -czvf ycgp-darwin-amd64.tar.gz ycgp-darwin-amd64 config/config.yaml LICENSE
           # 打包 macOS arm64
-          tar -czvf ycgp-darwin-arm64.tar.gz ycgp-darwin-arm64 config/config.yaml
+          tar -czvf ycgp-darwin-arm64.tar.gz ycgp-darwin-arm64 config/config.yaml LICENSE
           # 打包 Windows
-          zip ycgp-windows-amd64.zip ycgp-windows-amd64.exe config/config.yaml
+          zip ycgp-windows-amd64.zip ycgp-windows-amd64.exe config/config.yaml LICENSE
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
