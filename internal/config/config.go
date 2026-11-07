@@ -14,10 +14,10 @@ var Version = "dev"
 
 // Config 应用配置结构
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	JWT      JWTConfig      `mapstructure:"jwt"`
-	Log      LogConfig      `mapstructure:"log"`
+	Server    ServerConfig    `mapstructure:"server"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	Authentik AuthentikConfig `mapstructure:"authentik"`
+	Log       LogConfig       `mapstructure:"log"`
 }
 
 // ServerConfig 服务器配置
@@ -33,10 +33,9 @@ type DatabaseConfig struct {
 	DSN  string `mapstructure:"dsn"`
 }
 
-// JWTConfig JWT 配置
-type JWTConfig struct {
-	Secret string `mapstructure:"secret"`
-	Expire int64  `mapstructure:"expire"`
+type AuthentikConfig struct {
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+	AdminGroup     string   `mapstructure:"admin_group"`
 }
 
 // LogConfig 日志配置
@@ -117,12 +116,11 @@ func setDefaults(cfg *Config) {
 		cfg.Database.Path = "./data/gost-panel.db"
 	}
 
-	// JWT 默认配置
-	if cfg.JWT.Secret == "" {
-		cfg.JWT.Secret = "zxcvbnm123456"
+	if len(cfg.Authentik.TrustedProxies) == 0 {
+		cfg.Authentik.TrustedProxies = []string{"127.0.0.1", "::1"}
 	}
-	if cfg.JWT.Expire == 0 {
-		cfg.JWT.Expire = 7200 // 2小时
+	if cfg.Authentik.AdminGroup == "" {
+		cfg.Authentik.AdminGroup = "ycgp-admins"
 	}
 
 	// 日志默认配置

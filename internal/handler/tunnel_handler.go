@@ -31,7 +31,7 @@ func (h *TunnelHandler) Create(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	tunnel, err := h.tunnelService.Create(&req, ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	tunnel, err := h.tunnelService.Create(&req, ctx.Username, ctx.ClientIP, ctx.UserAgent)
 	if err != nil {
 		response.HandleError(c, err)
 		return
@@ -56,7 +56,7 @@ func (h *TunnelHandler) Update(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	tunnel, err := h.tunnelService.Update(uint(id), &req, ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	tunnel, err := h.tunnelService.Update(uint(id), &req, ctx.Username, ctx.ClientIP, ctx.UserAgent)
 	if err != nil {
 		response.HandleError(c, err)
 		return
@@ -75,7 +75,7 @@ func (h *TunnelHandler) Delete(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	if err = h.tunnelService.Delete(uint(id), ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
+	if err = h.tunnelService.Delete(uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
 		response.HandleError(c, err)
 		return
 	}
@@ -127,7 +127,7 @@ func (h *TunnelHandler) Start(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	if err = h.tunnelService.Start(uint(id), ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
+	if err = h.tunnelService.Start(uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
 		response.HandleError(c, err)
 		return
 	}
@@ -145,7 +145,7 @@ func (h *TunnelHandler) Stop(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	if err = h.tunnelService.Stop(uint(id), ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
+	if err = h.tunnelService.Stop(uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
 		response.HandleError(c, err)
 		return
 	}

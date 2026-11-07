@@ -31,7 +31,7 @@ func (h *NodeHandler) Create(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	node, err := h.nodeService.Create(&req, ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	node, err := h.nodeService.Create(&req, ctx.Username, ctx.ClientIP, ctx.UserAgent)
 	if err != nil {
 		response.HandleError(c, err)
 		return
@@ -56,7 +56,7 @@ func (h *NodeHandler) Update(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	node, err := h.nodeService.Update(uint(id), &req, ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	node, err := h.nodeService.Update(uint(id), &req, ctx.Username, ctx.ClientIP, ctx.UserAgent)
 	if err != nil {
 		response.HandleError(c, err)
 		return
@@ -75,7 +75,7 @@ func (h *NodeHandler) Delete(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	if err = h.nodeService.Delete(uint(id), ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
+	if err = h.nodeService.Delete(uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
 		response.HandleError(c, err)
 		return
 	}

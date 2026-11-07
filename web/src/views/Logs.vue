@@ -20,7 +20,6 @@
           @keyup.enter="handleSearch"
         />
         <el-select v-model="searchAction" placeholder="操作类型" clearable style="width: 120px" @change="handleSearch">
-          <el-option label="登录" value="login" />
           <el-option label="创建" value="create" />
           <el-option label="更新" value="update" />
           <el-option label="删除" value="delete" />
@@ -107,12 +106,12 @@ const searchResourceType = ref('')
 
 // 操作类型
 const getActionType = (action) => {
-  const map = { login: 'warning', create: 'primary', update: 'warning', delete: 'danger', start: 'success', stop: 'info' }
+  const map = { create: 'primary', update: 'warning', delete: 'danger', start: 'success', stop: 'info' }
   return map[action] || ''
 }
 
 const getActionText = (action) => {
-  const map = { login: '登录', logout: '登出', create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止', change_password: '改密' }
+  const map = { create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止' }
   return map[action] || action
 }
 

@@ -10,21 +10,6 @@ const request = axios.create({
   }
 })
 
-// 请求拦截器
-request.interceptors.request.use(
-  (config) => {
-    // 从 localStorage 获取 token
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
-    return config
-  },
-  (error) => {
-    return Promise.reject(error)
-  }
-)
-
 // 响应拦截器
 request.interceptors.response.use(
   (response) => {
@@ -32,12 +17,6 @@ request.interceptors.response.use(
     // 业务状态码判断
     if (res.code !== 0) {
       ElMessage.error(res.message || '请求失败')
-      // Token 过期
-      if (res.code === 40100) {
-        localStorage.removeItem('token')
-        localStorage.removeItem('userInfo')
-        window.location.href = '/login'
-      }
       return Promise.reject(new Error(res.message || '请求失败'))
     }
     return res
@@ -48,13 +27,10 @@ request.interceptors.response.use(
     if (error.response) {
       switch (error.response.status) {
         case 401:
-          message = '未授权，请重新登录'
-          localStorage.removeItem('token')
-          localStorage.removeItem('userInfo')
-          window.location.href = '/login'
+          message = '请重新打开面板并通过 Authentik 登录'
           break
         case 403:
-          message = '拒绝访问'
+          message = error.response.data?.message || '拒绝访问'
           break
         case 404:
           message = '请求地址不存在'

@@ -33,7 +33,7 @@ func NewNodeService(db *gorm.DB) *NodeService {
 
 // Create 创建节点
 // 创建前会检查节点名称是否已存在
-func (s *NodeService) Create(req *dto.CreateNodeReq, userID uint, username string, ip, userAgent string) (*model.GostNode, error) {
+func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent string) (*model.GostNode, error) {
 	// 检查名称是否存在
 	exists, err := s.nodeRepo.ExistsByName(req.Name)
 	if err != nil {
@@ -60,7 +60,6 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, userID uint, username strin
 
 	// 记录操作日志
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionCreate,
 		model.ResourceTypeNode,
@@ -75,7 +74,7 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, userID uint, username strin
 
 // Update 更新节点
 // 更新前会检查节点是否存在以及新名称是否与其他节点冲突
-func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, userID uint, username string, ip, userAgent string) (*model.GostNode, error) {
+func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, userAgent string) (*model.GostNode, error) {
 	// 查询节点
 	node, err := s.nodeRepo.FindByID(id)
 	if err != nil {
@@ -108,7 +107,6 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, userID uint, usern
 
 	// 记录操作日志
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionUpdate,
 		model.ResourceTypeNode,
@@ -122,7 +120,7 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, userID uint, usern
 
 // Delete 删除节点
 // 删除前会检查节点是否存在以及是否有关联的转发规则
-func (s *NodeService) Delete(id uint, userID uint, username string, ip, userAgent string) error {
+func (s *NodeService) Delete(id uint, username, ip, userAgent string) error {
 	// 查询节点（包含关联）
 	node, err := s.nodeRepo.FindByIDWithRelations(id)
 	if err != nil {
@@ -149,7 +147,6 @@ func (s *NodeService) Delete(id uint, userID uint, username string, ip, userAgen
 
 	// 记录操作日志
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionDelete,
 		model.ResourceTypeNode,

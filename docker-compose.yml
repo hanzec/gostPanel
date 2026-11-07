@@ -4,8 +4,9 @@ services:
     image: ycgp:local
     container_name: ycgp
     ports:
-      - "39100:39100"
+      - "127.0.0.1:39100:39100"
     volumes:
+      - ./config:/app/config:ro
       - ./data:/app/data
       - ./logs:/app/logs
     environment:

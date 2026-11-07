@@ -50,16 +50,3 @@ func (r *OperationLogRepository) List(opt *QueryOption) ([]model.OperationLog, i
 
 	return logs, total, nil
 }
-
-// FindByUserID 根据用户 ID 查询操作日志
-func (r *OperationLogRepository) FindByUserID(userID uint, opt *QueryOption) ([]model.OperationLog, int64, error) {
-	if opt == nil {
-		opt = &QueryOption{}
-	}
-	if opt.Conditions == nil {
-		opt.Conditions = make(map[string]any)
-	}
-	opt.Conditions["user_id = ?"] = userID
-
-	return r.List(opt)
-}

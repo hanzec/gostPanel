@@ -35,7 +35,7 @@ func NewTunnelService(db *gorm.DB) *TunnelService {
 }
 
 // Create 创建隧道
-func (s *TunnelService) Create(req *dto.CreateTunnelReq, userID uint, username string, ip, userAgent string) (*model.GostTunnel, error) {
+func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent string) (*model.GostTunnel, error) {
 	// 检查入口和出口是否相同
 	if req.EntryNodeID == req.ExitNodeID {
 		return nil, errors.ErrTunnelNodeSame
@@ -76,7 +76,6 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, userID uint, username s
 
 	// 记录操作日志
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionCreate,
 		model.ResourceTypeTunnel,
@@ -90,7 +89,7 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, userID uint, username s
 }
 
 // Update 更新隧道（仅支持更新非运行中的隧道，且不能修改入口/出口节点）
-func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, userID uint, username string, ip, userAgent string) (*model.GostTunnel, error) {
+func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, userAgent string) (*model.GostTunnel, error) {
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -115,7 +114,6 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, userID uint, u
 	}
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionUpdate,
 		model.ResourceTypeTunnel,
@@ -129,7 +127,7 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, userID uint, u
 
 // Delete 删除隧道
 // 如果有规则正在使用此隧道，不允许删除
-func (s *TunnelService) Delete(id uint, userID uint, username string, ip, userAgent string) error {
+func (s *TunnelService) Delete(id uint, username, ip, userAgent string) error {
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -149,7 +147,7 @@ func (s *TunnelService) Delete(id uint, userID uint, username string, ip, userAg
 
 	// 如果隧道正在运行，先停止
 	if tunnel.Status == model.TunnelStatusRunning {
-		if err = s.Stop(id, userID, username, ip, userAgent); err != nil {
+		if err = s.Stop(id, username, ip, userAgent); err != nil {
 			logger.Warnf("停止隧道失败: %v", err)
 		}
 	}
@@ -160,7 +158,6 @@ func (s *TunnelService) Delete(id uint, userID uint, username string, ip, userAg
 	}
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionDelete,
 		model.ResourceTypeTunnel,
@@ -214,7 +211,7 @@ func (s *TunnelService) List(req *dto.TunnelListReq) ([]model.GostTunnel, int64,
 
 // Start 启动隧道
 // 在出口节点创建 Relay 服务，在入口节点创建 Chain 连接到出口节点
-func (s *TunnelService) Start(id uint, userID uint, username string, ip, userAgent string) error {
+func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		return err
@@ -319,7 +316,6 @@ func (s *TunnelService) Start(id uint, userID uint, username string, ip, userAge
 	_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusRunning)
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionStart,
 		model.ResourceTypeTunnel,
@@ -334,7 +330,7 @@ func (s *TunnelService) Start(id uint, userID uint, username string, ip, userAge
 
 // Stop 停止隧道
 // 删除入口节点的 Chain 和出口节点的 Relay 服务
-func (s *TunnelService) Stop(id uint, userID uint, username string, ip, userAgent string) error {
+func (s *TunnelService) Stop(id uint, username, ip, userAgent string) error {
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		return err
@@ -371,7 +367,6 @@ func (s *TunnelService) Stop(id uint, userID uint, username string, ip, userAgen
 	_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusStopped)
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionStop,
 		model.ResourceTypeTunnel,

@@ -155,8 +155,7 @@ EOF
     echo -e "   ycgp 安装成功！"
     echo -e "   外网访问: http://${PUBLIC_IP}:${FINAL_PORT}"
     echo -e "   内网访问: http://${INTERNAL_IP}:${FINAL_PORT}"
-    echo -e "   账号: admin"
-    echo -e "   密码: admin123"
+    echo -e "   管理员登录由 Authentik 正向认证代理处理"
     echo -e "${GREEN}==============================================${NC}\n"
 }
 

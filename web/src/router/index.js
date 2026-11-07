@@ -1,20 +1,12 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { useAuthStore } from '@/store/auth'
 
 // 路由配置
 const routes = [
-    {
-        path: '/login',
-        name: 'Login',
-        component: () => import('@/views/Login.vue'),
-        meta: { requiresAuth: false, title: '登录' }
-    },
     {
         path: '/',
         name: 'Layout',
         component: () => import('@/views/Layout.vue'),
         redirect: '/dashboard',
-        meta: { requiresAuth: true },
         children: [
             {
                 path: 'dashboard',
@@ -69,22 +61,6 @@ const routes = [
 const router = createRouter({
     history: createWebHashHistory(),
     routes
-})
-
-// 路由守卫
-router.beforeEach((to, from, next) => {
-    const authStore = useAuthStore()
-    const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
-
-    if (requiresAuth && !authStore.isLoggedIn) {
-        // 需要认证但未登录
-        next({ name: 'Login', query: { redirect: to.fullPath } })
-    } else if (to.name === 'Login' && authStore.isLoggedIn) {
-        // 已登录但访问登录页
-        next({ name: 'Dashboard' })
-    } else {
-        next()
-    }
 })
 
 export default router

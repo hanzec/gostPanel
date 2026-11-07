@@ -43,7 +43,7 @@ func NewRuleService(db *gorm.DB) *RuleService {
 
 // Create 创建规则
 // 根据类型验证入口：端口转发需要 NodeID，隧道转发需要 TunnelID
-func (s *RuleService) Create(req *dto.CreateRuleReq, userID uint, username string, ip, userAgent string) (*model.GostRule, error) {
+func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent string) (*model.GostRule, error) {
 	var entryNodeID uint
 
 	// 根据规则类型验证入口
@@ -110,7 +110,6 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, userID uint, username strin
 
 	// 记录操作日志
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionCreate,
 		model.ResourceTypeRule,
@@ -124,7 +123,7 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, userID uint, username strin
 }
 
 // Update 更新规则（不能修改类型和入口）
-func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, userID uint, username string, ip, userAgent string) (*model.GostRule, error) {
+func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, userAgent string) (*model.GostRule, error) {
 	rule, err := s.ruleRepo.FindByID(id)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -164,7 +163,6 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, userID uint, usern
 	}
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionUpdate,
 		model.ResourceTypeRule,
@@ -177,7 +175,7 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, userID uint, usern
 }
 
 // Delete 删除规则
-func (s *RuleService) Delete(id uint, userID uint, username string, ip, userAgent string) error {
+func (s *RuleService) Delete(id uint, username, ip, userAgent string) error {
 	rule, err := s.ruleRepo.FindByID(id)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -188,7 +186,7 @@ func (s *RuleService) Delete(id uint, userID uint, username string, ip, userAgen
 
 	// 如果正在运行，先停止
 	if rule.Status == model.RuleStatusRunning {
-		if err = s.Stop(id, userID, username, ip, userAgent); err != nil {
+		if err = s.Stop(id, username, ip, userAgent); err != nil {
 			logger.Warnf("停止规则失败: %v", err)
 		}
 	}
@@ -199,7 +197,6 @@ func (s *RuleService) Delete(id uint, userID uint, username string, ip, userAgen
 	}
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionDelete,
 		model.ResourceTypeRule,
@@ -258,7 +255,7 @@ func (s *RuleService) List(req *dto.RuleListReq) ([]model.GostRule, int64, error
 }
 
 // Start 启动规则
-func (s *RuleService) Start(id uint, userID uint, username string, ip, userAgent string) error {
+func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 	rule, err := s.ruleRepo.FindByID(id)
 	if err != nil {
 		return err
@@ -294,7 +291,6 @@ func (s *RuleService) Start(id uint, userID uint, username string, ip, userAgent
 	}
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionStart,
 		model.ResourceTypeRule,
@@ -341,7 +337,7 @@ func (s *RuleService) startTunnelRule(rule *model.GostRule, client *gost.Client,
 }
 
 // Stop 停止规则
-func (s *RuleService) Stop(id uint, userID uint, username string, ip, userAgent string) error {
+func (s *RuleService) Stop(id uint, username, ip, userAgent string) error {
 	rule, err := s.ruleRepo.FindByID(id)
 	if err != nil {
 		return err
@@ -379,7 +375,6 @@ func (s *RuleService) Stop(id uint, userID uint, username string, ip, userAgent 
 	_ = client.SaveConfig()
 
 	s.logService.Record(
-		userID,
 		username,
 		model.ActionStop,
 		model.ResourceTypeRule,

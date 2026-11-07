@@ -6,7 +6,6 @@ import (
 	"ycgp/internal/middleware"
 	"ycgp/internal/repository"
 	"ycgp/internal/service"
-	"ycgp/pkg/jwt"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -14,25 +13,25 @@ import (
 
 // Router 路由配置
 type Router struct {
-	db     *gorm.DB
-	jwtCfg *jwt.Config
+	db        *gorm.DB
+	adminAuth gin.HandlerFunc
 }
 
 // NewRouter 创建路由实例
-func NewRouter(db *gorm.DB, jwtCfg *jwt.Config) *Router {
-	return &Router{
-		db:     db,
-		jwtCfg: jwtCfg,
+func NewRouter(db *gorm.DB, cfg config.AuthentikConfig) (*Router, error) {
+	adminAuth, err := middleware.NewAuthentikAuth(cfg)
+	if err != nil {
+		return nil, err
 	}
+	return &Router{
+		db:        db,
+		adminAuth: adminAuth,
+	}, nil
 }
 
 // Setup 配置路由
 func (r *Router) Setup(engine *gin.Engine) {
-	// 创建 JWT 实例
-	jwtInstance := jwt.New(r.jwtCfg)
-
 	// 全局中间件
-	engine.Use(middleware.CORS())
 	engine.Use(middleware.Logger())
 	engine.Use(middleware.Recovery())
 	engine.Use(middleware.ErrorHandler())
@@ -51,7 +50,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 	})
 
 	// 初始化服务
-	authService := service.NewAuthService(r.db, r.jwtCfg)
 	nodeService := service.NewNodeService(r.db)
 	ruleService := service.NewRuleService(r.db)
 	tunnelService := service.NewTunnelService(r.db)
@@ -65,7 +63,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 	backupService := service.NewBackupService(r.db)
 
 	// 初始化控制器
-	authHandler := handler.NewAuthHandler(authService)
 	nodeHandler := handler.NewNodeHandler(nodeService)
 	ruleHandler := handler.NewRuleHandler(ruleService)
 	tunnelHandler := handler.NewTunnelHandler(tunnelService)
@@ -74,23 +71,13 @@ func (r *Router) Setup(engine *gin.Engine) {
 	observerHandler := handler.NewObserverHandler(observerService)
 	systemConfigHandler := handler.NewSystemConfigHandler(systemConfigService, backupService)
 
-	// 公开路由（无需认证）
-	{
-		apiV1.POST("/auth/login", authHandler.Login)
-		// 流量上报接口
-		apiV1.POST("/observer/report", observerHandler.Report)
-		// 公开系统配置
-		apiV1.GET("/system/public-config", systemConfigHandler.GetPublicConfig)
-	}
+	apiV1.POST("/observer/report", observerHandler.Report)
 
-	// 需要认证的路由
+	// 管理员路由
 	authRoutes := apiV1.Group("")
-	authRoutes.Use(middleware.Auth(jwtInstance))
+	authRoutes.Use(r.adminAuth)
 	{
-		// 认证相关
-		authRoutes.GET("/auth/info", authHandler.GetUserInfo)
-		authRoutes.PUT("/auth/password", authHandler.ChangePassword)
-		authRoutes.POST("/auth/refresh", authHandler.RefreshToken)
+		authRoutes.GET("/auth/info", handler.CurrentAdmin)
 
 		// 仪表盘统计
 		authRoutes.GET("/dashboard/stats", statsHandler.GetDashboard)
@@ -125,6 +112,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.GET("/logs", logHandler.List)
 
 		// 系统设置
+		authRoutes.GET("/system/public-config", systemConfigHandler.GetPublicConfig)
 		authRoutes.GET("/system/config", systemConfigHandler.GetConfig)
 		authRoutes.PUT("/system/config", systemConfigHandler.UpdateConfig)
 		authRoutes.POST("/system/email/test", systemConfigHandler.TestEmail)

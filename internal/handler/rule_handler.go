@@ -31,7 +31,7 @@ func (h *RuleHandler) Create(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	rule, err := h.ruleService.Create(&req, ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	rule, err := h.ruleService.Create(&req, ctx.Username, ctx.ClientIP, ctx.UserAgent)
 	if err != nil {
 		response.HandleError(c, err)
 		return
@@ -56,7 +56,7 @@ func (h *RuleHandler) Update(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	rule, err := h.ruleService.Update(uint(id), &req, ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	rule, err := h.ruleService.Update(uint(id), &req, ctx.Username, ctx.ClientIP, ctx.UserAgent)
 	if err != nil {
 		response.HandleError(c, err)
 		return
@@ -75,7 +75,7 @@ func (h *RuleHandler) Delete(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	if err = h.ruleService.Delete(uint(id), ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
+	if err = h.ruleService.Delete(uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
 		response.HandleError(c, err)
 		return
 	}
@@ -127,7 +127,7 @@ func (h *RuleHandler) Start(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	if err = h.ruleService.Start(uint(id), ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
+	if err = h.ruleService.Start(uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
 		response.HandleError(c, err)
 		return
 	}
@@ -145,7 +145,7 @@ func (h *RuleHandler) Stop(c *gin.Context) {
 
 	ctx := GetRequestContext(c)
 
-	if err = h.ruleService.Stop(uint(id), ctx.UserID, ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
+	if err = h.ruleService.Stop(uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent); err != nil {
 		response.HandleError(c, err)
 		return
 	}

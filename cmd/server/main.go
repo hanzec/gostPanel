@@ -12,7 +12,6 @@ import (
 	"ycgp/internal/model"
 	"ycgp/internal/router"
 	"ycgp/internal/service"
-	"ycgp/pkg/jwt"
 	"ycgp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -68,31 +67,26 @@ func main() {
 	}
 	logger.Info("数据库迁移完成")
 
-	// 初始化默认管理员
-	if err = initDefaultAdmin(db, cfg); err != nil {
-		logger.Fatalf("初始化管理员失败: %v", err)
-	}
-
 	// 初始化系统配置
 	if err = initSystemConfig(db); err != nil {
 		logger.Fatalf("初始化系统配置失败: %v", err)
 	}
 
-	// 创建 Gin 引擎
 	engine := gin.New()
-
-	// 配置路由
-	jwtCfg := &jwt.Config{
-		Secret: cfg.JWT.Secret,
-		Expire: cfg.JWT.Expire,
+	if err = engine.SetTrustedProxies(cfg.Authentik.TrustedProxies); err != nil {
+		logger.Fatalf("反向代理配置无效: %v", err)
 	}
-	r := router.NewRouter(db, jwtCfg)
+
+	r, err := router.NewRouter(db, cfg.Authentik)
+	if err != nil {
+		logger.Fatalf("Authentik 配置无效: %v", err)
+	}
 	r.Setup(engine)
 
 	// 启动服务器
 	go func() {
 		logger.Infof("服务器启动在 %s", cfg.Server.Port)
-		if err = engine.Run(cfg.Server.Port); err != nil {
+		if err := engine.Run(cfg.Server.Port); err != nil {
 			logger.Fatalf("服务器启动失败: %v", err)
 		}
 	}()
@@ -161,7 +155,6 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 func autoMigrate(db *gorm.DB) error {
 	// 1. 执行自动迁移（添加新字段）
 	if err := db.AutoMigrate(
-		&model.User{},
 		&model.GostNode{},
 		&model.GostRule{},
 		&model.GostTunnel{},
@@ -172,16 +165,6 @@ func autoMigrate(db *gorm.DB) error {
 	}
 
 	return nil
-}
-
-// initDefaultAdmin 初始化默认管理员
-func initDefaultAdmin(db *gorm.DB, cfg *config.Config) error {
-	jwtCfg := &jwt.Config{
-		Secret: cfg.JWT.Secret,
-		Expire: cfg.JWT.Expire,
-	}
-	authService := service.NewAuthService(db, jwtCfg)
-	return authService.InitDefaultAdmin("admin", "admin123")
 }
 
 // initSystemConfig 初始化系统配置

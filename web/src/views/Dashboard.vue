@@ -101,7 +101,6 @@
           <el-descriptions :column="2" border>
             <el-descriptions-item label="Gost 版本">v3.2.6</el-descriptions-item>
             <el-descriptions-item label="数据库">{{ stats.database || '—' }}</el-descriptions-item>
-            <el-descriptions-item label="登录用户">{{ authStore.username }}</el-descriptions-item>
             <el-descriptions-item label="当前时间">{{ currentTime }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -138,11 +137,8 @@
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { Monitor, Switch, Connection, TrendCharts, Plus, Refresh } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/store/auth'
 import { getDashboardStats } from '@/api/stats'
 import { getLogList } from '@/api/log'
-
-const authStore = useAuthStore()
 
 // 统计数据
 const stats = reactive({
@@ -163,12 +159,12 @@ let timer = null
 
 // 操作类型
 const getActionType = (action) => {
-  const map = { login: 'success', create: 'primary', update: 'warning', delete: 'danger', start: 'success', stop: 'info' }
+  const map = { create: 'primary', update: 'warning', delete: 'danger', start: 'success', stop: 'info' }
   return map[action] || ''
 }
 
 const getActionText = (action) => {
-  const map = { login: '登录', logout: '登出', create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止', change_password: '改密' }
+  const map = { create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止' }
   return map[action] || action
 }
 

@@ -7,9 +7,9 @@ database:
   path: "./data/gost-panel.db"  # SQLite 文件路径
   dsn: ""  # MySQL 连接串，也可用 YCGP_DATABASE_DSN
 
-jwt:
-  secret: "zxcvbnm123456"
-  expire: 7200  # 2小时 (秒)
+authentik:
+  trusted_proxies: ["127.0.0.1", "::1"]
+  admin_group: "ycgp-admins"
 
 log:
   level: "info"  # debug, info, warn, error

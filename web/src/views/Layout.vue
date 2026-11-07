@@ -10,25 +10,13 @@
         </div>
       </div>
       <div class="header-right">
-        <div class="user-group">
+        <div v-if="username" class="user-group">
           <div class="username-box">
-            {{ authStore.username || 'admin' }}
+            {{ username }}
           </div>
-          <el-dropdown trigger="click">
-            <div class="user-icon-box">
-              <el-icon><User /></el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="showPasswordDialog = true">
-                  <el-icon><Key /></el-icon>改密
-                </el-dropdown-item>
-                <el-dropdown-item divided @click="handleLogout">
-                  <el-icon><SwitchButton /></el-icon>退出
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <a class="user-icon-box" href="/outpost.goauthentik.io/sign_out" title="退出 Authentik" aria-label="退出 Authentik">
+            <el-icon><SwitchButton /></el-icon>
+          </a>
         </div>
       </div>
     </el-header>
@@ -76,11 +64,17 @@
       <!-- 主内容 (Content) -->
       <div class="main-wrapper">
         <el-main class="main">
-          <router-view v-slot="{ Component }">
+          <router-view v-if="username" v-slot="{ Component }">
             <transition name="fade" mode="out-in">
               <component :is="Component" />
             </transition>
           </router-view>
+          <el-result
+            v-else-if="identityError"
+            icon="error"
+            title="无法确认管理员身份"
+            sub-title="请通过启用了 Authentik 的面板地址访问。"
+          />
         </el-main>
         
         <!-- 底部版权 (Footer) -->
@@ -92,77 +86,32 @@
         </div>
       </div>
     </el-container>
-
-    <!-- 修改密码对话框 -->
-    <el-dialog
-      v-model="showPasswordDialog"
-      title="修改密码"
-      width="400px"
-      :close-on-click-modal="false"
-    >
-      <el-form
-        ref="passwordFormRef"
-        :model="passwordForm"
-        :rules="passwordRules"
-        label-width="80px"
-      >
-        <el-form-item label="原密码" prop="old_password">
-          <el-input
-            v-model="passwordForm.old_password"
-            type="password"
-            placeholder="请输入原密码"
-            show-password
-          />
-        </el-form-item>
-        <el-form-item label="新密码" prop="new_password">
-          <el-input
-            v-model="passwordForm.new_password"
-            type="password"
-            placeholder="请输入新密码"
-            show-password
-          />
-        </el-form-item>
-        <el-form-item label="确认密码" prop="confirm_password">
-          <el-input
-            v-model="passwordForm.confirm_password"
-            type="password"
-            placeholder="请确认新密码"
-            show-password
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showPasswordDialog = false">取消</el-button>
-        <el-button type="primary" :loading="passwordLoading" @click="handleChangePassword">
-          确定
-        </el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Key, SwitchButton, Menu as IconMenu, Expand,
-  Odometer, Monitor, Switch, Connection, Document, User, Setting, InfoFilled
-} from '@element-plus/icons-vue'
-import { useAuthStore } from '@/store/auth'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { SwitchButton, Expand, Odometer, Monitor, Switch, Connection, Document, Setting } from '@element-plus/icons-vue'
 import { useSystemStore } from '@/store/system'
-import { changePassword } from '@/api/auth'
+import { getUserInfo } from '@/api/auth'
 
 const route = useRoute()
-const router = useRouter()
-const authStore = useAuthStore()
 const systemStore = useSystemStore()
 
 const siteTitle = computed(() => systemStore.siteTitle)
 const logoUrl = computed(() => systemStore.logoUrl)
+const username = ref('')
+const identityError = ref(false)
 
-onMounted(() => {
-  systemStore.fetchSystemConfig()
+onMounted(async () => {
+  try {
+    const { data } = await getUserInfo()
+    username.value = data.username
+    await systemStore.fetchSystemConfig()
+  } catch {
+    identityError.value = true
+  }
 })
 
 // 菜单配置
@@ -193,78 +142,6 @@ const currentTitle = computed(() => {
   const item = menuItems.find(m => m.path === route.path)
   return item?.title || ''
 })
-
-// 修改密码
-const showPasswordDialog = ref(false)
-const passwordLoading = ref(false)
-const passwordFormRef = ref(null)
-const passwordForm = reactive({
-  old_password: '',
-  new_password: '',
-  confirm_password: ''
-})
-
-const validateConfirmPassword = (rule, value, callback) => {
-  if (value !== passwordForm.new_password) {
-    callback(new Error('两次输入的密码不一致'))
-  } else {
-    callback()
-  }
-}
-
-const passwordRules = {
-  old_password: [
-    { required: true, message: '请输入原密码', trigger: 'blur' }
-  ],
-  new_password: [
-    { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, max: 50, message: '密码长度为 6-50 个字符', trigger: 'blur' }
-  ],
-  confirm_password: [
-    { required: true, message: '请确认新密码', trigger: 'blur' },
-    { validator: validateConfirmPassword, trigger: 'blur' }
-  ]
-}
-
-const handleChangePassword = async () => {
-  if (!passwordFormRef.value) return
-  
-  await passwordFormRef.value.validate(async (valid) => {
-    if (!valid) return
-    
-    passwordLoading.value = true
-    try {
-      await changePassword({
-        old_password: passwordForm.old_password,
-        new_password: passwordForm.new_password
-      })
-      ElMessage.success('密码修改成功，请重新登录')
-      showPasswordDialog.value = false
-      authStore.logout()
-      router.push('/login')
-    } catch (error) {
-      console.error('修改密码失败:', error)
-    } finally {
-      passwordLoading.value = false
-    }
-  })
-}
-
-// 退出登录
-const handleLogout = async () => {
-  try {
-    await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    authStore.logout()
-    router.push('/login')
-    ElMessage.success('已退出登录')
-  } catch {
-    // 取消操作
-  }
-}
 </script>
 
 <style scoped>
@@ -386,6 +263,7 @@ const handleLogout = async () => {
   border-bottom-right-radius: 4px;
   background: #fff;
   color: #606266;
+  text-decoration: none;
   cursor: pointer;
   transition: all 0.3s;
   font-size: 14px;

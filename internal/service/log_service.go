@@ -51,7 +51,6 @@ func (s *LogService) List(req *dto.LogListReq) ([]model.OperationLog, int64, err
 
 // LogAction 操作日志参数
 type LogAction struct {
-	UserID       uint
 	Username     string
 	Action       string
 	ResourceType string
@@ -62,9 +61,8 @@ type LogAction struct {
 }
 
 // Record 记录操作日志
-func (s *LogService) Record(userID uint, username, action, resourceType string, resourceID uint, details, ip, userAgent string) {
+func (s *LogService) Record(username, action, resourceType string, resourceID uint, details, ip, userAgent string) {
 	s.RecordAction(&LogAction{
-		UserID:       userID,
 		Username:     username,
 		Action:       action,
 		ResourceType: resourceType,
@@ -78,7 +76,6 @@ func (s *LogService) Record(userID uint, username, action, resourceType string, 
 // RecordAction 使用结构体记录操作日志
 func (s *LogService) RecordAction(action *LogAction) {
 	log := &model.OperationLog{
-		UserID:       action.UserID,
 		Username:     action.Username,
 		Action:       action.Action,
 		ResourceType: action.ResourceType,

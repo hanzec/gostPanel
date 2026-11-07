@@ -26,15 +26,12 @@ func (r *Router) setupStatic(engine *gin.Engine) {
 
 	// 使用 NoRoute 接管所有未匹配的请求
 	engine.NoRoute(func(c *gin.Context) {
-		pathStr := c.Request.URL.Path
-
-		// 跳过 API 路由
-		if strings.HasPrefix(pathStr, "/api") {
-			return
+		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+			c.Abort()
 		}
-
+	}, r.adminAuth, func(c *gin.Context) {
 		// 规范化路径
-		fileItem := strings.TrimPrefix(pathStr, "/")
+		fileItem := strings.TrimPrefix(c.Request.URL.Path, "/")
 		if fileItem == "" {
 			fileItem = "index.html"
 		}
