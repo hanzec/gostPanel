@@ -61,6 +61,8 @@ func TestAdminRouteBoundary(t *testing.T) {
 		{http.MethodGet, "/api/v1/nodes/1/gost/service", "", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v1/nodes/1/gost/logs", "staff", http.StatusForbidden},
 		{http.MethodPost, "/api/v1/nodes/1/gost/restart", "staff", http.StatusForbidden},
+		{http.MethodGet, "/api/v1/nodes/1/nft", "", http.StatusUnauthorized},
+		{http.MethodPut, "/api/v1/nodes/1/nft", "staff", http.StatusForbidden},
 		{http.MethodPost, "/api/v1/nodes/1/registration-token", "", http.StatusUnauthorized},
 		{http.MethodPost, "/api/v1/nodes/1/registration-token", "staff", http.StatusForbidden},
 		{http.MethodPost, "/api/v1/nodes/1/registration-token", "yagp-admins", http.StatusOK},

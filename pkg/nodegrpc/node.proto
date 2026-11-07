@@ -44,12 +44,22 @@ message GostLogsReply {
   repeated GostLogEntry entries = 1;
 }
 
+message NftConfig {
+  string config = 1;
+}
+
+message NftTemplateRequest {
+  uint64 node_id = 1;
+}
+
 service Node {
   rpc Execute(CommandRequest) returns (CommandReply);
   rpc GetObserverEndpoint(google.protobuf.Empty) returns (ObserverEndpoint);
   rpc GetGostServiceStatus(google.protobuf.Empty) returns (GostServiceStatus);
   rpc RestartGostService(google.protobuf.Empty) returns (GostServiceStatus);
   rpc GetGostLogs(GostLogsRequest) returns (GostLogsReply);
+  rpc GetNftConfig(google.protobuf.Empty) returns (NftConfig);
+  rpc ApplyNftConfig(NftConfig) returns (NftConfig);
 }
 
 message ReportRequest {
@@ -72,4 +82,5 @@ message RegisterNodeReply {
 service Panel {
   rpc Report(ReportRequest) returns (proto.ObserveReply);
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeReply);
+  rpc GetNftTemplate(NftTemplateRequest) returns (NftConfig);
 }

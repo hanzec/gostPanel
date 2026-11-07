@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"yagp/internal/nodebridge"
@@ -30,13 +32,30 @@ func run(ctx context.Context, args []string) error {
 			return prepareGost(ctx, args[1:])
 		case "ensure-gost":
 			return ensureGost(ctx, parseConfigFlag(args[0], args[1:]))
+		case "nft-template":
+			return printNftTemplate(ctx, parseConfigFlag(args[0], args[1:]))
 		}
 	}
-	config, err := readConfig(parseConfigFlag("yagp-node", args))
+	configFile := parseConfigFlag("yagp-node", args)
+	config, err := readConfig(configFile)
 	if err != nil {
 		return err
 	}
+	config.NftConfigFile = filepath.Join(filepath.Dir(configFile), "nft.json")
 	return nodebridge.Run(ctx, config)
+}
+
+func printNftTemplate(ctx context.Context, configFile string) error {
+	config, err := readConfig(configFile)
+	if err != nil {
+		return err
+	}
+	template, err := nodebridge.GetNftTemplate(ctx, config)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(os.Stdout, template)
+	return err
 }
 
 func parseConfigFlag(name string, args []string) string {

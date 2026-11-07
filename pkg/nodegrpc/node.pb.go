@@ -395,6 +395,94 @@ func (x *GostLogsReply) GetEntries() []*GostLogEntry {
 	return nil
 }
 
+type NftConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Config        string                 `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NftConfig) Reset() {
+	*x = NftConfig{}
+	mi := &file_node_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NftConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NftConfig) ProtoMessage() {}
+
+func (x *NftConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NftConfig.ProtoReflect.Descriptor instead.
+func (*NftConfig) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *NftConfig) GetConfig() string {
+	if x != nil {
+		return x.Config
+	}
+	return ""
+}
+
+type NftTemplateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NftTemplateRequest) Reset() {
+	*x = NftTemplateRequest{}
+	mi := &file_node_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NftTemplateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NftTemplateRequest) ProtoMessage() {}
+
+func (x *NftTemplateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NftTemplateRequest.ProtoReflect.Descriptor instead.
+func (*NftTemplateRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *NftTemplateRequest) GetNodeId() uint64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
+}
+
 type ReportRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
@@ -405,7 +493,7 @@ type ReportRequest struct {
 
 func (x *ReportRequest) Reset() {
 	*x = ReportRequest{}
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -417,7 +505,7 @@ func (x *ReportRequest) String() string {
 func (*ReportRequest) ProtoMessage() {}
 
 func (x *ReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -430,7 +518,7 @@ func (x *ReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportRequest.ProtoReflect.Descriptor instead.
 func (*ReportRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{7}
+	return file_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ReportRequest) GetNodeId() uint64 {
@@ -457,7 +545,7 @@ type RegisterNodeRequest struct {
 
 func (x *RegisterNodeRequest) Reset() {
 	*x = RegisterNodeRequest{}
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -469,7 +557,7 @@ func (x *RegisterNodeRequest) String() string {
 func (*RegisterNodeRequest) ProtoMessage() {}
 
 func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -482,7 +570,7 @@ func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeRequest.ProtoReflect.Descriptor instead.
 func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{8}
+	return file_node_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RegisterNodeRequest) GetToken() string {
@@ -511,7 +599,7 @@ type RegisterNodeReply struct {
 
 func (x *RegisterNodeReply) Reset() {
 	*x = RegisterNodeReply{}
-	mi := &file_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +611,7 @@ func (x *RegisterNodeReply) String() string {
 func (*RegisterNodeReply) ProtoMessage() {}
 
 func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,7 +624,7 @@ func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeReply.ProtoReflect.Descriptor instead.
 func (*RegisterNodeReply) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{9}
+	return file_node_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RegisterNodeReply) GetNodeId() uint64 {
@@ -596,7 +684,11 @@ const file_node_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
 	"\bpriority\x18\x03 \x01(\x05R\bpriority\"E\n" +
 	"\rGostLogsReply\x124\n" +
-	"\aentries\x18\x01 \x03(\v2\x1a.ycgp.node.v1.GostLogEntryR\aentries\"a\n" +
+	"\aentries\x18\x01 \x03(\v2\x1a.ycgp.node.v1.GostLogEntryR\aentries\"#\n" +
+	"\tNftConfig\x12\x16\n" +
+	"\x06config\x18\x01 \x01(\tR\x06config\"-\n" +
+	"\x12NftTemplateRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\"a\n" +
 	"\rReportRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x127\n" +
 	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"]\n" +
@@ -607,16 +699,19 @@ const file_node_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x03 \x01(\tR\bpassword\x12!\n" +
-	"\fcontrol_port\x18\x04 \x01(\rR\vcontrolPort2\x85\x03\n" +
+	"\fcontrol_port\x18\x04 \x01(\rR\vcontrolPort2\x8a\x04\n" +
 	"\x04Node\x12C\n" +
 	"\aExecute\x12\x1c.ycgp.node.v1.CommandRequest\x1a\x1a.ycgp.node.v1.CommandReply\x12M\n" +
 	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.ycgp.node.v1.ObserverEndpoint\x12O\n" +
 	"\x14GetGostServiceStatus\x12\x16.google.protobuf.Empty\x1a\x1f.ycgp.node.v1.GostServiceStatus\x12M\n" +
 	"\x12RestartGostService\x12\x16.google.protobuf.Empty\x1a\x1f.ycgp.node.v1.GostServiceStatus\x12I\n" +
-	"\vGetGostLogs\x12\x1d.ycgp.node.v1.GostLogsRequest\x1a\x1b.ycgp.node.v1.GostLogsReply2\x97\x01\n" +
+	"\vGetGostLogs\x12\x1d.ycgp.node.v1.GostLogsRequest\x1a\x1b.ycgp.node.v1.GostLogsReply\x12?\n" +
+	"\fGetNftConfig\x12\x16.google.protobuf.Empty\x1a\x17.ycgp.node.v1.NftConfig\x12B\n" +
+	"\x0eApplyNftConfig\x12\x17.ycgp.node.v1.NftConfig\x1a\x17.ycgp.node.v1.NftConfig2\xe4\x01\n" +
 	"\x05Panel\x12:\n" +
 	"\x06Report\x12\x1b.ycgp.node.v1.ReportRequest\x1a\x13.proto.ObserveReply\x12R\n" +
-	"\fRegisterNode\x12!.ycgp.node.v1.RegisterNodeRequest\x1a\x1f.ycgp.node.v1.RegisterNodeReplyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
+	"\fRegisterNode\x12!.ycgp.node.v1.RegisterNodeRequest\x1a\x1f.ycgp.node.v1.RegisterNodeReply\x12K\n" +
+	"\x0eGetNftTemplate\x12 .ycgp.node.v1.NftTemplateRequest\x1a\x17.ycgp.node.v1.NftConfigB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var (
 	file_node_proto_rawDescOnce sync.Once
@@ -630,7 +725,7 @@ func file_node_proto_rawDescGZIP() []byte {
 	return file_node_proto_rawDescData
 }
 
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_node_proto_goTypes = []any{
 	(*CommandRequest)(nil),       // 0: ycgp.node.v1.CommandRequest
 	(*CommandReply)(nil),         // 1: ycgp.node.v1.CommandReply
@@ -639,32 +734,40 @@ var file_node_proto_goTypes = []any{
 	(*GostLogsRequest)(nil),      // 4: ycgp.node.v1.GostLogsRequest
 	(*GostLogEntry)(nil),         // 5: ycgp.node.v1.GostLogEntry
 	(*GostLogsReply)(nil),        // 6: ycgp.node.v1.GostLogsReply
-	(*ReportRequest)(nil),        // 7: ycgp.node.v1.ReportRequest
-	(*RegisterNodeRequest)(nil),  // 8: ycgp.node.v1.RegisterNodeRequest
-	(*RegisterNodeReply)(nil),    // 9: ycgp.node.v1.RegisterNodeReply
-	(*proto.ObserveRequest)(nil), // 10: proto.ObserveRequest
-	(*emptypb.Empty)(nil),        // 11: google.protobuf.Empty
-	(*proto.ObserveReply)(nil),   // 12: proto.ObserveReply
+	(*NftConfig)(nil),            // 7: ycgp.node.v1.NftConfig
+	(*NftTemplateRequest)(nil),   // 8: ycgp.node.v1.NftTemplateRequest
+	(*ReportRequest)(nil),        // 9: ycgp.node.v1.ReportRequest
+	(*RegisterNodeRequest)(nil),  // 10: ycgp.node.v1.RegisterNodeRequest
+	(*RegisterNodeReply)(nil),    // 11: ycgp.node.v1.RegisterNodeReply
+	(*proto.ObserveRequest)(nil), // 12: proto.ObserveRequest
+	(*emptypb.Empty)(nil),        // 13: google.protobuf.Empty
+	(*proto.ObserveReply)(nil),   // 14: proto.ObserveReply
 }
 var file_node_proto_depIdxs = []int32{
 	5,  // 0: ycgp.node.v1.GostLogsReply.entries:type_name -> ycgp.node.v1.GostLogEntry
-	10, // 1: ycgp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	12, // 1: ycgp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	0,  // 2: ycgp.node.v1.Node.Execute:input_type -> ycgp.node.v1.CommandRequest
-	11, // 3: ycgp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
-	11, // 4: ycgp.node.v1.Node.GetGostServiceStatus:input_type -> google.protobuf.Empty
-	11, // 5: ycgp.node.v1.Node.RestartGostService:input_type -> google.protobuf.Empty
+	13, // 3: ycgp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
+	13, // 4: ycgp.node.v1.Node.GetGostServiceStatus:input_type -> google.protobuf.Empty
+	13, // 5: ycgp.node.v1.Node.RestartGostService:input_type -> google.protobuf.Empty
 	4,  // 6: ycgp.node.v1.Node.GetGostLogs:input_type -> ycgp.node.v1.GostLogsRequest
-	7,  // 7: ycgp.node.v1.Panel.Report:input_type -> ycgp.node.v1.ReportRequest
-	8,  // 8: ycgp.node.v1.Panel.RegisterNode:input_type -> ycgp.node.v1.RegisterNodeRequest
-	1,  // 9: ycgp.node.v1.Node.Execute:output_type -> ycgp.node.v1.CommandReply
-	2,  // 10: ycgp.node.v1.Node.GetObserverEndpoint:output_type -> ycgp.node.v1.ObserverEndpoint
-	3,  // 11: ycgp.node.v1.Node.GetGostServiceStatus:output_type -> ycgp.node.v1.GostServiceStatus
-	3,  // 12: ycgp.node.v1.Node.RestartGostService:output_type -> ycgp.node.v1.GostServiceStatus
-	6,  // 13: ycgp.node.v1.Node.GetGostLogs:output_type -> ycgp.node.v1.GostLogsReply
-	12, // 14: ycgp.node.v1.Panel.Report:output_type -> proto.ObserveReply
-	9,  // 15: ycgp.node.v1.Panel.RegisterNode:output_type -> ycgp.node.v1.RegisterNodeReply
-	9,  // [9:16] is the sub-list for method output_type
-	2,  // [2:9] is the sub-list for method input_type
+	13, // 7: ycgp.node.v1.Node.GetNftConfig:input_type -> google.protobuf.Empty
+	7,  // 8: ycgp.node.v1.Node.ApplyNftConfig:input_type -> ycgp.node.v1.NftConfig
+	9,  // 9: ycgp.node.v1.Panel.Report:input_type -> ycgp.node.v1.ReportRequest
+	10, // 10: ycgp.node.v1.Panel.RegisterNode:input_type -> ycgp.node.v1.RegisterNodeRequest
+	8,  // 11: ycgp.node.v1.Panel.GetNftTemplate:input_type -> ycgp.node.v1.NftTemplateRequest
+	1,  // 12: ycgp.node.v1.Node.Execute:output_type -> ycgp.node.v1.CommandReply
+	2,  // 13: ycgp.node.v1.Node.GetObserverEndpoint:output_type -> ycgp.node.v1.ObserverEndpoint
+	3,  // 14: ycgp.node.v1.Node.GetGostServiceStatus:output_type -> ycgp.node.v1.GostServiceStatus
+	3,  // 15: ycgp.node.v1.Node.RestartGostService:output_type -> ycgp.node.v1.GostServiceStatus
+	6,  // 16: ycgp.node.v1.Node.GetGostLogs:output_type -> ycgp.node.v1.GostLogsReply
+	7,  // 17: ycgp.node.v1.Node.GetNftConfig:output_type -> ycgp.node.v1.NftConfig
+	7,  // 18: ycgp.node.v1.Node.ApplyNftConfig:output_type -> ycgp.node.v1.NftConfig
+	14, // 19: ycgp.node.v1.Panel.Report:output_type -> proto.ObserveReply
+	11, // 20: ycgp.node.v1.Panel.RegisterNode:output_type -> ycgp.node.v1.RegisterNodeReply
+	7,  // 21: ycgp.node.v1.Panel.GetNftTemplate:output_type -> ycgp.node.v1.NftConfig
+	12, // [12:22] is the sub-list for method output_type
+	2,  // [2:12] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -681,7 +784,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

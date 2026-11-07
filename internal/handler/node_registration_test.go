@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,6 +155,15 @@ func TestNodeRegistration(t *testing.T) {
 	newAuth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(first.reply.GetUsername(), first.reply.GetPassword()))
 	if _, err := client.Report(ctx, report, newAuth); err != nil {
 		t.Fatalf("report using refreshed credentials: %v", err)
+	}
+	requestTemplate := &nodegrpc.NftTemplateRequest{NodeId: reply.GetNodeId()}
+	if _, err := client.GetNftTemplate(ctx, requestTemplate); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("unauthenticated nft template request: %v", err)
+	}
+	template, err := client.GetNftTemplate(ctx, requestTemplate, newAuth)
+	if err != nil || !json.Valid([]byte(template.GetConfig())) ||
+		!strings.Contains(template.GetConfig(), nodegrpc.NftTableName(reply.GetNodeId())) {
+		t.Fatalf("node did not receive its nftables JSON template: %v", err)
 	}
 }
 

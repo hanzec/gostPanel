@@ -158,6 +158,12 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 该功能使用节点上的 `libsystemd.so.0`。新发布包包含 systemd 和通用构建，安装脚本会按服务管理器选择。在 Linux glibc 主机可用 `make build-node-systemd` 构建 systemd 版本。升级已有实例时，停止 `yagp-node-<ID>`，替换 `/etc/yagp-node/<ID>/yagp-node`，再启动该服务即可沿用现有注册配置。
 
+### 管理节点的 nftables 配置
+
+在装有 `nftables` 的 Linux 节点上，通过 **节点管理 → 更多 → nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。节点也可运行 `/etc/yagp-node/<ID>/yagp-node nft-template -c /etc/yagp-node/<ID>/node.yaml`，经 TLS 从面板获取同一份模板。
+
+配置使用 `{"nftables":[...]}`，只允许为该节点专用的 `inet yagp_node_<ID>` 表添加链、规则、集合等对象。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除该表。卸载时安装脚本会清理该表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
+
 ---
 
 ## 📦 预编译下载

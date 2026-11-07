@@ -26,6 +26,8 @@ const (
 	Node_GetGostServiceStatus_FullMethodName = "/ycgp.node.v1.Node/GetGostServiceStatus"
 	Node_RestartGostService_FullMethodName   = "/ycgp.node.v1.Node/RestartGostService"
 	Node_GetGostLogs_FullMethodName          = "/ycgp.node.v1.Node/GetGostLogs"
+	Node_GetNftConfig_FullMethodName         = "/ycgp.node.v1.Node/GetNftConfig"
+	Node_ApplyNftConfig_FullMethodName       = "/ycgp.node.v1.Node/ApplyNftConfig"
 )
 
 // NodeClient is the client API for Node service.
@@ -37,6 +39,8 @@ type NodeClient interface {
 	GetGostServiceStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
 	RestartGostService(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
 	GetGostLogs(ctx context.Context, in *GostLogsRequest, opts ...grpc.CallOption) (*GostLogsReply, error)
+	GetNftConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NftConfig, error)
+	ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...grpc.CallOption) (*NftConfig, error)
 }
 
 type nodeClient struct {
@@ -97,6 +101,26 @@ func (c *nodeClient) GetGostLogs(ctx context.Context, in *GostLogsRequest, opts 
 	return out, nil
 }
 
+func (c *nodeClient) GetNftConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NftConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NftConfig)
+	err := c.cc.Invoke(ctx, Node_GetNftConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeClient) ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...grpc.CallOption) (*NftConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NftConfig)
+	err := c.cc.Invoke(ctx, Node_ApplyNftConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServer is the server API for Node service.
 // All implementations must embed UnimplementedNodeServer
 // for forward compatibility.
@@ -106,6 +130,8 @@ type NodeServer interface {
 	GetGostServiceStatus(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
 	RestartGostService(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
 	GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error)
+	GetNftConfig(context.Context, *emptypb.Empty) (*NftConfig, error)
+	ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error)
 	mustEmbedUnimplementedNodeServer()
 }
 
@@ -130,6 +156,12 @@ func (UnimplementedNodeServer) RestartGostService(context.Context, *emptypb.Empt
 }
 func (UnimplementedNodeServer) GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetGostLogs not implemented")
+}
+func (UnimplementedNodeServer) GetNftConfig(context.Context, *emptypb.Empty) (*NftConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetNftConfig not implemented")
+}
+func (UnimplementedNodeServer) ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplyNftConfig not implemented")
 }
 func (UnimplementedNodeServer) mustEmbedUnimplementedNodeServer() {}
 func (UnimplementedNodeServer) testEmbeddedByValue()              {}
@@ -242,6 +274,42 @@ func _Node_GetGostLogs_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Node_GetNftConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).GetNftConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_GetNftConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).GetNftConfig(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Node_ApplyNftConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NftConfig)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).ApplyNftConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_ApplyNftConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).ApplyNftConfig(ctx, req.(*NftConfig))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Node_ServiceDesc is the grpc.ServiceDesc for Node service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -269,14 +337,23 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "GetGostLogs",
 			Handler:    _Node_GetGostLogs_Handler,
 		},
+		{
+			MethodName: "GetNftConfig",
+			Handler:    _Node_GetNftConfig_Handler,
+		},
+		{
+			MethodName: "ApplyNftConfig",
+			Handler:    _Node_ApplyNftConfig_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "node.proto",
 }
 
 const (
-	Panel_Report_FullMethodName       = "/ycgp.node.v1.Panel/Report"
-	Panel_RegisterNode_FullMethodName = "/ycgp.node.v1.Panel/RegisterNode"
+	Panel_Report_FullMethodName         = "/ycgp.node.v1.Panel/Report"
+	Panel_RegisterNode_FullMethodName   = "/ycgp.node.v1.Panel/RegisterNode"
+	Panel_GetNftTemplate_FullMethodName = "/ycgp.node.v1.Panel/GetNftTemplate"
 )
 
 // PanelClient is the client API for Panel service.
@@ -285,6 +362,7 @@ const (
 type PanelClient interface {
 	Report(ctx context.Context, in *ReportRequest, opts ...grpc.CallOption) (*proto.ObserveReply, error)
 	RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeReply, error)
+	GetNftTemplate(ctx context.Context, in *NftTemplateRequest, opts ...grpc.CallOption) (*NftConfig, error)
 }
 
 type panelClient struct {
@@ -315,12 +393,23 @@ func (c *panelClient) RegisterNode(ctx context.Context, in *RegisterNodeRequest,
 	return out, nil
 }
 
+func (c *panelClient) GetNftTemplate(ctx context.Context, in *NftTemplateRequest, opts ...grpc.CallOption) (*NftConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NftConfig)
+	err := c.cc.Invoke(ctx, Panel_GetNftTemplate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PanelServer is the server API for Panel service.
 // All implementations must embed UnimplementedPanelServer
 // for forward compatibility.
 type PanelServer interface {
 	Report(context.Context, *ReportRequest) (*proto.ObserveReply, error)
 	RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeReply, error)
+	GetNftTemplate(context.Context, *NftTemplateRequest) (*NftConfig, error)
 	mustEmbedUnimplementedPanelServer()
 }
 
@@ -336,6 +425,9 @@ func (UnimplementedPanelServer) Report(context.Context, *ReportRequest) (*proto.
 }
 func (UnimplementedPanelServer) RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RegisterNode not implemented")
+}
+func (UnimplementedPanelServer) GetNftTemplate(context.Context, *NftTemplateRequest) (*NftConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetNftTemplate not implemented")
 }
 func (UnimplementedPanelServer) mustEmbedUnimplementedPanelServer() {}
 func (UnimplementedPanelServer) testEmbeddedByValue()               {}
@@ -394,6 +486,24 @@ func _Panel_RegisterNode_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Panel_GetNftTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NftTemplateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PanelServer).GetNftTemplate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Panel_GetNftTemplate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PanelServer).GetNftTemplate(ctx, req.(*NftTemplateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Panel_ServiceDesc is the grpc.ServiceDesc for Panel service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -408,6 +518,10 @@ var Panel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterNode",
 			Handler:    _Panel_RegisterNode_Handler,
+		},
+		{
+			MethodName: "GetNftTemplate",
+			Handler:    _Panel_GetNftTemplate_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

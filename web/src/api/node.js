@@ -84,3 +84,11 @@ export function restartGostService(id) {
 export function getGostLogs(id) {
     return request.get(`/nodes/${id}/gost/logs`)
 }
+
+export function getNodeNftConfig(id) {
+    return request.get(`/nodes/${id}/nft`)
+}
+
+export function applyNodeNftConfig(id, config) {
+    return request.put(`/nodes/${id}/nft`, { config }, { timeout: 25000 })
+}

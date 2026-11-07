@@ -107,6 +107,9 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	if _, err = controlClient.RestartGostService(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated restart request: %v", err)
 	}
+	if _, err = controlClient.ApplyNftConfig(timeout, &nodegrpc.NftConfig{Config: `{"nftables":[]}`}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("unauthenticated nftables request: %v", err)
+	}
 	client := gost.NewClient(&gost.Config{Address: controlAddress, CAFile: certFile, Username: username, Password: password})
 	if err = client.HealthCheck(); err != nil {
 		t.Fatal(err)

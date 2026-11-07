@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"regexp"
@@ -35,6 +36,7 @@ type Config struct {
 	ReportCAFile   string `yaml:"report_ca_file"`
 	TLSCertFile    string `yaml:"tls_cert_file"`
 	TLSKeyFile     string `yaml:"tls_key_file"`
+	NftConfigFile  string `yaml:"-"`
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -51,12 +53,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("load node TLS certificate: %w", err)
 	}
-	reportTLS, err := nodegrpc.ClientTLS(cfg.ReportCAFile)
-	if err != nil {
-		return fmt.Errorf("load panel report CA: %w", err)
-	}
-	reportConn, err := grpc.NewClient(cfg.ReportAddress, grpc.WithTransportCredentials(reportTLS),
-		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)))
+	reportConn, err := connectPanel(cfg)
 	if err != nil {
 		return fmt.Errorf("create panel report client: %w", err)
 	}
@@ -72,6 +69,14 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("listen for local Gost observer: %w", err)
 	}
 	defer observerListener.Close()
+	if cfg.NftConfigFile != "" {
+		restoreCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := restoreNftConfig(restoreCtx, cfg.NodeID, cfg.NftConfigFile)
+		cancel()
+		if err != nil {
+			log.Printf("restore nftables config: %v", err)
+		}
+	}
 
 	control := grpc.NewServer(grpc.Creds(controlTLS))
 	defer control.Stop()
@@ -102,6 +107,15 @@ func Run(ctx context.Context, cfg Config) error {
 	case err := <-serveErrors:
 		return err
 	}
+}
+
+func connectPanel(cfg Config) (*grpc.ClientConn, error) {
+	transport, err := nodegrpc.ClientTLS(cfg.ReportCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("load panel report CA: %w", err)
+	}
+	return grpc.NewClient(cfg.ReportAddress, grpc.WithTransportCredentials(transport),
+		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)))
 }
 
 func IsLoopbackAddress(address string) bool {

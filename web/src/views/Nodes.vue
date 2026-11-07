@@ -100,6 +100,7 @@
                     <template #dropdown>
                       <el-dropdown-menu>
                         <el-dropdown-item command="gost">Gost 服务</el-dropdown-item>
+                        <el-dropdown-item command="nft">nft 配置</el-dropdown-item>
                         <el-dropdown-item command="edit">编辑节点</el-dropdown-item>
                         <el-dropdown-item command="copy">复制节点</el-dropdown-item>
                         <el-dropdown-item command="delete" divided class="inventory-danger">删除节点</el-dropdown-item>
@@ -186,6 +187,7 @@
     </el-dialog>
 
     <NodeGostDialog v-if="gostNode" v-model="gostDialogVisible" :node="gostNode" @closed="gostNode = null" />
+    <NodeNftDialog v-if="nftNode" v-model="nftDialogVisible" :node="nftNode" @closed="nftNode = null" />
 
     <el-dialog
       v-model="installDialogVisible"
@@ -246,6 +248,7 @@ import { getNodeList, createNode, updateNode, issueNodeRegistrationToken, delete
 import { getPublicSystemConfig } from '@/api/system'
 
 const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
+const NodeNftDialog = defineAsyncComponent(() => import('@/components/NodeNftDialog.vue'))
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/gostPanel/master/scripts/install_node.sh'
 const nodeStates = {
   online: { label: '在线', icon: CircleCheck, tone: 'success' },
@@ -298,6 +301,8 @@ const configError = ref(false)
 
 const gostNode = ref(null)
 const gostDialogVisible = ref(false)
+const nftNode = ref(null)
+const nftDialogVisible = ref(false)
 
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
@@ -468,6 +473,10 @@ const handleNodeAction = (action, row) => {
   if (action === 'gost') {
     gostNode.value = row
     gostDialogVisible.value = true
+  }
+  if (action === 'nft') {
+    nftNode.value = row
+    nftDialogVisible.value = true
   }
   if (action === 'edit') openDialog(row)
   if (action === 'delete') handleDelete(row)
