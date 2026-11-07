@@ -1,9 +1,9 @@
 package service
 
 import (
-	"gost-panel/internal/config"
-	"gost-panel/internal/model"
-	"gost-panel/internal/repository"
+	"ycgp/internal/config"
+	"ycgp/internal/model"
+	"ycgp/internal/repository"
 
 	"gorm.io/gorm"
 )

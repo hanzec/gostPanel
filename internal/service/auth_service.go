@@ -4,12 +4,12 @@ package service
 import (
 	stderrors "errors"
 
-	"gost-panel/internal/dto"
-	"gost-panel/internal/errors"
-	"gost-panel/internal/model"
-	"gost-panel/internal/repository"
-	"gost-panel/pkg/jwt"
-	"gost-panel/pkg/logger"
+	"ycgp/internal/dto"
+	"ycgp/internal/errors"
+	"ycgp/internal/model"
+	"ycgp/internal/repository"
+	"ycgp/pkg/jwt"
+	"ycgp/pkg/logger"
 
 	"gorm.io/gorm"
 )

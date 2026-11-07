@@ -3,7 +3,9 @@ FROM node:20-alpine AS web-builder
 WORKDIR /app/web
 COPY web/package*.json ./
 RUN npm ci
-COPY web/ .
+COPY web/index.html web/vite.config.js ./
+COPY web/src/ ./src/
+COPY web/public/ ./public/
 RUN npm run build
 
 # 后端构建阶段
@@ -14,6 +16,7 @@ WORKDIR /app
 ARG VERSION=dev
 
 # 复制依赖文件
+ARG GOPROXY
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -29,7 +32,7 @@ COPY --from=web-builder /app/internal/router/dist ./internal/router/dist
 
 # 编译（关闭 CGO，使用纯 Go SQLite 驱动，注入版本号）
 RUN CGO_ENABLED=0 GOOS=linux \
-    go build -ldflags="-s -w -X 'gost-panel/internal/config.Version=${VERSION}'" -o gost-panel cmd/server/main.go
+    go build -ldflags="-s -w -X 'ycgp/internal/config.Version=${VERSION}'" -o ycgp cmd/server/main.go
 
 # 运行阶段
 FROM alpine:latest
@@ -38,15 +41,15 @@ RUN apk --no-cache add ca-certificates tzdata
 ENV TZ=Asia/Shanghai
 
 # 复制程序和配置
-COPY --from=backend-builder /app/gost-panel .
+COPY --from=backend-builder /app/ycgp .
 COPY --from=backend-builder /app/config ./config
 
 # 创建目录
 RUN mkdir -p /app/data /app/logs
 
-EXPOSE 8080
+EXPOSE 39100
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/v1/health || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1:39100/api/v1/health
 
-CMD ["./gost-panel"]
+CMD ["./ycgp"]

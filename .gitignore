@@ -40,6 +40,7 @@ build/
 internal/router/dist/
 main
 gost-panel
+ycgp
 
 # Frontend (Web)
 web/node_modules/

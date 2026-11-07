@@ -3,7 +3,7 @@ package middleware
 import (
 	"time"
 
-	"gost-panel/pkg/logger"
+	"ycgp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

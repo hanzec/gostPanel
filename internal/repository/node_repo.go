@@ -1,8 +1,8 @@
 package repository
 
 import (
-	"gost-panel/internal/model"
 	"time"
+	"ycgp/internal/model"
 
 	"gorm.io/gorm"
 )

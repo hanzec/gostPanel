@@ -4,7 +4,7 @@ import { getPublicSystemConfig } from '@/api/system'
 
 export const useSystemStore = defineStore('system', () => {
     // State
-    const siteTitle = ref(localStorage.getItem('siteTitle') || 'Gost Panel')
+    const siteTitle = ref(localStorage.getItem('siteTitle') || 'ycgp')
     const logoUrl = ref(localStorage.getItem('logoUrl') || 'https://gost.run/images/gost.png')
     const copyright = ref(localStorage.getItem('copyright') || '')
 

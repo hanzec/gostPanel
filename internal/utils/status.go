@@ -1,6 +1,6 @@
 package utils
 
-import "gost-panel/internal/model"
+import "ycgp/internal/model"
 
 // GostStateToRuleStatus 将 Gost 服务状态转换为规则状态
 func GostStateToRuleStatus(state string) model.RuleStatus {

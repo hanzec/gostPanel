@@ -3,8 +3,8 @@ package middleware
 import (
 	"strings"
 
-	"gost-panel/pkg/jwt"
-	"gost-panel/pkg/response"
+	"ycgp/pkg/jwt"
+	"ycgp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )

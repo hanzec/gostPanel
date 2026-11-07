@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"gost-panel/internal/dto"
-	"gost-panel/internal/service"
-	"gost-panel/pkg/logger"
+	"ycgp/internal/dto"
+	"ycgp/internal/service"
+	"ycgp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

@@ -1,9 +1,9 @@
 package service
 
 import (
-	"gost-panel/internal/dto"
-	"gost-panel/internal/repository"
 	"strings"
+	"ycgp/internal/dto"
+	"ycgp/internal/repository"
 )
 
 // SystemConfigService 系统配置服务

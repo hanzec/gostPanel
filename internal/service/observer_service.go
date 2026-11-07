@@ -1,13 +1,13 @@
 package service
 
 import (
-	"gost-panel/internal/dto"
-	"gost-panel/internal/errors"
-	"gost-panel/internal/model"
-	"gost-panel/internal/repository"
-	"gost-panel/pkg/gost"
-	"gost-panel/pkg/logger"
 	"strings"
+	"ycgp/internal/dto"
+	"ycgp/internal/errors"
+	"ycgp/internal/model"
+	"ycgp/internal/repository"
+	"ycgp/pkg/gost"
+	"ycgp/pkg/logger"
 
 	"gorm.io/gorm"
 )

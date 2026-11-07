@@ -2,7 +2,7 @@ package repository
 
 import (
 	"errors"
-	"gost-panel/internal/model"
+	"ycgp/internal/model"
 
 	"gorm.io/gorm"
 )
@@ -27,7 +27,7 @@ func (r *SystemConfigRepository) Get() (*model.SystemConfig, error) {
 			// 如果不存在，创建默认配置
 			config = model.SystemConfig{
 				ID:               1,
-				SiteTitle:        "Gost Panel",
+				SiteTitle:        "ycgp",
 				LogLevel:         "info",
 				LogRetentionDays: 7,
 			}

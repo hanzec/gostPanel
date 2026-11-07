@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Gost Panel Binary Installation Script
+# ycgp Binary Installation Script
 # Author: code-gopher
-# Repository: https://github.com/code-gopher/gostPanel
+# Upstream project: https://github.com/code-gopher/gostPanel
 
 set -e
 
@@ -19,11 +19,13 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configuration
-APP_NAME="gost-panel"
+APP_NAME="ycgp"
 INSTALL_DIR="/usr/local/bin"
+# Keep the existing unit and working directory for in-place upgrades.
+SERVICE_NAME="gost-panel"
 CONFIG_DIR="/etc/gost-panel"
-SERVICE_FILE="/etc/systemd/system/gost-panel.service"
-REPO="code-gopher/gostPanel"
+SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+REPO=${YCGP_REPO:-hanzec/gostPanel}
 GH_PROXY=${GH_PROXY:-""}
 
 # Detect Architecture
@@ -61,28 +63,30 @@ function install_panel() {
     info "最新版本: $LATEST_TAG"
 
     TEMP_DIR=$(mktemp -d)
-    TAR_FILE="$TEMP_DIR/gost-panel.tar.gz"
-    DOWNLOAD_URL="${GH_PROXY}https://github.com/$REPO/releases/download/$LATEST_TAG/gost-panel-$PLATFORM.tar.gz"
+    TAR_FILE="$TEMP_DIR/$APP_NAME.tar.gz"
+    DOWNLOAD_URL="${GH_PROXY}https://github.com/$REPO/releases/download/$LATEST_TAG/$APP_NAME-$PLATFORM.tar.gz"
     
     info "正在下载发布包: $DOWNLOAD_URL"
-    curl -L "$DOWNLOAD_URL" -o "$TAR_FILE"
+    if ! curl -fL "$DOWNLOAD_URL" -o "$TAR_FILE"; then
+        rm -rf "$TEMP_DIR"
+        error "无法下载 $APP_NAME-$PLATFORM.tar.gz，请确认 $REPO 已发布 ycgp 安装包。"
+    fi
     
     info "正在解压..."
-    tar -xzf "$TAR_FILE" -C "$TEMP_DIR"
-    
-    # 获取二进制文件名 (发布包里可能是 gost-panel-linux-amd64)
-    EXTRACTED_BIN=$(find "$TEMP_DIR" -name "gost-panel-linux-*" -type f)
-    if [ -z "$EXTRACTED_BIN" ]; then
-        error "解压后未找到二进制文件"
+    if ! tar -xzf "$TAR_FILE" -C "$TEMP_DIR"; then
+        rm -rf "$TEMP_DIR"
+        error "无法解压发布包"
     fi
-
-    chmod +x "$EXTRACTED_BIN"
-    mv "$EXTRACTED_BIN" "$INSTALL_DIR/$APP_NAME"
+    EXTRACTED_BIN="$TEMP_DIR/$APP_NAME-$PLATFORM"
+    if [ ! -f "$EXTRACTED_BIN" ]; then
+        rm -rf "$TEMP_DIR"
+        error "发布包缺少二进制文件"
+    fi
 
     # 处理配置目录
-    if [ ! -d "$CONFIG_DIR/config" ]; then
-        mkdir -p "$CONFIG_DIR/config"
-    fi
+    mkdir -p "$CONFIG_DIR/config" "$CONFIG_DIR/data"
+    chmod +x "$EXTRACTED_BIN"
+    mv "$EXTRACTED_BIN" "$INSTALL_DIR/$APP_NAME"
 
     if [ -f "$TEMP_DIR/config/config.yaml" ]; then
         if [ ! -f "$CONFIG_DIR/config/config.yaml" ]; then
@@ -110,7 +114,7 @@ function install_panel() {
     info "创建系统服务..."
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Gost Panel Service
+Description=ycgp Service
 After=network.target
 
 [Service]
@@ -126,11 +130,11 @@ WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable "$APP_NAME"
-    systemctl restart "$APP_NAME"
+    systemctl enable "$SERVICE_NAME"
+    systemctl restart "$SERVICE_NAME"
 
-    info "Gost Panel 安装完成并已启动！"
-    systemctl status gost-panel --no-pager
+    info "ycgp 安装完成并已启动！"
+    systemctl status "$SERVICE_NAME" --no-pager
     
     # 获取最终端口
     FINAL_PORT=$(grep "port:" "$CONFIG_DIR/config/config.yaml" | awk -F'"' '{print $2}' | sed 's/://')
@@ -147,7 +151,7 @@ EOF
     [ -z "$INTERNAL_IP" ] && INTERNAL_IP="127.0.0.1"
     
     echo -e "\n${GREEN}==============================================${NC}"
-    echo -e "   Gost Panel 安装成功！"
+    echo -e "   ycgp 安装成功！"
     echo -e "   外网访问: http://${PUBLIC_IP}:${FINAL_PORT}"
     echo -e "   内网访问: http://${INTERNAL_IP}:${FINAL_PORT}"
     echo -e "   账号: admin"
@@ -156,9 +160,9 @@ EOF
 }
 
 function uninstall_panel() {
-    info "正在卸载 Gost Panel..."
-    systemctl stop "$APP_NAME" || true
-    systemctl disable "$APP_NAME" || true
+    info "正在卸载 ycgp..."
+    systemctl stop "$SERVICE_NAME" || true
+    systemctl disable "$SERVICE_NAME" || true
     rm -f "$SERVICE_FILE"
     systemctl daemon-reload
     rm -f "$INSTALL_DIR/$APP_NAME"
@@ -177,13 +181,21 @@ if [ -n "$1" ]; then
         PORT="$1"
     elif [ "$1" == "install" ]; then
         ACTION="install"
-        PORT="$2"
+        if [ "$2" == "--port" ]; then
+            PORT="$3"
+            [ -n "$PORT" ] || error "请为 --port 指定端口号"
+        else
+            PORT="$2"
+        fi
     elif [ "$1" == "uninstall" ]; then
         ACTION="uninstall"
     else
-        echo "用法: $0 [port] 或 $0 [install|uninstall] [port]"
+        echo "用法: $0 [port] 或 $0 install [--port] [port] 或 $0 uninstall"
         exit 1
     fi
+fi
+if [ -n "$PORT" ] && ! [[ "$PORT" =~ ^[0-9]+$ ]]; then
+    error "无效的端口号: $PORT"
 fi
 
 case $ACTION in

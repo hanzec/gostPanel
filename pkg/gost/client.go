@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"gost-panel/internal/errors"
 	"io"
 	"net/http"
 	"time"
+	"ycgp/internal/errors"
 
-	"gost-panel/pkg/logger"
+	"ycgp/pkg/logger"
 )
 
 // Client Gost API 客户端

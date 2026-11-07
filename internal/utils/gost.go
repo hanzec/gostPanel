@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"gost-panel/internal/model"
-	"gost-panel/pkg/gost"
+	"ycgp/internal/model"
+	"ycgp/pkg/gost"
 )
 
 // GetGostClient 根据节点配置创建 Gost 客户端

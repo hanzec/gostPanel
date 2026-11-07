@@ -1,9 +1,9 @@
 package response
 
 import (
-	"gost-panel/internal/errors"
-	"gost-panel/pkg/logger"
 	"net/http"
+	"ycgp/internal/errors"
+	"ycgp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

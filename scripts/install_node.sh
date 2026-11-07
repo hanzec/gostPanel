@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ========================================================
-#  Gost 节点一键安装脚本
+#  ycgp Gost 节点一键安装脚本
 #  系统要求: Ubuntu, Debian, CentOS, Alpine
 #  作者: code-gopher
 # ========================================================
@@ -149,7 +149,7 @@ setup_service() {
         info "正在配置 systemd 服务..."
         cat > /etc/systemd/system/gost-node.service <<EOF
 [Unit]
-Description=Gost Panel Node Service
+Description=ycgp Gost Node Service
 After=network.target
 
 [Service]
@@ -168,7 +168,7 @@ EOF
         info "正在配置 OpenRC 服务..."
         cat > /etc/init.d/gost-node <<EOF
 #!/sbin/openrc-run
-description="Gost Panel Node Service"
+description="ycgp Gost Node Service"
 command="$BIN_PATH"
 command_args="-C $CONF_FILE"
 command_background=true

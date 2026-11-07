@@ -5,13 +5,13 @@ import (
 	stderrors "errors"
 	"fmt"
 
-	"gost-panel/internal/dto"
-	"gost-panel/internal/errors"
-	"gost-panel/internal/model"
-	"gost-panel/internal/repository"
-	"gost-panel/internal/utils"
-	"gost-panel/pkg/gost"
-	"gost-panel/pkg/logger"
+	"ycgp/internal/dto"
+	"ycgp/internal/errors"
+	"ycgp/internal/model"
+	"ycgp/internal/repository"
+	"ycgp/internal/utils"
+	"ycgp/pkg/gost"
+	"ycgp/pkg/logger"
 
 	"gorm.io/gorm"
 )

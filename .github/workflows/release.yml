@@ -34,22 +34,22 @@ jobs:
       - name: Package binaries
         run: |
           # 打包 Linux amd64
-          tar -czvf gost-panel-linux-amd64.tar.gz gost-panel-linux-amd64 config/config.yaml
+          tar -czvf ycgp-linux-amd64.tar.gz ycgp-linux-amd64 config/config.yaml
           # 打包 Linux arm64
-          tar -czvf gost-panel-linux-arm64.tar.gz gost-panel-linux-arm64 config/config.yaml
+          tar -czvf ycgp-linux-arm64.tar.gz ycgp-linux-arm64 config/config.yaml
           # 打包 macOS amd64
-          tar -czvf gost-panel-darwin-amd64.tar.gz gost-panel-darwin-amd64 config/config.yaml
+          tar -czvf ycgp-darwin-amd64.tar.gz ycgp-darwin-amd64 config/config.yaml
           # 打包 macOS arm64
-          tar -czvf gost-panel-darwin-arm64.tar.gz gost-panel-darwin-arm64 config/config.yaml
+          tar -czvf ycgp-darwin-arm64.tar.gz ycgp-darwin-arm64 config/config.yaml
           # 打包 Windows
-          zip gost-panel-windows-amd64.zip gost-panel-windows-amd64.exe config/config.yaml
+          zip ycgp-windows-amd64.zip ycgp-windows-amd64.exe config/config.yaml
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: |
-            *.tar.gz
-            *.zip
+            ycgp-*.tar.gz
+            ycgp-*.zip
           generate_release_notes: true
           draft: false
           prerelease: false

@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"fmt"
-	"gost-panel/internal/errors"
-	"gost-panel/pkg/logger"
 	"net/http"
 	"runtime/debug"
+	"ycgp/internal/errors"
+	"ycgp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

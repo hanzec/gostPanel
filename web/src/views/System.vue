@@ -15,7 +15,7 @@
                <el-input v-model="configForm.panelUrl" placeholder="你当前的面板地址" />
             </el-form-item>
              <el-form-item label="站点标题" prop="siteTitle">
-              <el-input v-model="configForm.siteTitle" placeholder="Gost Panel" />
+              <el-input v-model="configForm.siteTitle" placeholder="ycgp" />
             </el-form-item>
 
             <el-form-item label="Logo地址" prop="logoUrl">
@@ -119,7 +119,7 @@ const emailForm = reactive({
 
 const configForm = reactive({
   panelUrl: '',
-  siteTitle: 'Gost Panel',
+  siteTitle: 'ycgp',
   logoUrl: '',
   copyright: ''
 })

@@ -1,12 +1,12 @@
 package router
 
 import (
-	"gost-panel/internal/config"
-	"gost-panel/internal/handler"
-	"gost-panel/internal/middleware"
-	"gost-panel/internal/repository"
-	"gost-panel/internal/service"
-	"gost-panel/pkg/jwt"
+	"ycgp/internal/config"
+	"ycgp/internal/handler"
+	"ycgp/internal/middleware"
+	"ycgp/internal/repository"
+	"ycgp/internal/service"
+	"ycgp/pkg/jwt"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

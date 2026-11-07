@@ -1,4 +1,4 @@
-module gost-panel
+module ycgp
 
 go 1.23.0
 

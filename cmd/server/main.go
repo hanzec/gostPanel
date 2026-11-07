@@ -6,12 +6,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"gost-panel/internal/config"
-	"gost-panel/internal/model"
-	"gost-panel/internal/router"
-	"gost-panel/internal/service"
-	"gost-panel/pkg/jwt"
-	"gost-panel/pkg/logger"
+	"ycgp/internal/config"
+	"ycgp/internal/model"
+	"ycgp/internal/router"
+	"ycgp/internal/service"
+	"ycgp/pkg/jwt"
+	"ycgp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -44,7 +44,7 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	logger.Info("Gost Panel 启动中...")
+	logger.Info("ycgp 启动中...")
 
 	// 设置 Gin 模式
 	if cfg.Server.Mode == "release" {
@@ -110,7 +110,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Info("Gost Panel 正在关闭...")
+	logger.Info("ycgp 正在关闭...")
 
 	// 停止相关的后台服务
 	healthService.Stop()
@@ -173,6 +173,8 @@ func initDefaultAdmin(db *gorm.DB, cfg *config.Config) error {
 
 // initSystemConfig 初始化系统配置
 func initSystemConfig(db *gorm.DB) error {
+	const upstreamURL = "https://github.com/code-gopher/gostPanel"
+
 	var count int64
 	if err := db.Model(&model.SystemConfig{}).Count(&count).Error; err != nil {
 		return err
@@ -181,9 +183,9 @@ func initSystemConfig(db *gorm.DB) error {
 	if count == 0 {
 		// 设置默认值
 		sysConfig := &model.SystemConfig{
-			SiteTitle:            "Gost Panel",
+			SiteTitle:            "ycgp",
 			LogoURL:              "https://gost.run/images/gost.png",
-			Copyright:            "https://github.com/code-gopher/gostPanel",
+			Copyright:            upstreamURL,
 			LogRetentionDays:     7,
 			LogLevel:             "info",
 			AutoBackup:           false,
@@ -193,6 +195,11 @@ func initSystemConfig(db *gorm.DB) error {
 			return err
 		}
 		logger.Info("初始化默认系统配置完成")
+		return nil
 	}
-	return nil
+
+	// 仅更新沿用原项目默认标题和版权设置的站点。
+	return db.Model(&model.SystemConfig{}).
+		Where("site_title = ? AND copyright = ?", "Gost Panel", upstreamURL).
+		Update("site_title", "ycgp").Error
 }

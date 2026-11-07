@@ -4,10 +4,10 @@ import (
 	"sync"
 	"time"
 
-	"gost-panel/internal/model"
-	"gost-panel/internal/repository"
-	"gost-panel/internal/utils"
-	"gost-panel/pkg/logger"
+	"ycgp/internal/model"
+	"ycgp/internal/repository"
+	"ycgp/internal/utils"
+	"ycgp/pkg/logger"
 
 	"gorm.io/gorm"
 )

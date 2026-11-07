@@ -1,10 +1,10 @@
-# Gost Panel
+# ycgp
 
 <div align="center">
 
 **现代化 Gost v3 端口转发管理面板**
 
-[![License](https://img.shields.io/github/license/code-gopher/gostPanel)](./LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
 [![Go](https://img.shields.io/badge/Go-1.23+-00ADD8.svg)](https://golang.org/)
 
@@ -45,43 +45,43 @@
 
 ### 1. 部署面板
 
-**方式 A: Docker (推荐)**
-确保已安装 Docker 和 Docker Compose，然后运行：
+**方式 A · Docker（推荐）**
+
+在本项目根目录使用 Docker Compose 从源码构建并启动面板。
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/code-gopher/gostPanel/master/docker-compose.yml -o docker-compose.yml
-docker-compose up -d
+docker compose up -d --build
 ```
 
-**方式 B: 二进制脚本 (原生部署)**
-适用于没有 Docker 的 Linux 服务器（要求内存 > 128MB）：
+构建环境如需使用 Go 模块代理，可通过 `docker compose build --build-arg GOPROXY=<代理地址>` 指定，再执行 `docker compose up -d`。
 
-**默认安装 (端口 39100):**
+面板默认监听 `39100`。从旧版 Compose 升级时，先用旧配置执行 `docker compose down`，再在同一目录替换 Compose 文件并启动，以继续使用现有的 `data` 和 `logs`。如果已经替换配置，可在同一 Compose 项目执行 `docker compose down --remove-orphans` 后再启动。
+
+**方式 B · Linux 二进制部署**
+
+安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从当前 GitHub 仓库 `hanzec/gostPanel` 下载最新发布包，也可通过 `YCGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `ycgp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
+
+在本项目根目录以 root 身份运行脚本。默认端口为 `39100`。
+
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/code-gopher/gostPanel/master/scripts/install_panel.sh)
+bash scripts/install_panel.sh
 ```
 
-**自定义端口 (例如 8080):**
+可指定自定义端口，例如 `8080`。
+
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/code-gopher/gostPanel/master/scripts/install_panel.sh) 8080
-```
-或者
-```bash
-bash <(curl -sSL https://raw.githubusercontent.com/code-gopher/gostPanel/master/scripts/install_panel.sh) install --port 8080
+bash scripts/install_panel.sh install --port 8080
 ```
 
-**卸载面板:**
-```bash
-bash <(curl -sSL https://raw.githubusercontent.com/code-gopher/gostPanel/master/scripts/install_panel.sh) uninstall
-```
+脚本将程序安装到 `/usr/local/bin/ycgp`，沿用 `gost-panel.service` 和 `/etc/gost-panel` 以便原地升级。卸载面板时保留配置和数据库。
 
-**卸载节点:**
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/code-gopher/gostPanel/master/scripts/install_node.sh) uninstall
+bash scripts/install_panel.sh uninstall
 ```
 
 ---
 
-## 📸 界面预览
+## 📸 上游界面预览
 
 <table>
   <tr>
@@ -114,21 +114,20 @@ bash <(curl -sSL https://raw.githubusercontent.com/code-gopher/gostPanel/master/
 2. 点击已有节点的 **安装** 按钮，或者点击 **添加节点**。
 3. 复制生成的安装命令，在目标服务器上运行即可完成自动化部署。
 
+面板生成的命令使用上游 Gost Panel 的脚本安装 Gost 节点。也可将本仓库的 `scripts/install_node.sh` 复制到目标服务器运行。卸载节点时，以 root 身份在脚本所在目录执行 `bash install_node.sh uninstall`。
+
 ---
 
 ## 📦 预编译下载
 
-项目支持多平台二进制发布，请访问 [Releases](https://github.com/code-gopher/gostPanel/releases) 下载：
-- **Linux**: amd64, arm64
-- **Windows**: amd64
-- **macOS**: Apple Silicon, Intel
+新版发布包以 `ycgp-` 开头。发布流程支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。[查看当前仓库的 Releases](https://github.com/hanzec/gostPanel/releases)
 
 ### 开发与编译
-如果你想自行编译单二进制文件：
 
-**使用 Makefile（推荐）**：
+使用 Go 1.23+ 和 Node.js 20.19+（20.x）或 22.12+ 构建。Go 编译时会嵌入前端产物，首次编译后端前需先构建前端。
+
 ```bash
-# 完整构建（前端+后端）
+# 完整构建，产物为 ycgp
 make build
 
 # 只构建前端
@@ -142,6 +141,13 @@ make clean
 
 # 构建多平台发布版本
 make release
+```
+
+在项目根目录创建数据库目录，再启动构建好的 Linux 或 macOS 程序。
+
+```bash
+mkdir -p data
+./ycgp -c config/config.yaml
 ```
 
 ---

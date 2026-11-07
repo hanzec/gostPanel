@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"gost-panel/internal/config"
-	"gost-panel/internal/errors"
-	"gost-panel/internal/repository"
-	"gost-panel/pkg/logger"
+	"ycgp/internal/config"
+	"ycgp/internal/errors"
+	"ycgp/internal/repository"
+	"ycgp/pkg/logger"
 
 	"gorm.io/gorm"
 )

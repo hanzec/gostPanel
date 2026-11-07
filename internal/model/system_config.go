@@ -32,7 +32,7 @@ type SystemConfig struct {
 	BackupRetentionCount int  `gorm:"default:7" json:"backup_retention_count"`
 
 	// 面板配置
-	SiteTitle string `gorm:"size:100;default:Gost Panel" json:"site_title"`
+	SiteTitle string `gorm:"size:100;default:ycgp" json:"site_title"`
 	LogoURL   string `gorm:"size:255" json:"logo_url"`
 	Copyright string `gorm:"size:255" json:"copyright"`
 }

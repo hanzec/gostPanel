@@ -1,6 +1,6 @@
 # 版本信息
 VERSION ?= $(shell git describe --tags --always)
-LDFLAGS := -s -w -X 'gost-panel/internal/config.Version=$(VERSION)'
+LDFLAGS := -s -w -X 'ycgp/internal/config.Version=$(VERSION)'
 
 .PHONY: all build build-web build-server clean dev help release
 
@@ -22,7 +22,7 @@ help:
 
 # 完整构建
 build: build-web build-server
-	@echo "Build complete! Binary: gost-panel"
+	@echo "Build complete! Binary: ycgp"
 
 # 构建前端
 build-web:
@@ -33,7 +33,7 @@ build-web:
 # 构建后端（包含嵌入的前端）
 build-server:
 	@echo "Building server..."
-	go build -ldflags="$(LDFLAGS)" -o gost-panel cmd/server/main.go
+	go build -ldflags="$(LDFLAGS)" -o ycgp cmd/server/main.go
 	@echo "Server build complete"
 
 # 运行（构建前端并启动后端）
@@ -44,18 +44,18 @@ run: build-web
 # 构建多平台发布版本
 release: build-web
 	@echo "Building release binaries..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o gost-panel-linux-amd64 cmd/server/main.go
-	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o gost-panel-linux-arm64 cmd/server/main.go
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o gost-panel-darwin-amd64 cmd/server/main.go
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o gost-panel-darwin-arm64 cmd/server/main.go
-	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o gost-panel-windows-amd64.exe cmd/server/main.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o ycgp-linux-amd64 cmd/server/main.go
+	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o ycgp-linux-arm64 cmd/server/main.go
+	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o ycgp-darwin-amd64 cmd/server/main.go
+	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o ycgp-darwin-arm64 cmd/server/main.go
+	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o ycgp-windows-amd64.exe cmd/server/main.go
 	@echo "Release build complete"
 
 # 清理构建产物
 clean:
 	@echo "Cleaning artifacts..."
-	rm -f gost-panel
-	rm -f gost-panel.exe
+	rm -f ycgp
+	rm -f ycgp.exe
 	rm -f main
 	rm -f main.exe
 	rm -rf internal/router/dist

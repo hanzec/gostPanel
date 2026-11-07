@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"gost-panel/internal/service"
-	"gost-panel/pkg/response"
+	"ycgp/internal/service"
+	"ycgp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
