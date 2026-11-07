@@ -2,8 +2,14 @@
 package service
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	stderrors "errors"
 	"fmt"
+	"time"
 
 	"yagp/internal/dto"
 	"yagp/internal/errors"
@@ -15,6 +21,8 @@ import (
 
 	"gorm.io/gorm"
 )
+
+const registrationTokenLifetime = 15 * time.Minute
 
 // NodeService 节点服务
 // 负责节点的 CRUD 操作和业务逻辑处理
@@ -45,13 +53,11 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 
 	// 创建节点
 	node := &model.GostNode{
-		Name:     req.Name,
-		Address:  req.Address,
-		Port:     req.Port,
-		Username: req.Username,
-		Password: req.Password,
-		Remark:   req.Remark,
-		Status:   model.NodeStatusOffline,
+		Name:    req.Name,
+		Address: req.Address,
+		Port:    req.Port,
+		Remark:  req.Remark,
+		Status:  model.NodeStatusOffline,
 	}
 
 	if err = s.nodeRepo.Create(node); err != nil {
@@ -97,8 +103,6 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 	node.Name = req.Name
 	node.Address = req.Address
 	node.Port = req.Port
-	node.Username = req.Username
-	node.Password = req.Password
 	node.Remark = req.Remark
 
 	if err = s.nodeRepo.Update(node); err != nil {
@@ -116,6 +120,55 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 		userAgent)
 
 	return node, nil
+}
+
+func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, username, ip, userAgent string) (*dto.NodeRegistrationToken, error) {
+	secret, err := newNodeSecret()
+	if err != nil {
+		return nil, err
+	}
+	issued := &dto.NodeRegistrationToken{
+		Token:     fmt.Sprintf("%d.%s", id, secret),
+		ExpiresAt: time.Now().UTC().Add(registrationTokenLifetime),
+	}
+	if err := s.nodeRepo.SetRegistrationToken(ctx, id, registrationTokenHash(issued.Token), issued.ExpiresAt); err != nil {
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.ErrNodeNotFound
+		}
+		return nil, err
+	}
+	s.logService.Record(username, model.ActionUpdate, model.ResourceTypeNode, id, "签发节点注册 token", ip, userAgent)
+	return issued, nil
+}
+
+func (s *NodeService) Register(ctx context.Context, id uint, token, certPEM string) (*model.GostNode, error) {
+	password, err := newNodeSecret()
+	if err != nil {
+		return nil, err
+	}
+	node := &model.GostNode{
+		ID:                id,
+		Username:          fmt.Sprintf("node-%d", id),
+		Password:          password,
+		TLSCertificatePEM: certPEM,
+	}
+	if err := s.nodeRepo.ConsumeRegistrationToken(ctx, node, registrationTokenHash(token)); err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func newNodeSecret() (string, error) {
+	var secret [32]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(secret[:]), nil
+}
+
+func registrationTokenHash(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
 
 // Delete 删除节点

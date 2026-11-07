@@ -40,6 +40,21 @@ func (h *NodeHandler) Create(c *gin.Context) {
 	response.Success(c, node)
 }
 
+func (h *NodeHandler) IssueRegistrationToken(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "无效的节点 ID")
+		return
+	}
+	ctx := GetRequestContext(c)
+	token, err := h.nodeService.IssueRegistrationToken(c.Request.Context(), uint(id), ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+	response.Success(c, token)
+}
+
 // Update 更新节点
 func (h *NodeHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)

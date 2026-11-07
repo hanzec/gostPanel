@@ -231,6 +231,126 @@ func (x *ReportRequest) GetObservation() *proto.ObserveRequest {
 	return nil
 }
 
+type RegisterNodeRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Token              string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	NodeCertificatePem string                 `protobuf:"bytes,2,opt,name=node_certificate_pem,json=nodeCertificatePem,proto3" json:"node_certificate_pem,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *RegisterNodeRequest) Reset() {
+	*x = RegisterNodeRequest{}
+	mi := &file_pkg_nodegrpc_node_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterNodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterNodeRequest) ProtoMessage() {}
+
+func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_nodegrpc_node_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterNodeRequest.ProtoReflect.Descriptor instead.
+func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
+	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *RegisterNodeRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *RegisterNodeRequest) GetNodeCertificatePem() string {
+	if x != nil {
+		return x.NodeCertificatePem
+	}
+	return ""
+}
+
+type RegisterNodeReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Password      string                 `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
+	ControlPort   uint32                 `protobuf:"varint,4,opt,name=control_port,json=controlPort,proto3" json:"control_port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterNodeReply) Reset() {
+	*x = RegisterNodeReply{}
+	mi := &file_pkg_nodegrpc_node_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterNodeReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterNodeReply) ProtoMessage() {}
+
+func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_nodegrpc_node_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterNodeReply.ProtoReflect.Descriptor instead.
+func (*RegisterNodeReply) Descriptor() ([]byte, []int) {
+	return file_pkg_nodegrpc_node_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RegisterNodeReply) GetNodeId() uint64 {
+	if x != nil {
+		return x.NodeId
+	}
+	return 0
+}
+
+func (x *RegisterNodeReply) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *RegisterNodeReply) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *RegisterNodeReply) GetControlPort() uint32 {
+	if x != nil {
+		return x.ControlPort
+	}
+	return 0
+}
+
 var File_pkg_nodegrpc_node_proto protoreflect.FileDescriptor
 
 const file_pkg_nodegrpc_node_proto_rawDesc = "" +
@@ -248,12 +368,21 @@ const file_pkg_nodegrpc_node_proto_rawDesc = "" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"a\n" +
 	"\rReportRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x127\n" +
-	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation2\x9a\x01\n" +
+	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"]\n" +
+	"\x13RegisterNodeRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x120\n" +
+	"\x14node_certificate_pem\x18\x02 \x01(\tR\x12nodeCertificatePem\"\x87\x01\n" +
+	"\x11RegisterNodeReply\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpassword\x12!\n" +
+	"\fcontrol_port\x18\x04 \x01(\rR\vcontrolPort2\x9a\x01\n" +
 	"\x04Node\x12C\n" +
 	"\aExecute\x12\x1c.ycgp.node.v1.CommandRequest\x1a\x1a.ycgp.node.v1.CommandReply\x12M\n" +
-	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.ycgp.node.v1.ObserverEndpoint2C\n" +
+	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.ycgp.node.v1.ObserverEndpoint2\x97\x01\n" +
 	"\x05Panel\x12:\n" +
-	"\x06Report\x12\x1b.ycgp.node.v1.ReportRequest\x1a\x13.proto.ObserveReplyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
+	"\x06Report\x12\x1b.ycgp.node.v1.ReportRequest\x1a\x13.proto.ObserveReply\x12R\n" +
+	"\fRegisterNode\x12!.ycgp.node.v1.RegisterNodeRequest\x1a\x1f.ycgp.node.v1.RegisterNodeReplyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var (
 	file_pkg_nodegrpc_node_proto_rawDescOnce sync.Once
@@ -267,26 +396,30 @@ func file_pkg_nodegrpc_node_proto_rawDescGZIP() []byte {
 	return file_pkg_nodegrpc_node_proto_rawDescData
 }
 
-var file_pkg_nodegrpc_node_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_pkg_nodegrpc_node_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_pkg_nodegrpc_node_proto_goTypes = []any{
 	(*CommandRequest)(nil),       // 0: ycgp.node.v1.CommandRequest
 	(*CommandReply)(nil),         // 1: ycgp.node.v1.CommandReply
 	(*ObserverEndpoint)(nil),     // 2: ycgp.node.v1.ObserverEndpoint
 	(*ReportRequest)(nil),        // 3: ycgp.node.v1.ReportRequest
-	(*proto.ObserveRequest)(nil), // 4: proto.ObserveRequest
-	(*emptypb.Empty)(nil),        // 5: google.protobuf.Empty
-	(*proto.ObserveReply)(nil),   // 6: proto.ObserveReply
+	(*RegisterNodeRequest)(nil),  // 4: ycgp.node.v1.RegisterNodeRequest
+	(*RegisterNodeReply)(nil),    // 5: ycgp.node.v1.RegisterNodeReply
+	(*proto.ObserveRequest)(nil), // 6: proto.ObserveRequest
+	(*emptypb.Empty)(nil),        // 7: google.protobuf.Empty
+	(*proto.ObserveReply)(nil),   // 8: proto.ObserveReply
 }
 var file_pkg_nodegrpc_node_proto_depIdxs = []int32{
-	4, // 0: ycgp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	6, // 0: ycgp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	0, // 1: ycgp.node.v1.Node.Execute:input_type -> ycgp.node.v1.CommandRequest
-	5, // 2: ycgp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
+	7, // 2: ycgp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
 	3, // 3: ycgp.node.v1.Panel.Report:input_type -> ycgp.node.v1.ReportRequest
-	1, // 4: ycgp.node.v1.Node.Execute:output_type -> ycgp.node.v1.CommandReply
-	2, // 5: ycgp.node.v1.Node.GetObserverEndpoint:output_type -> ycgp.node.v1.ObserverEndpoint
-	6, // 6: ycgp.node.v1.Panel.Report:output_type -> proto.ObserveReply
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
+	4, // 4: ycgp.node.v1.Panel.RegisterNode:input_type -> ycgp.node.v1.RegisterNodeRequest
+	1, // 5: ycgp.node.v1.Node.Execute:output_type -> ycgp.node.v1.CommandReply
+	2, // 6: ycgp.node.v1.Node.GetObserverEndpoint:output_type -> ycgp.node.v1.ObserverEndpoint
+	8, // 7: ycgp.node.v1.Panel.Report:output_type -> proto.ObserveReply
+	5, // 8: ycgp.node.v1.Panel.RegisterNode:output_type -> ycgp.node.v1.RegisterNodeReply
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -303,7 +436,7 @@ func file_pkg_nodegrpc_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_nodegrpc_node_proto_rawDesc), len(file_pkg_nodegrpc_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

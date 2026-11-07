@@ -24,11 +24,12 @@ type Client struct {
 
 // Config 客户端配置
 type Config struct {
-	Address  string
-	CAFile   string
-	Username string
-	Password string
-	Timeout  time.Duration
+	Address        string
+	CAFile         string
+	CertificatePEM string
+	Username       string
+	Password       string
+	Timeout        time.Duration
 }
 
 // NewClient 创建 Gost 客户端
@@ -384,7 +385,7 @@ func (c *Client) ObserverToken() string {
 }
 
 func (c *Client) connect() (*grpc.ClientConn, error) {
-	transport, err := nodegrpc.ClientTLS(c.config.CAFile)
+	transport, err := nodegrpc.NodeClientTLS(c.config.CAFile, c.config.CertificatePEM)
 	if err != nil {
 		return nil, err
 	}

@@ -22,8 +22,12 @@ type GostNode struct {
 	Address  string     `gorm:"size:255;not null" json:"address"`      // IP 或域名
 	Port     int        `gorm:"not null" json:"port"`                  // 端口
 	Username string     `gorm:"size:50" json:"username"`               // API 认证用户名
-	Password string     `gorm:"size:255" json:"password"`              // API 认证密码
+	Password string     `gorm:"size:255" json:"-"`                     // API 认证密码
 	Status   NodeStatus `gorm:"size:20;default:offline" json:"status"` // 状态
+
+	RegistrationTokenHash string     `gorm:"size:64" json:"-"`
+	RegistrationExpiresAt *time.Time `json:"-"`
+	TLSCertificatePEM     string     `gorm:"type:text" json:"-"`
 
 	// 流量统计
 	TotalBytes  int64 `gorm:"default:0" json:"total_bytes"`

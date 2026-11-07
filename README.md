@@ -89,9 +89,9 @@ database:
 
 面板备份功能适用于 SQLite。MySQL 使用数据库服务的备份机制。
 
-### 启用节点流量上报
+### 启用节点注册和流量上报
 
-为面板上报监听器配置 TLS 证书。`report.address` 是节点使用的地址，证书必须覆盖其中的主机名。将端口开放给 Gost 节点。管理页面仍通过 Authentik 代理访问。
+为面板的节点 gRPC 监听器配置 TLS 证书。`report.address` 是节点注册和上报时访问的 `主机:端口`，证书必须覆盖该地址中的主机名或 IP。将这个端口开放给节点。管理页面仍通过 Authentik 代理访问。
 
 ```yaml
 report:
@@ -103,7 +103,7 @@ node_tls:
   ca_file: "/app/config/node-ca.crt"
 ```
 
-`node_tls.ca_file` 用于面板验证节点桥的 TLS 证书。使用系统信任的签发机构时可留空。
+通过 token 注册时，面板保存节点提交的证书，用于后续连接该节点桥。原有节点继续使用 `node_tls.ca_file` 或系统信任的 CA 验证证书。
 
 ---
 
@@ -136,17 +136,19 @@ node_tls:
 
 ## 📡 添加 Gost 实例
 
-1. 在 **节点管理** 添加实例，填写节点桥的地址、gRPC 端口和认证凭据。
-2. 打开该实例的 **安装** 操作，填写证书和私钥路径，并在目标服务器执行生成的命令。多个实例部署到同一台服务器时，为每个实例分配独立端口。
+1. 在 **节点管理** 添加实例，填写面板用于连接节点桥的地址和 gRPC 端口。多个实例部署到同一台服务器时，为每个实例分配独立端口。
+2. 打开该实例的 **安装** 操作，点击 **签发注册令牌**，并在目标 Linux 服务器以 root 执行生成的命令。命令只传 `--panel-address` 和 `--token`。token 有效期为 15 分钟，成功注册后立即失效，重新签发会替换尚未使用的 token。
 3. 节点在线后创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 gRPC `Panel.Report`。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
-Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS gRPC 接口下发配置。同一节点的上报使用其面板登记的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
+首次注册时，`yagp-node` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `Panel.RegisterNode` 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-node/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
 
-使用私有 CA 签发面板证书时，在安装窗口填写节点上的上报 CA 文件路径。安装脚本会下载 `yagp-node` 发布包，也可在目标节点用 `YAGP_NODE_BIN=/path/to/yagp-node` 指定已构建的二进制。卸载某个实例时，执行 `bash scripts/install_node.sh uninstall --node-id <ID>`。
+Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS gRPC 接口下发配置。节点上报时使用注册获得的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
-创建节点时，浏览器生成一个可编辑的随机密码，面板保存凭据并分配节点 ID。安装命令将同一组凭据和节点 ID 带到目标服务器，安装脚本把它们写入节点配置。证书、私钥和所需的 CA 文件由管理员预先部署。安装命令包含可读密码，请通过可信渠道传递。
+如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-node/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载 `yagp-node` 发布包。包含注册功能的版本发布前，可以用 `make build-node` 构建节点桥，并在目标节点用 `YAGP_NODE_BIN=/path/to/yagp-node` 指定该二进制。
 
-已安装的节点桥可以继续与新版面板通信。新安装使用 `/etc/yagp-node/<ID>` 和 `yagp-node-<ID>` 服务名。
+安装脚本为每个实例启用独立的节点桥和 Gost 服务。
+
+执行 `bash scripts/install_node.sh uninstall --node-id <ID>` 可卸载实例并保留配置。在同一台服务器重新注册同一节点前，先卸载原实例并移走保留的目录。
 
 ---
 

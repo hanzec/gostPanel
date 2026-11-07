@@ -22,10 +22,35 @@ type ReportHandler struct {
 	nodegrpc.UnimplementedPanelServer
 	db      *gorm.DB
 	traffic *service.ObserverService
+	nodes   *service.NodeService
 }
 
 func NewReportHandler(db *gorm.DB) *ReportHandler {
-	return &ReportHandler{db: db, traffic: service.NewObserverService(db)}
+	return &ReportHandler{db: db, traffic: service.NewObserverService(db), nodes: service.NewNodeService(db)}
+}
+
+func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
+	id, err := nodegrpc.ParseRegistrationTokenID(request.GetToken())
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid or expired registration token")
+	}
+	if err := nodegrpc.ValidateNodeCertificate(request.GetNodeCertificatePem()); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid node certificate")
+	}
+	node, err := h.nodes.Register(ctx, uint(id), request.GetToken(), request.GetNodeCertificatePem())
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, status.Error(codes.Unauthenticated, "invalid or expired registration token")
+	}
+	if err != nil {
+		logger.Errorf("注册节点 %d 失败: %v", id, err)
+		return nil, status.Error(codes.Internal, "could not register node")
+	}
+	return &nodegrpc.RegisterNodeReply{
+		NodeId:      uint64(node.ID),
+		Username:    node.Username,
+		Password:    node.Password,
+		ControlPort: uint32(node.Port),
+	}, nil
 }
 
 func (h *ReportHandler) Report(ctx context.Context, request *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {

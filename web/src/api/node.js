@@ -44,6 +44,16 @@ export function updateNode(id, data) {
 }
 
 /**
+ * 签发一次性节点注册令牌
+ */
+export function issueNodeRegistrationToken(id) {
+    return request({
+        url: `/nodes/${id}/registration-token`,
+        method: 'post'
+    })
+}
+
+/**
  * 删除节点
  */
 export function deleteNode(id) {

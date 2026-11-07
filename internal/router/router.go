@@ -82,6 +82,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.GET("/nodes", nodeHandler.List)
 		authRoutes.GET("/nodes/:id", nodeHandler.GetByID)
 		authRoutes.POST("/nodes", nodeHandler.Create)
+		authRoutes.POST("/nodes/:id/registration-token", nodeHandler.IssueRegistrationToken)
 		authRoutes.PUT("/nodes/:id", nodeHandler.Update)
 		authRoutes.DELETE("/nodes/:id", nodeHandler.Delete)
 		authRoutes.GET("/nodes/:id/config", nodeHandler.GetConfig)

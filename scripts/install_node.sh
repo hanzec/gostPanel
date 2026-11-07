@@ -10,10 +10,7 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 usage() {
     cat <<'EOF'
 用法:
-  install_node.sh --node-id ID --username USER --password PASSWORD \
-    --report-address HOST:PORT --tls-cert CERT_FILE --tls-key KEY_FILE \
-    [--control-port 39000] [--admin-port 39001] [--observer-port 39002] \
-    [--report-ca CA_FILE]
+  install_node.sh --panel-address HOST:PORT --token TOKEN
   install_node.sh uninstall --node-id ID
 EOF
 }
@@ -28,37 +25,20 @@ if [[ "${1:-}" == uninstall ]]; then
 fi
 
 node_id=
-control_port=39000
-admin_port=39001
-observer_port=39002
-username=
-password=
-report_address=
-report_ca=
-tls_cert=
-tls_key=
+panel_address=
+token=
 while (($#)); do
     [[ $# -ge 2 ]] || die "缺少参数值: $1"
-    case "$1" in
-        --node-id) node_id=$2 ;;
-        --control-port) control_port=$2 ;;
-        --admin-port) admin_port=$2 ;;
-        --observer-port) observer_port=$2 ;;
-        --username) username=$2 ;;
-        --password) password=$2 ;;
-        --report-address) report_address=$2 ;;
-        --report-ca) report_ca=$2 ;;
-        --tls-cert) tls_cert=$2 ;;
-        --tls-key) tls_key=$2 ;;
+    case "$action:$1" in
+        uninstall:--node-id) node_id=$2 ;;
+        install:--panel-address) panel_address=$2 ;;
+        install:--token) token=$2 ;;
         *) usage; die "未知参数: $1" ;;
     esac
     shift 2
 done
 
-[[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "请填写面板中的节点 ID"
-base_path="/etc/yagp-node/$node_id"
-gost_unit="yagp-gost-$node_id"
-bridge_unit="yagp-node-$node_id"
+state_dir=/etc/yagp-node
 
 if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
     manager=systemd
@@ -69,6 +49,10 @@ else
 fi
 
 if [[ "$action" == uninstall ]]; then
+    [[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "请填写面板中的节点 ID"
+    base_path="$state_dir/$node_id"
+    gost_unit="yagp-gost-$node_id"
+    bridge_unit="yagp-node-$node_id"
     if [[ "$manager" == systemd ]]; then
         systemctl disable --now "$bridge_unit" "$gost_unit" || true
         rm -f -- "/etc/systemd/system/$bridge_unit.service" "/etc/systemd/system/$gost_unit.service"
@@ -85,33 +69,7 @@ if [[ "$action" == uninstall ]]; then
     exit 0
 fi
 
-for port in "$control_port" "$admin_port" "$observer_port"; do
-    [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && ((port <= 65535)) || die "无效端口: $port"
-done
-[[ "$control_port" != "$admin_port" && "$control_port" != "$observer_port" && "$admin_port" != "$observer_port" ]] ||
-    die "控制、Gost 管理和观察器端口必须各不相同"
-if [[ ! -f "$base_path/node.yaml" ]] && command -v ss >/dev/null 2>&1; then
-    for port in "$control_port" "$admin_port" "$observer_port"; do
-        if [[ -n "$(ss -H -ltn "sport = :$port")" ]]; then
-            die "端口 $port 已被占用"
-        fi
-    done
-fi
-[[ -n "$username" && "$username" != *:* && -n "$password" ]] || die "请填写节点认证信息，用户名不能包含冒号"
-[[ "$report_address" == *:* ]] || die "请填写面板流量上报地址 HOST:PORT"
-[[ -f "$tls_cert" && -f "$tls_key" ]] || die "请先准备节点 TLS 证书和私钥"
-tls_cert=$(readlink -f -- "$tls_cert")
-tls_key=$(readlink -f -- "$tls_key")
-if [[ -n "$report_ca" ]]; then
-    [[ -f "$report_ca" ]] || die "上报 CA 文件不存在"
-    report_ca=$(readlink -f -- "$report_ca")
-fi
-
-yaml_quote() {
-    [[ "$1" != *$'\n'* && "$1" != *$'\r'* ]] || die "参数不能包含换行"
-    local value=${1//\'/\'\'}
-    printf "'%s'" "$value"
-}
+[[ -n "$panel_address" && -n "$token" ]] || { usage; exit 1; }
 
 case "$(uname -m)" in
     x86_64) arch=amd64 ;;
@@ -127,37 +85,22 @@ if [[ -n "$node_version" ]]; then
     release_path="download/$node_version"
 fi
 
-tmp_dir=$(mktemp -d)
-trap 'rm -rf -- "$tmp_dir"' EXIT
-mkdir -p -- "$tmp_dir/gost" "$tmp_dir/bridge"
-
-# 先验证配置和下载内容，再写入系统目录。
-for value in "$username" "$password" "$report_address" "$report_ca" "$tls_cert" "$tls_key"; do
-    yaml_quote "$value" >/dev/null
-done
-cat > "$tmp_dir/node.yaml" <<EOF
-node_id: $node_id
-username: $(yaml_quote "$username")
-password: $(yaml_quote "$password")
-control_listen: ":$control_port"
-admin_address: "127.0.0.1:$admin_port"
-observer_listen: "127.0.0.1:$observer_port"
-report_address: $(yaml_quote "$report_address")
-report_ca_file: $(yaml_quote "$report_ca")
-tls_cert_file: $(yaml_quote "$tls_cert")
-tls_key_file: $(yaml_quote "$tls_key")
-EOF
-if [[ -f "$base_path/node.yaml" ]] && ! cmp -s "$tmp_dir/node.yaml" "$base_path/node.yaml"; then
-    die "此节点已有不同的设置。请核对 $base_path/node.yaml 和 $base_path/gost.yaml"
-fi
-cat > "$tmp_dir/gost.yaml" <<EOF
-api:
-  addr: "127.0.0.1:$admin_port"
-  pathPrefix: /api
-  auth:
-    username: $(yaml_quote "$username")
-    password: $(yaml_quote "$password")
-EOF
+mkdir -p -- "$state_dir"
+tmp_dir=$(mktemp -d -- "$state_dir/.install.XXXXXXXX")
+stage="$tmp_dir/node"
+cleanup() {
+    local result=$?
+    if (( result != 0 )) && [[ -n "$node_id" ]]; then
+        if [[ -d "$stage" ]]; then
+            printf '注册文件已保留在 %s\n' "$stage" >&2
+            return
+        fi
+        printf '节点配置已保留在 %s，请检查服务后重新启动\n' "$base_path" >&2
+    fi
+    rm -rf -- "$tmp_dir"
+}
+trap cleanup EXIT
+mkdir -p -- "$tmp_dir/gost" "$tmp_dir/bridge" "$stage"
 
 curl -fsSL "${GH_PROXY:-}https://github.com/go-gost/gost/releases/download/v$gost_version/gost_${gost_version}_linux_$arch.tar.gz" \
     -o "$tmp_dir/gost.tar.gz"
@@ -171,18 +114,22 @@ if [[ -z "$bridge_bin" ]]; then
 fi
 [[ -f "$tmp_dir/gost/gost" && -f "$bridge_bin" ]] || die "安装包缺少 Gost 或 yagp-node 程序"
 
-install -d -m 0700 -- "$base_path"
-install -m 0700 -- "$tmp_dir/gost/gost" "$base_path/gost"
-install -m 0700 -- "$bridge_bin" "$base_path/yagp-node"
+install -m 0700 -- "$tmp_dir/gost/gost" "$stage/gost"
+install -m 0700 -- "$bridge_bin" "$stage/yagp-node"
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
-    install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$base_path/LICENSE"
+    install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$stage/LICENSE"
 fi
-if [[ ! -f "$base_path/node.yaml" ]]; then
-    install -m 0600 -- "$tmp_dir/node.yaml" "$base_path/node.yaml"
+
+if ! node_id=$(printf '%s' "$token" | "$stage/yagp-node" enroll --panel-address "$panel_address" --output "$stage"); then
+    die "节点注册未完成。若 token 已失效，请在面板生成新的 token 后重试。"
 fi
-if [[ ! -f "$base_path/gost.yaml" ]]; then
-    install -m 0600 -- "$tmp_dir/gost.yaml" "$base_path/gost.yaml"
-fi
+unset token
+[[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "yagp-node 未返回有效的节点 ID"
+base_path="$state_dir/$node_id"
+gost_unit="yagp-gost-$node_id"
+bridge_unit="yagp-node-$node_id"
+mv -T -n -- "$stage" "$base_path"
+[[ ! -e "$stage" ]] || die "节点安装目录已存在: $base_path"
 
 write_service() {
     local name=$1 description=$2 executable=$3 config_flag=$4 config_file=$5
@@ -232,4 +179,4 @@ else
     done
 fi
 
-printf '节点 %s 已启动。gRPC 控制端口 %s，上报地址 %s\n' "$node_id" "$control_port" "$report_address"
+printf '节点 %s 已启动，上报地址 %s\n' "$node_id" "$panel_address"

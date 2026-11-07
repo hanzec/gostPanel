@@ -1,10 +1,12 @@
 package repository
 
 import (
+	"context"
 	"time"
 	"yagp/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // NodeRepository 节点仓库
@@ -24,9 +26,43 @@ func (r *NodeRepository) Create(node *model.GostNode) error {
 	return r.DB.Create(node).Error
 }
 
-// Update 更新节点
+// Update 更新节点元数据，不覆盖并发完成的注册或健康检查。
 func (r *NodeRepository) Update(node *model.GostNode) error {
-	return r.DB.Save(node).Error
+	return r.DB.Model(node).Select("Name", "Address", "Port", "Remark").Updates(node).Error
+}
+
+func (r *NodeRepository) SetRegistrationToken(ctx context.Context, id uint, hash string, expiresAt time.Time) error {
+	result := r.DB.WithContext(ctx).Model(&model.GostNode{}).Where("id = ?", id).Updates(map[string]any{
+		"registration_token_hash": hash,
+		"registration_expires_at": expiresAt,
+	})
+	if result.Error == nil && result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
+}
+
+func (r *NodeRepository) ConsumeRegistrationToken(ctx context.Context, node *model.GostNode, hash string) error {
+	// The first statement inside the transaction writes, avoiding a read-to-write lock upgrade on SQLite.
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Do not interpolate the newly issued password into GORM's SQL trace.
+		result := tx.Session(&gorm.Session{Logger: logger.Discard}).Model(&model.GostNode{}).
+			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
+			Updates(map[string]any{
+				"registration_token_hash": "",
+				"registration_expires_at": nil,
+				"username":                node.Username,
+				"password":                node.Password,
+				"tls_certificate_pem":     node.TLSCertificatePEM,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Select("port").First(node).Error
+	})
 }
 
 // Delete 删除节点

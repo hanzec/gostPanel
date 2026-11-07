@@ -33,6 +33,19 @@ message ReportRequest {
   proto.ObserveRequest observation = 2;
 }
 
+message RegisterNodeRequest {
+  string token = 1;
+  string node_certificate_pem = 2;
+}
+
+message RegisterNodeReply {
+  uint64 node_id = 1;
+  string username = 2;
+  string password = 3;
+  uint32 control_port = 4;
+}
+
 service Panel {
   rpc Report(ReportRequest) returns (proto.ObserveReply);
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeReply);
 }

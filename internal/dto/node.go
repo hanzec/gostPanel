@@ -1,26 +1,29 @@
 // Package dto 定义数据传输对象
 package dto
 
+import "time"
+
 // ==================== 节点相关 ====================
 
 // CreateNodeReq 创建节点请求
 type CreateNodeReq struct {
-	Name     string `json:"name" binding:"required,min=1,max=100"`         // 节点名称
-	Address  string `json:"address" binding:"required"`                    // IP 或域名
-	Port     int    `json:"port" binding:"required,min=1,max=65535"`       // 端口
-	Username string `json:"username" binding:"required,max=50,excludes=:"` // 节点桥认证用户名
-	Password string `json:"password" binding:"required,max=255"`           // 节点桥认证密码
-	Remark   string `json:"remark"`                                        // 备注
+	Name    string `json:"name" binding:"required,min=1,max=100"`   // 节点名称
+	Address string `json:"address" binding:"required"`              // IP 或域名
+	Port    int    `json:"port" binding:"required,min=1,max=65535"` // 端口
+	Remark  string `json:"remark"`                                  // 备注
 }
 
 // UpdateNodeReq 更新节点请求
 type UpdateNodeReq struct {
-	Name     string `json:"name" binding:"required,min=1,max=100"`         // 节点名称
-	Address  string `json:"address" binding:"required"`                    // IP 或域名
-	Port     int    `json:"port" binding:"required,min=1,max=65535"`       // 端口
-	Username string `json:"username" binding:"required,max=50,excludes=:"` // 节点桥认证用户名
-	Password string `json:"password" binding:"required,max=255"`           // 节点桥认证密码
-	Remark   string `json:"remark"`                                        // 备注
+	Name    string `json:"name" binding:"required,min=1,max=100"`   // 节点名称
+	Address string `json:"address" binding:"required"`              // IP 或域名
+	Port    int    `json:"port" binding:"required,min=1,max=65535"` // 端口
+	Remark  string `json:"remark"`                                  // 备注
+}
+
+type NodeRegistrationToken struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // NodeListReq 节点列表请求

@@ -147,12 +147,6 @@
           <el-form-item label="gRPC 端口" prop="port">
             <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
           </el-form-item>
-          <el-form-item label="认证用户名" prop="username">
-            <el-input v-model="form.username" autocomplete="username" />
-          </el-form-item>
-          <el-form-item label="认证密码" prop="password">
-            <el-input v-model="form.password" type="password" show-password autocomplete="new-password" />
-          </el-form-item>
           <el-form-item label="备注" prop="remark" class="inventory-form-wide">
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录节点用途或部署位置" />
           </el-form-item>
@@ -195,44 +189,42 @@
       :title="'安装节点 · ' + (currentInstallNode?.name || '')"
       width="min(680px, calc(100vw - 24px))"
       :close-on-click-modal="false"
+      @close="clearRegistration"
     >
-      <p class="install-intro ops-muted">在目标服务器上准备 TLS 证书和私钥，再以 root 身份执行安装命令。</p>
+      <p class="install-intro ops-muted">在目标服务器上以 root 身份执行安装命令。节点首次通过 TLS 注册时会自动获取节点 ID 和凭据。</p>
       <dl v-if="currentInstallNode" class="install-meta">
         <div><dt>节点 ID</dt><dd class="ops-mono">#{{ currentInstallNode.id }}</dd></div>
         <div><dt>gRPC 地址</dt><dd class="ops-mono">{{ nodeEndpoint(currentInstallNode) }}</dd></div>
       </dl>
-      <el-form :model="installSettings" label-position="top">
-        <div class="inventory-form-grid">
-          <el-form-item label="面板上报地址" class="inventory-form-wide">
-            <el-input v-model="installSettings.reportAddress" placeholder="panel.example.com:39101" />
-          </el-form-item>
-          <el-form-item label="节点证书路径">
-            <el-input v-model="installSettings.tlsCert" />
-          </el-form-item>
-          <el-form-item label="节点私钥路径">
-            <el-input v-model="installSettings.tlsKey" />
-          </el-form-item>
-          <el-form-item label="面板 CA 路径" class="inventory-form-wide">
-            <el-input v-model="installSettings.reportCA" placeholder="使用私有 CA 时填写" />
-          </el-form-item>
-          <el-form-item label="本机管理端口">
-            <el-input-number v-model="installSettings.adminPort" :min="1" :max="65535" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="本机观察器端口">
-            <el-input-number v-model="installSettings.observerPort" :min="1" :max="65535" controls-position="right" />
-          </el-form-item>
-        </div>
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="面板注册地址" for="node-panel-address">
+          <el-input id="node-panel-address" v-model.trim="panelAddress" placeholder="panel.example.com:39101" spellcheck="false" />
+        </el-form-item>
       </el-form>
+
+      <div class="install-registration">
+        <p class="ops-muted" role="status">
+          <template v-if="registrationToken">
+            令牌到期时间 <time :datetime="registrationExpiresAt">{{ formatTime(registrationExpiresAt) }}</time>
+          </template>
+          <template v-else-if="registrationExpiresAt">令牌已过期，请重新签发。</template>
+          <template v-else>令牌在注册成功后立即失效。</template>
+        </p>
+        <el-button type="primary" :loading="issuingToken" :disabled="!panelAddress" @click="issueRegistrationToken">
+          {{ registrationExpiresAt ? '重新签发令牌' : '签发注册令牌' }}
+        </el-button>
+      </div>
 
       <section class="install-command" aria-labelledby="node-install-command">
         <div class="install-command-heading">
           <h3 id="node-install-command">安装命令</h3>
-          <el-button :icon="CopyDocument" :disabled="!installCommand" @click="copyInstallCommand">复制命令</el-button>
+          <el-button :icon="CopyDocument" :disabled="!installCommand || issuingToken" @click="copyInstallCommand">复制命令</el-button>
         </div>
         <pre v-if="installCommand" class="config-code"><code>{{ installCommand }}</code></pre>
-        <p v-else class="ops-muted">填写上报地址和 TLS 路径，并为 gRPC、管理与观察器配置不同端口。</p>
+        <p v-else class="ops-muted">填写面板地址并签发令牌后即可复制命令。</p>
       </section>
-      <p class="install-hint ops-muted">证书须覆盖已登记的节点地址。同一台服务器运行多个实例时，请为每个实例分配独立端口。</p>
+      <p class="install-hint ops-muted">请妥善保管安装命令。重新签发会撤销该节点上一枚未使用的令牌。</p>
+      <p class="install-hint ops-muted">已安装的节点使用新令牌注册后会更换凭据，旧实例将失去访问权限。</p>
 
       <template #footer>
         <el-button @click="installDialogVisible = false">关闭</el-button>
@@ -247,7 +239,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, CircleCheck, CircleClose, CopyDocument, Monitor, Plus, Refresh, Search, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { getNodeList, createNode, updateNode, deleteNode, getNodeConfig } from '@/api/node'
+import { getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
 
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/gostPanel/master/scripts/install_node.sh'
@@ -286,13 +278,11 @@ const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
 const submitLoading = ref(false)
 const formRef = ref(null)
-const form = reactive({ name: '', address: '', port: 39000, username: '', password: '', remark: '' })
+const form = reactive({ name: '', address: '', port: 39000, remark: '' })
 const rules = {
   name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
   address: [{ required: true, message: '请输入 IP 或域名', trigger: 'blur' }],
-  port: [{ required: true, message: '请输入端口', trigger: 'blur' }],
-  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+  port: [{ required: true, message: '请输入端口', trigger: 'blur' }]
 }
 
 const configDialogVisible = ref(false)
@@ -304,14 +294,11 @@ const configError = ref(false)
 
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
-const installSettings = reactive({
-  reportAddress: '',
-  tlsCert: '/etc/yagp-node/tls/node.pem',
-  tlsKey: '/etc/yagp-node/tls/node.key',
-  reportCA: '',
-  adminPort: 39001,
-  observerPort: 39002
-})
+const panelAddress = ref('')
+const registrationToken = ref('')
+const registrationExpiresAt = ref('')
+const issuingToken = ref(false)
+let registrationTimer
 
 const formatBytes = (bytes) => {
   if (!bytes) return '0 B'
@@ -337,41 +324,44 @@ const configSummary = (tab, entry) => {
 const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "'"
 
 const installCommand = computed(() => {
-  const node = currentInstallNode.value
-  const { reportAddress, tlsCert, tlsKey, reportCA, adminPort, observerPort } = installSettings
-  if (!node || !node.username || !node.password || !reportAddress.trim() || !tlsCert.trim() || !tlsKey.trim()) return ''
-  if (!adminPort || !observerPort || new Set([node.port, adminPort, observerPort]).size !== 3) return ''
-
-  const args = [
-    ['--node-id', node.id],
-    ['--control-port', node.port],
-    ['--admin-port', adminPort],
-    ['--observer-port', observerPort],
-    ['--username', node.username],
-    ['--password', node.password],
-    ['--report-address', reportAddress.trim()],
-    ['--tls-cert', tlsCert.trim()],
-    ['--tls-key', tlsKey.trim()]
-  ]
-  if (reportCA.trim()) args.push(['--report-ca', reportCA.trim()])
+  if (!panelAddress.value || !registrationToken.value) return ''
   return 'bash <(curl -fsSL ' + shellQuote(INSTALL_SCRIPT_URL) + ') ' +
-    args.map(([flag, value]) => flag + ' ' + shellQuote(value)).join(' ')
+    '--panel-address ' + shellQuote(panelAddress.value) + ' --token ' + shellQuote(registrationToken.value)
 })
 
 const showInstallCommand = async (row) => {
-  currentInstallNode.value = row
+  currentInstallNode.value = { id: row.id, name: row.name, address: row.address, port: row.port }
   installDialogVisible.value = true
-  if (!installSettings.reportAddress) {
-    try {
-      const res = await getPublicSystemConfig()
-      if (!installSettings.reportAddress) installSettings.reportAddress = res.data.reportAddress || ''
-    } catch (error) {
-      console.error('获取默认流量上报地址失败:', error)
-    }
+  if (!panelAddress.value) {
+    const res = await getPublicSystemConfig().catch(() => null)
+    if (!panelAddress.value && res) panelAddress.value = (res.data.reportAddress || '').trim()
   }
 }
 
+const clearRegistration = () => {
+  clearTimeout(registrationTimer)
+  registrationToken.value = ''
+  registrationExpiresAt.value = ''
+}
+
+const issueRegistrationToken = async () => {
+  const node = currentInstallNode.value
+  if (!node || issuingToken.value) return
+  issuingToken.value = true
+  const res = await issueNodeRegistrationToken(node.id).catch(() => null)
+  issuingToken.value = false
+  if (!res || !installDialogVisible.value || currentInstallNode.value !== node) return
+
+  clearRegistration()
+  registrationExpiresAt.value = res.data.expires_at
+  const remaining = Date.parse(registrationExpiresAt.value) - Date.now()
+  if (remaining <= 0) return
+  registrationToken.value = res.data.token
+  registrationTimer = setTimeout(() => { registrationToken.value = '' }, remaining)
+}
+
 const copyInstallCommand = async () => {
+  if (!installCommand.value || Date.parse(registrationExpiresAt.value) <= Date.now()) return
   try {
     await navigator.clipboard.writeText(installCommand.value)
     ElMessage.success('安装命令已复制')
@@ -379,9 +369,6 @@ const copyInstallCommand = async () => {
     ElMessage.error('复制失败，请手动选择命令')
   }
 }
-
-const generatePassword = () =>
-  Array.from(crypto.getRandomValues(new Uint8Array(18)), (value) => value.toString(16).padStart(2, '0')).join('')
 
 const fetchData = async (isSilent = false) => {
   if (isSilent && (loading.value || loadError.value)) return
@@ -420,15 +407,11 @@ const openDialog = (row = null) => {
     name: row.name,
     address: row.address,
     port: row.port,
-    username: row.username,
-    password: row.password,
     remark: row.remark || ''
   } : {
     name: '',
     address: '127.0.0.1',
     port: 39000,
-    username: 'admin',
-    password: generatePassword(),
     remark: ''
   })
   formRef.value?.clearValidate()
@@ -481,7 +464,6 @@ const handleNodeAction = (action, row) => {
     openDialog(row)
     editId.value = null
     form.name = row.name.slice(0, 95) + '-copy'
-    form.password = generatePassword()
   }
 }
 
@@ -506,7 +488,11 @@ onMounted(() => {
   fetchData()
   refreshTimer = setInterval(() => fetchData(true), 5000)
 })
-onBeforeUnmount(() => clearInterval(refreshTimer))
+onBeforeUnmount(() => {
+  clearInterval(refreshTimer)
+  installDialogVisible.value = false
+  clearRegistration()
+})
 </script>
 
 <style scoped src="../inventory.css"></style>
@@ -539,6 +525,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 }
 .install-meta dt { font-size: 12px; color: var(--ops-muted); }
 .install-meta dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.install-registration { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.install-registration p { margin: 0; }
 .install-command { border: 1px solid var(--ops-border); border-radius: 8px; padding: 12px; }
 .install-command-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .install-command-heading h3 { font-size: 14px; margin: 0; }
