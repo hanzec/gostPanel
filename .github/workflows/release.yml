@@ -2,18 +2,42 @@ name: Build and Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  version:
+    if: ${{ !github.event.deleted && (github.ref_name == 'main' || github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Calculate version
+        id: version
+        run: |
+          version=$(bash scripts/version.sh)
+          printf 'value=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -27,9 +51,10 @@ jobs:
         with:
           go-version: '1.23'
 
-      - name: Build and Release
-        run: |
-          make release VERSION=${{ github.ref_name }}
+      - name: Build release binaries
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: make release VERSION="$VERSION"
 
       - name: Package binaries
         run: |
@@ -46,14 +71,36 @@ jobs:
           tar -czvf yagp-node-linux-amd64.tar.gz yagp-node-linux-amd64 yagp-node-systemd-linux-amd64 LICENSE
           tar -czvf yagp-node-linux-arm64.tar.gz yagp-node-linux-arm64 yagp-node-systemd-linux-arm64 LICENSE
 
+      - name: Check latest release eligibility
+        id: latest
+        run: |
+          default_head=$(git ls-remote origin HEAD)
+          if [[ "${default_head%%$'\t'*}" == "$GITHUB_SHA" ]]; then
+            echo 'value=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'value=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           files: |
             yagp-*.tar.gz
             yagp-*.zip
+          fail_on_unmatched_files: true
+          overwrite_files: false
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          make_latest: ${{ steps.latest.outputs.value }}
+
+  docker:
+    needs: version
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker.yml
+    with:
+      version: ${{ needs.version.outputs.version }}

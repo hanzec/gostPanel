@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"yagp/internal/buildinfo"
 	"yagp/internal/config"
 	"yagp/internal/handler"
 	"yagp/internal/model"
@@ -32,7 +33,12 @@ func main() {
 	var configPath string
 	flag.StringVar(&configPath, "c", "", "配置文件路径")
 	flag.StringVar(&configPath, "config", "", "配置文件路径")
+	showVersion := flag.Bool("version", false, "打印构建版本")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(buildinfo.Version)
+		return
+	}
 
 	// 加载配置
 	cfg, err := config.Load(configPath)

@@ -50,20 +50,9 @@ function check_memory() {
 
 function install_panel() {
     check_memory
-    info "正在获取最新版本信息..."
-    LATEST_TAG=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    if [ -z "$LATEST_TAG" ]; then
-        LATEST_TAG=$(curl -s "${GH_PROXY}https://github.com/$REPO/releases/latest" | grep -oP 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
-    fi
-    
-    if [ -z "$LATEST_TAG" ]; then
-        error "无法获取最新版本号，请检查网络或手动指定。"
-    fi
-    info "最新版本: $LATEST_TAG"
-
     TEMP_DIR=$(mktemp -d)
     TAR_FILE="$TEMP_DIR/$APP_NAME.tar.gz"
-    DOWNLOAD_URL="${GH_PROXY}https://github.com/$REPO/releases/download/$LATEST_TAG/$APP_NAME-$PLATFORM.tar.gz"
+    DOWNLOAD_URL="${GH_PROXY}https://github.com/$REPO/releases/latest/download/$APP_NAME-$PLATFORM.tar.gz"
     
     info "正在下载发布包: $DOWNLOAD_URL"
     if ! curl -fL "$DOWNLOAD_URL" -o "$TAR_FILE"; then

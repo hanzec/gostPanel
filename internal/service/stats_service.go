@@ -1,7 +1,7 @@
 package service
 
 import (
-	"yagp/internal/config"
+	"yagp/internal/buildinfo"
 	"yagp/internal/model"
 	"yagp/internal/repository"
 
@@ -117,7 +117,7 @@ func (s *StatsService) GetDashboardStats() (*DashboardStats, error) {
 		Stopped: tunnelTotal - tunnelRunning,
 	}
 
-	stats.Version = config.Version
+	stats.Version = buildinfo.Version
 	stats.Database = s.database
 
 	return stats, nil

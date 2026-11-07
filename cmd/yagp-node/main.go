@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"yagp/internal/buildinfo"
 	"yagp/internal/nodebridge"
 
 	"gopkg.in/yaml.v3"
@@ -26,6 +27,9 @@ func main() {
 func run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
+		case "--version":
+			_, err := fmt.Fprintln(os.Stdout, buildinfo.Version)
+			return err
 		case "enroll":
 			return enroll(ctx, args[1:])
 		case "prepare-gost":

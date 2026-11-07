@@ -31,7 +31,7 @@ COPY --from=web-builder /app/internal/router/dist ./internal/router/dist
 
 # 编译（关闭 CGO，使用纯 Go SQLite 驱动，注入版本号）
 RUN CGO_ENABLED=0 GOOS=linux \
-    go build -ldflags="-s -w -X 'yagp/internal/config.Version=${VERSION}'" -o yagp cmd/server/main.go
+    go build -ldflags="-s -w -X 'yagp/internal/buildinfo.Version=${VERSION}'" -o yagp cmd/server/main.go
 
 # 运行阶段
 FROM alpine:latest

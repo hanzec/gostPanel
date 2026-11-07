@@ -168,6 +168,14 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 面板和节点桥需要一起更新到使用 `yagp.node.v1` 的版本。更新后在面板中停止并重新启动已运行的转发规则，以更新 Gost 观察器凭据。未通过令牌注册的节点须重新注册。
 
+### 自动版本号
+
+推送到 `main` 时，GitHub Actions 使用该次推送的最后一个提交生成版本，并发布 GitHub Release 和同名的 GHCR 镜像标签。仓库默认分支为 `master` 时，推送到 `master` 也会触发发布。默认分支的最新提交可以更新 `latest`。
+
+版本格式为 `x.y.z-sha`，例如 `0.1.67-a1b2c3d`。`x.y` 在仓库根目录的 `VERSION` 中维护，`z` 是沿第一父提交统计的主线提交数，`sha` 是提交 SHA 的前 7 位。用 `bash scripts/version.sh` 可查看当前检出提交的版本，需要完整 Git 历史。
+
+面板仪表盘、`/api/v1/health`、`yagp --version` 和 `yagp-node --version` 使用相同的构建版本。
+
 ### 开发与编译
 
 使用 Go 1.23+ 和 Node.js 20.19+（20.x）或 22.12+ 构建。Go 编译时会嵌入前端产物，首次编译后端前需先构建前端。

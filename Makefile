@@ -1,6 +1,11 @@
 # 版本信息
-VERSION ?= $(shell git describe --tags --always)
-LDFLAGS := -s -w -X 'yagp/internal/config.Version=$(VERSION)'
+ifndef VERSION
+VERSION := $(shell bash scripts/version.sh)
+endif
+ifeq ($(strip $(VERSION)),)
+$(error 无法生成构建版本)
+endif
+LDFLAGS := -s -w -X 'yagp/internal/buildinfo.Version=$(VERSION)'
 
 .PHONY: all build build-web build-server build-node build-node-systemd clean dev help release
 
@@ -39,15 +44,15 @@ build-server:
 	@echo "Server build complete"
 
 build-node:
-	go build -ldflags="-s -w" -o yagp-node ./cmd/yagp-node
+	go build -ldflags="$(LDFLAGS)" -o yagp-node ./cmd/yagp-node
 
 build-node-systemd:
-	CGO_ENABLED=0 go build -tags libsystemd -ldflags="-s -w" -o yagp-node ./cmd/yagp-node
+	CGO_ENABLED=0 go build -tags libsystemd -ldflags="$(LDFLAGS)" -o yagp-node ./cmd/yagp-node
 
 # 运行（构建前端并启动后端）
 run: build-web
 	@echo "Starting server..."
-	go run cmd/server/main.go
+	go run -ldflags="$(LDFLAGS)" cmd/server/main.go
 
 # 构建多平台发布版本
 release: build-web
@@ -57,10 +62,10 @@ release: build-web
 	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-amd64 cmd/server/main.go
 	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-arm64 cmd/server/main.go
 	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-windows-amd64.exe cmd/server/main.go
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o yagp-node-linux-amd64 ./cmd/yagp-node
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o yagp-node-linux-arm64 ./cmd/yagp-node
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags libsystemd -ldflags="-s -w" -o yagp-node-systemd-linux-amd64 ./cmd/yagp-node
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags libsystemd -ldflags="-s -w" -o yagp-node-systemd-linux-arm64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-node-linux-amd64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-node-linux-arm64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags libsystemd -ldflags="$(LDFLAGS)" -o yagp-node-systemd-linux-amd64 ./cmd/yagp-node
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags libsystemd -ldflags="$(LDFLAGS)" -o yagp-node-systemd-linux-arm64 ./cmd/yagp-node
 	@echo "Release build complete"
 
 # 清理构建产物

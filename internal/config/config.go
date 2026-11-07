@@ -9,9 +9,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Version 编译时注入的版本号
-var Version = "dev"
-
 // Config 应用配置结构
 type Config struct {
 	Server    ServerConfig    `mapstructure:"server"`

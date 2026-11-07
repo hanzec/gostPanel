@@ -1,6 +1,7 @@
 package router
 
 import (
+	"yagp/internal/buildinfo"
 	"yagp/internal/config"
 	"yagp/internal/handler"
 	"yagp/internal/middleware"
@@ -46,7 +47,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 
 	// API v1 健康检查
 	apiV1.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok", "version": config.Version})
+		c.JSON(200, gin.H{"status": "ok", "version": buildinfo.Version})
 	})
 
 	// 初始化服务
