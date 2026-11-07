@@ -12,6 +12,8 @@
 
 ycgp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证。[上游项目](https://github.com/code-gopher/gostPanel) · [许可证](./LICENSE)
 
+本次改名、移除推广、更新文档和验证使用了 OpenAI Codex 辅助。详见 [AGENTS.md](./AGENTS.md)。
+
 ## 🚀 核心特性
 
 - ⚡ **极简管理** - 统一管理多个 Gost 节点及其转发规则。
