@@ -1,396 +1,237 @@
 <template>
-  <div class="layout-container">
-    <!-- 头部 (Top Header) -->
-    <el-header class="header">
-      <div class="header-left">
-        <el-icon class="menu-toggle" @click="toggleMobileMenu"><Expand /></el-icon>
-        <div class="logo">
-          <img v-if="logoUrl" :src="logoUrl" alt="logo" class="logo-img" />
-          <span>{{ siteTitle }}</span>
-        </div>
-      </div>
-      <div class="header-right">
-        <div v-if="username" class="user-group">
-          <div class="username-box">
-            {{ username }}
+  <div class="console-shell">
+    <a class="console-skip" href="#console-main" @click.prevent="mainContent?.focus()">跳到主要内容</a>
+
+    <aside class="console-sidebar" aria-label="侧栏">
+      <ConsoleNav :site-title="system.siteTitle" :logo-url="system.logoUrl" />
+    </aside>
+
+    <div class="console-workspace">
+      <header class="console-topbar">
+        <div class="console-topbar__inner">
+          <div class="console-topbar__location">
+            <button
+              type="button"
+              class="console-icon-button console-menu-button"
+              aria-label="打开管理导航"
+              aria-haspopup="dialog"
+              :aria-expanded="mobileMenu"
+              @click="mobileMenu = true"
+            >
+              <el-icon aria-hidden="true"><Menu /></el-icon>
+            </button>
+            <nav class="console-crumb" aria-label="面包屑">
+              <RouterLink to="/dashboard">控制台</RouterLink>
+              <span aria-hidden="true">/</span>
+              <span aria-current="page">{{ route.meta.title }}</span>
+            </nav>
           </div>
-          <a class="user-icon-box" href="/outpost.goauthentik.io/sign_out" title="退出 Authentik" aria-label="退出 Authentik">
-            <el-icon><SwitchButton /></el-icon>
-          </a>
+
+          <div v-if="username" class="console-identity">
+            <span class="console-identity__avatar" aria-hidden="true"><el-icon><User /></el-icon></span>
+            <span class="console-identity__text">
+              <strong>{{ username }}</strong>
+              <small>Authentik 管理员</small>
+            </span>
+            <a class="console-icon-button" href="/outpost.goauthentik.io/sign_out" aria-label="退出 Authentik" title="退出 Authentik">
+              <el-icon aria-hidden="true"><SwitchButton /></el-icon>
+            </a>
+          </div>
         </div>
-      </div>
-    </el-header>
+      </header>
 
-    <!-- 下方主体 (Body: Sidebar + Content) -->
-    <el-container class="body-container">
-      <!-- 侧边栏 (Floating Sidebar) -->
-      <div v-if="mobileMenuVisible" class="mobile-overlay" @click="mobileMenuVisible = false"></div>
-      <el-aside :width="isCollapse ? '64px' : '220px'" class="aside" :class="{ 'mobile-show': mobileMenuVisible }">
-        <el-menu
-          :default-active="currentRoute"
-          :collapse="isCollapse"
-          :collapse-transition="false"
-          router
-          class="sidebar-menu"
-          text-color="#606266"
-          active-text-color="#409eff"
-        >
-          <template v-for="item in menuItems" :key="item.path">
-            <!-- 有子菜单 -->
-            <el-sub-menu v-if="item.children" :index="item.path">
-              <template #title>
-                <el-icon><component :is="item.icon" /></el-icon>
-                <span>{{ item.title }}</span>
-              </template>
-              <el-menu-item 
-                v-for="child in item.children"
-                :key="child.path"
-                :index="child.path"
-              >
-                <el-icon><component :is="child.icon" /></el-icon>
-                <template #title>{{ child.title }}</template>
-              </el-menu-item>
-            </el-sub-menu>
-
-            <!-- 无子菜单 -->
-            <el-menu-item v-else :index="item.path">
-              <el-icon><component :is="item.icon" /></el-icon>
-              <template #title>{{ item.title }}</template>
-            </el-menu-item>
-          </template>
-        </el-menu>
-      </el-aside>
-
-      <!-- 主内容 (Content) -->
-      <div class="main-wrapper">
-        <el-main class="main">
-          <router-view v-if="username" v-slot="{ Component }">
-            <transition name="fade" mode="out-in">
-              <component :is="Component" />
-            </transition>
-          </router-view>
-          <el-result
-            v-else-if="identityError"
-            icon="error"
-            title="无法确认管理员身份"
-            sub-title="请通过启用了 Authentik 的面板地址访问。"
-          />
-        </el-main>
-        
-        <!-- 底部版权 (Footer) -->
-        <div class="footer">
-          <span>ycgp · 原作者 code-gopher · </span>
-          <a href="https://github.com/code-gopher/gostPanel" target="_blank" rel="noopener noreferrer">
-            上游 Gost Panel
-          </a>
+      <main id="console-main" ref="mainContent" class="console-main" tabindex="-1">
+        <RouterView v-if="identity === 'ready'" />
+        <section v-else-if="identity === 'error'" class="ops-panel console-gate" role="alert">
+          <el-icon aria-hidden="true"><Lock /></el-icon>
+          <h1>无法确认管理员身份</h1>
+          <p>请通过启用了 Authentik 的面板地址访问。</p>
+          <el-button type="primary" @click="loadIdentity">重试身份验证</el-button>
+        </section>
+        <div v-else class="ops-panel console-gate" role="status" aria-live="polite">
+          <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
+          <p>正在确认管理员身份…</p>
         </div>
-      </div>
-    </el-container>
+      </main>
+
+      <footer class="console-footer">
+        <span>ycgp · 原作者 code-gopher</span>
+        <a href="https://github.com/code-gopher/gostPanel" target="_blank" rel="noopener noreferrer">上游 Gost Panel</a>
+        <span v-if="system.copyright && system.copyright !== upstream">{{ system.copyright }}</span>
+      </footer>
+    </div>
+
+    <el-drawer v-model="mobileMenu" direction="ltr" size="min(304px, 88vw)" title="管理导航" append-to-body destroy-on-close class="console-drawer">
+      <ConsoleNav :site-title="system.siteTitle" :logo-url="system.logoUrl" @navigate="mobileMenu = false" />
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { SwitchButton, Expand, Odometer, Monitor, Switch, Connection, Document, Setting } from '@element-plus/icons-vue'
-import { useSystemStore } from '@/store/system'
+import { Loading, Lock, Menu, SwitchButton, User } from '@element-plus/icons-vue'
 import { getUserInfo } from '@/api/auth'
+import ConsoleNav from '@/components/ConsoleNav.vue'
+import { useSystemStore } from '@/store/system'
 
 const route = useRoute()
-const systemStore = useSystemStore()
-
-const siteTitle = computed(() => systemStore.siteTitle)
-const logoUrl = computed(() => systemStore.logoUrl)
+const system = useSystemStore()
+const upstream = 'https://github.com/code-gopher/gostPanel'
+const mainContent = ref(null)
+const mobileMenu = ref(false)
 const username = ref('')
-const identityError = ref(false)
+const identity = ref('loading')
 
-onMounted(async () => {
+async function loadIdentity() {
+  identity.value = 'loading'
   try {
     const { data } = await getUserInfo()
     username.value = data.username
-    await systemStore.fetchSystemConfig()
+    identity.value = 'ready'
+    await system.fetchSystemConfig()
   } catch {
-    identityError.value = true
+    identity.value = 'error'
   }
-})
-
-// 菜单配置
-const menuItems = [
-  { path: '/dashboard', title: '仪表盘', icon: Odometer },
-  { path: '/nodes', title: '节点管理', icon: Monitor },
-  { path: '/rules', title: '规则管理', icon: Switch },
-  { path: '/tunnels', title: '隧道管理', icon: Connection },
-  { path: '/logs', title: '操作日志', icon: Document },
-  { path: '/system', title: '系统管理', icon: Setting }
-]
-
-// 侧边栏折叠
-const isCollapse = ref(false)
-const toggleCollapse = () => {
-  isCollapse.value = !isCollapse.value
 }
 
-// 移动端菜单
-const mobileMenuVisible = ref(false)
-const toggleMobileMenu = () => {
-  mobileMenuVisible.value = !mobileMenuVisible.value
-}
-
-// 当前路由
-const currentRoute = computed(() => route.path)
-const currentTitle = computed(() => {
-  const item = menuItems.find(m => m.path === route.path)
-  return item?.title || ''
-})
+onMounted(loadIdentity)
 </script>
 
 <style scoped>
-.layout-container {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+.console-shell {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: 224px minmax(0, 1fr);
 }
 
-.header {
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
-  height: 64px;
-  position: relative;
-  z-index: 10;
+.console-skip {
+  position: fixed;
+  z-index: 20;
+  top: 8px;
+  left: 8px;
+  padding: 9px 13px;
+  transform: translateY(-150%);
+  border-radius: 7px;
+  background: var(--ops-accent);
+  color: var(--ops-on-accent);
+  font-weight: 650;
 }
 
-.body-container {
-  flex: 1;
-  display: flex;
-  background-color: #f0f2f5;
-  overflow: hidden;
-}
+.console-skip:focus { transform: none; }
 
-.aside {
-  background-color: #fff !important;
-  margin: 16px 0 16px 16px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  overflow: hidden;
-  border-right: none;
-  transition: width 0.3s;
-}
-
-.sidebar-menu {
-  border-right: none;
-  height: 100%;
-}
-
-.main-wrapper {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.main {
-  flex: 1;
-  background: transparent;
-  padding: 0;
-  margin: 16px;
-  margin-bottom: 0;
-  display: flex;
-  flex-direction: column;
+.console-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100dvh;
   overflow-y: auto;
+  border-right: 1px solid var(--ops-border);
+  background: var(--ops-rail);
 }
 
-.logo {
-  font-size: 20px;
-  font-weight: 700;
-  color: #333;
-  margin-right: 32px;
+.console-workspace {
   display: flex;
+  min-height: 100dvh;
+  min-width: 0;
+  flex-direction: column;
+  --grid-line: color-mix(in srgb, var(--ops-border) 26%, transparent);
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    radial-gradient(ellipse 950px 430px at 91% -12%, var(--ops-inset), transparent 79%);
+  background-size: 28px 28px, 28px 28px, auto;
+}
+
+.console-topbar {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  border-bottom: 1px solid var(--ops-border);
+  background: var(--ops-rail);
+}
+
+.console-topbar__inner, .console-main, .console-footer {
+  width: 100%;
+  max-width: 1560px;
+  margin-inline: auto;
+  padding-inline: 28px;
+}
+
+.console-topbar__inner, .console-topbar__location, .console-crumb, .console-identity {
+  display: flex;
+  min-width: 0;
   align-items: center;
 }
 
-.logo-img {
-  width: 32px;
-  height: 32px;
-  margin-right: 10px;
-  border-radius: 4px;
+.console-topbar__inner { min-height: 56px; justify-content: space-between; gap: 10px; }
+.console-topbar__location, .console-crumb { gap: 10px; }
+.console-crumb { color: var(--ops-faint); font-size: 13px; }
+.console-crumb a { color: var(--ops-muted); text-decoration: none; white-space: nowrap; }
+.console-crumb a:hover { color: var(--ops-accent); }
+.console-crumb [aria-current] { color: var(--ops-text); font-weight: 600; white-space: nowrap; }
+
+.console-identity { gap: 9px; }
+.console-identity__text { display: grid; min-width: 0; line-height: 1.4; }
+.console-identity__text strong { overflow: hidden; max-width: 22ch; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.console-identity__text small { color: var(--ops-faint); font-size: 10px; white-space: nowrap; }
+
+.console-identity__avatar, .console-icon-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  background: var(--ops-panel);
+  color: var(--ops-muted);
+  font-size: 17px;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-}
+.console-identity__avatar { color: var(--ops-accent); }
+.console-icon-button:hover { border-color: var(--ops-accent-line); color: var(--ops-accent); }
+.console-menu-button { display: none; }
 
-.header-right {
-  display: flex;
-  align-items: center;
-}
+.console-main { flex: 1; min-width: 0; padding-block: 28px 36px; }
 
-.user-group {
-  display: flex;
-  align-items: center;
-}
-
-.username-box {
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 16px;
-  min-width: 100px;
-  border: 1px solid #d9d9d9;
-  border-right: none;
-  border-top-left-radius: 4px;
-  border-bottom-left-radius: 4px;
-  background: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: default;
-  color: #606266;
-}
-
-.user-icon-box {
-  height: 30px;
-  width: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #d9d9d9;
-  border-top-right-radius: 4px;
-  border-bottom-right-radius: 4px;
-  background: #fff;
-  color: #606266;
-  text-decoration: none;
-  cursor: pointer;
-  transition: all 0.3s;
-  font-size: 14px;
-  margin-left: -1px;
-}
-
-.user-icon-box:hover {
-  border-color: #409eff;
-  color: #409eff;
-  position: relative;
-  z-index: 1;
-}
-
-.footer {
+.console-gate {
+  display: grid;
+  min-height: 215px;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--ops-muted);
   text-align: center;
-  padding: 16px;
-  color: #909399;
-  font-size: 13px;
-  background-color: #f0f2f5;
 }
 
-.footer a {
-  color: #909399;
-  text-decoration: none;
-  transition: color 0.3s;
+.console-gate .el-icon { color: var(--ops-accent); font-size: 25px; }
+.console-gate h1 { color: var(--ops-text); font-size: 22px; }
+
+.console-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  padding-block: 14px 20px;
+  border-top: 1px solid var(--ops-border);
+  color: var(--ops-faint);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
-.footer a:hover {
-  color: #409eff;
+@media (max-width: 900px) {
+  .console-shell { display: block; }
+  .console-sidebar { display: none; }
+  .console-menu-button { display: grid; }
+  .console-icon-button { width: 44px; height: 44px; }
 }
 
-/* Transitions */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* ========== 移动端适配 ========== */
-@media screen and (max-width: 768px) {
-  .header {
-    padding: 0 12px;
-    height: 56px;
-  }
-  
-  .logo span {
-    display: none;
-  }
-  
-  .logo-img {
-    width: 28px;
-    height: 28px;
-  }
-  
-  .username-box {
-    display: none;
-  }
-  
-  .user-icon-box {
-    border-radius: 4px;
-    margin-left: 0;
-  }
-  
-  .aside {
-    position: fixed;
-    left: 0;
-    top: 56px;
-    bottom: 0;
-    z-index: 1000;
-    margin: 0;
-    border-radius: 0;
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
-  }
-  
-  .aside.mobile-show {
-    transform: translateX(0);
-  }
-  
-  .main {
-    margin: 8px;
-  }
-  
-  .footer {
-    padding: 12px;
-    font-size: 12px;
-  }
-  
-  .footer span {
-    display: block;
-  }
-}
-
-/* 汉堡菜单默认隐藏 */
-.menu-toggle {
-  display: none;
-}
-
-/* 遮罩层默认隐藏 */
-.mobile-overlay {
-  display: none;
-}
-
-/* 移动端显示汉堡菜单和遮罩层 */
-@media screen and (max-width: 768px) {
-  .menu-toggle {
-    display: flex !important;
-    font-size: 28px;
-    color: #303133;
-    cursor: pointer;
-    padding: 8px;
-    margin-right: 4px;
-  }
-  
-  .mobile-overlay {
-    display: block;
-    position: fixed;
-    top: 56px;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 999;
-  }
+@media (max-width: 640px) {
+  .console-topbar__inner, .console-main, .console-footer { padding-inline: 16px; }
+  .console-main { padding-block: 20px 28px; }
+  .console-topbar__location { gap: 8px; }
+  .console-crumb a, .console-crumb [aria-hidden], .console-identity__avatar { display: none; }
+  .console-identity__text strong { max-width: 12ch; }
 }
 </style>

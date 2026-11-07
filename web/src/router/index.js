@@ -12,7 +12,7 @@ const routes = [
                 path: 'dashboard',
                 name: 'Dashboard',
                 component: () => import('@/views/Dashboard.vue'),
-                meta: { title: '仪表盘', icon: 'Odometer' }
+                meta: { title: '运行总览', icon: 'Odometer' }
             },
             {
                 path: 'nodes',
@@ -31,12 +31,6 @@ const routes = [
                 name: 'Tunnels',
                 component: () => import('@/views/Tunnels.vue'),
                 meta: { title: '隧道管理', icon: 'Connection' }
-            },
-            {
-                path: 'logs',
-                name: 'Logs',
-                component: () => import('@/views/Logs.vue'),
-                meta: { title: '操作日志', icon: 'Document' }
             },
             {
                 path: 'logs',
