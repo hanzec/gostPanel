@@ -1,254 +1,238 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h3>节点管理</h3>
-    </div>
-    <el-card shadow="hover">
-      <!-- 搜索栏 -->
-      <div class="search-bar">
-        <div class="filters">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索节点名称或地址"
-            :prefix-icon="Search"
-            clearable
-            style="width: 250px"
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
-          />
-          <el-select v-model="searchStatus" placeholder="状态" clearable style="width: 120px" @change="handleSearch">
+  <div class="ops-page">
+    <PageHeader eyebrow="NODE INVENTORY" title="节点管理" description="登记 Gost 实例，检查 gRPC 连通性，并管理节点桥接服务。">
+      <template #actions>
+        <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
+        <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
+      </template>
+    </PageHeader>
+
+    <MetricStrip label="节点统计" :items="nodeMetrics" />
+
+    <section class="ops-panel inventory-panel" aria-labelledby="node-inventory-title">
+      <div class="inventory-heading">
+        <div>
+          <h2 id="node-inventory-title">节点清单</h2>
+          <p class="ops-muted">查看节点健康状态与累计上下行流量。</p>
+        </div>
+        <span class="inventory-badge ops-mono">gRPC / TLS</span>
+      </div>
+
+      <form class="ops-toolbar inventory-filters" aria-label="筛选节点" @submit.prevent="handleSearch">
+        <div class="inventory-field">
+          <label for="node-keyword">节点名称</label>
+          <el-input id="node-keyword" v-model="searchKeyword" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
+        </div>
+        <div class="inventory-field">
+          <label for="node-status">健康状态</label>
+          <el-select id="node-status" v-model="searchStatus" placeholder="全部状态" clearable @change="handleSearch">
             <el-option label="在线" value="online" />
             <el-option label="离线" value="offline" />
+            <el-option label="异常" value="error" />
           </el-select>
-          <el-button :icon="Search" @click="handleSearch">搜索</el-button>
-          <el-button :icon="Refresh" @click="fetchData">刷新</el-button>
         </div>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
+        <el-button native-type="submit" :icon="Search">筛选</el-button>
+      </form>
+
+      <div v-if="loadError" class="inventory-error" role="alert">
+        <span>无法加载节点清单，请重试。</span>
+        <el-button :loading="loading" @click="fetchData()">重新加载</el-button>
       </div>
 
-      <!-- 表格 -->
-      <el-table :data="nodeList" v-loading="loading" style="width: 100%" border>
-        <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column prop="name" label="节点名称" min-width="120" align="center" show-overflow-tooltip />
-        <el-table-column prop="address" label="IP/域名" min-width="150" align="center" show-overflow-tooltip />
-        <el-table-column prop="port" label="gRPC 端口" width="110" align="center" />
-
-        <el-table-column prop="total_bytes" label="总流量" width="120" align="center">
-          <template #default="{ row }">
-            {{ formatBytes(row.total_bytes || 0) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="input_bytes" label="上传流量" width="120" align="center">
-          <template #default="{ row }">
-            <span style="color: #67c23a">{{ formatBytes(row.input_bytes || 0) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="output_bytes" label="下载流量" width="120" align="center">
-          <template #default="{ row }">
-            <span style="color: #409eff">{{ formatBytes(row.output_bytes || 0) }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="status" label="状态" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'online' ? 'success' : 'danger'" size="small">
-              {{ row.status === 'online' ? '在线' : '离线' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="last_check_at" label="最后检查" width="170" align="center">
-          <template #default="{ row }">
-            {{ row.last_check_at ? new Date(row.last_check_at).toLocaleString() : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="300" align="center" fixed="right">
-          <template #default="{ row }">
-            <el-button v-if="row.status !== 'online'" type="warning" link size="small" @click="showInstallCommand(row)">安装</el-button>
-            <el-button v-if="row.status === 'online'" type="success" link size="small" @click="handleViewConfig(row)">配置</el-button>
-            <el-button type="primary" link size="small" @click="openDialog(row)">编辑</el-button>
-            <el-button type="info" link size="small" @click="handleCopy(row)">复制</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div class="pagination">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          @size-change="fetchData"
-          @current-change="fetchData"
-        />
+      <div v-if="loading && !nodeList.length && !loadError" class="inventory-state" role="status">
+        <el-skeleton :rows="4" animated />
+        <span class="ops-muted">正在加载节点</span>
       </div>
-    </el-card>
+      <div v-else-if="!nodeList.length && !loadError" class="inventory-state">
+        <el-icon class="inventory-state-icon" aria-hidden="true"><Monitor /></el-icon>
+        <p>{{ filtered ? '没有匹配的节点' : '尚未添加节点' }}</p>
+        <span class="ops-muted">{{ filtered ? '调整关键字或状态后重试。' : '先登记一个 Gost 实例，再生成安装命令。' }}</span>
+        <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
+        <el-button v-else type="primary" @click="openDialog()">添加节点</el-button>
+      </div>
+      <div v-else-if="nodeList.length" class="ops-table-scroll inventory-scroll" :aria-busy="loading">
+        <table class="inventory-table" role="table" aria-labelledby="node-inventory-title">
+          <thead role="rowgroup">
+            <tr role="row">
+              <th scope="col" role="columnheader">实例</th>
+              <th scope="col" role="columnheader">连接地址</th>
+              <th scope="col" role="columnheader">状态</th>
+              <th scope="col" role="columnheader">累计流量</th>
+              <th scope="col" role="columnheader">操作</th>
+            </tr>
+          </thead>
+          <tbody role="rowgroup">
+            <tr v-for="node in nodeList" :key="node.id" role="row">
+              <td class="inventory-resource" role="cell">
+                <span class="inventory-row-name">
+                  <el-icon class="inventory-row-icon" aria-hidden="true"><Monitor /></el-icon>
+                  <strong>{{ node.name }}</strong>
+                </span>
+                <span class="inventory-secondary ops-mono ops-muted">#{{ node.id }}</span>
+              </td>
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">gRPC 地址</span>
+                <strong class="ops-mono">{{ nodeEndpoint(node) }}</strong>
+                <span class="inventory-secondary ops-muted">检查 · {{ node.last_check_at ? formatTime(node.last_check_at) : '待检查' }}</span>
+              </td>
+              <td class="inventory-status" role="cell">
+                <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">
+                  {{ nodeStates[node.status]?.label || '未知' }}
+                </span>
+              </td>
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">累计流量</span>
+                <strong class="ops-mono">{{ formatBytes(node.total_bytes) }}</strong>
+                <span class="inventory-secondary ops-muted">
+                  入 <span class="ops-mono">{{ formatBytes(node.input_bytes) }}</span>
+                  <span aria-hidden="true"> · </span>
+                  出 <span class="ops-mono">{{ formatBytes(node.output_bytes) }}</span>
+                </span>
+              </td>
+              <td class="inventory-actions-cell" role="cell">
+                <div class="inventory-actions">
+                  <el-button @click="showInstallCommand(node)">安装</el-button>
+                  <el-button @click="handleViewConfig(node)">配置</el-button>
+                  <el-dropdown trigger="click" @command="handleNodeAction($event, node)">
+                    <el-button :aria-label="'节点 ' + node.name + ' 的更多操作'">
+                      更多<el-icon aria-hidden="true"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="edit">编辑节点</el-dropdown-item>
+                        <el-dropdown-item command="copy">复制节点</el-dropdown-item>
+                        <el-dropdown-item command="delete" divided class="inventory-danger">删除节点</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <!-- 添加/编辑对话框 -->
+      <div v-if="total" class="ops-pagination inventory-pagination">
+        <span class="ops-muted">共 {{ total }} 个节点</span>
+        <div class="inventory-page-controls">
+          <el-select v-model="pageSize" class="inventory-page-size" aria-label="每页节点数" @change="handleSearch">
+            <el-option v-for="size in [10, 20, 50, 100]" :key="size" :label="size + ' 条/页'" :value="size" />
+          </el-select>
+          <el-pagination
+            v-model:current-page="page"
+            :page-size="pageSize"
+            :total="total"
+            :pager-count="3"
+            layout="prev, pager, next"
+            @current-change="fetchData()"
+          />
+        </div>
+      </div>
+    </section>
+
     <el-dialog
       v-model="dialogVisible"
       :title="isEdit ? '编辑节点' : '添加节点'"
-      width="600px"
+      width="min(600px, calc(100vw - 24px))"
       :close-on-click-modal="false"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
-        <el-form-item label="节点名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入节点名称" :prefix-icon="Management" />
-        </el-form-item>
-        <el-row :gutter="20">
-          <el-col :span="24" :sm="12">
-            <el-form-item label="IP/域名" prop="address">
-              <el-input v-model="form.address" placeholder="例如: 1.2.3.4" :prefix-icon="Link" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24" :sm="12">
-            <el-form-item label="gRPC 端口" prop="port">
-              <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-        
-        <el-row :gutter="20">
-          <el-col :span="24" :sm="12">
-            <el-form-item label="认证用户" prop="username">
-              <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="24" :sm="12">
-            <el-form-item label="认证密码" prop="password">
-              <el-input v-model="form.password" type="password" show-password placeholder="密码" :prefix-icon="Lock" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item label="备注说明" prop="remark">
-          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="备注信息" />
-        </el-form-item>
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="handleSubmit">
+        <div class="inventory-form-grid">
+          <el-form-item label="节点名称" prop="name" class="inventory-form-wide">
+            <el-input v-model="form.name" placeholder="例如 华东入口" />
+          </el-form-item>
+          <el-form-item label="IP 或域名" prop="address">
+            <el-input v-model="form.address" placeholder="gost.example.com" />
+          </el-form-item>
+          <el-form-item label="gRPC 端口" prop="port">
+            <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="认证用户名" prop="username">
+            <el-input v-model="form.username" autocomplete="username" />
+          </el-form-item>
+          <el-form-item label="认证密码" prop="password">
+            <el-input v-model="form.password" type="password" show-password autocomplete="new-password" />
+          </el-form-item>
+          <el-form-item label="备注" prop="remark" class="inventory-form-wide">
+            <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录节点用途或部署位置" />
+          </el-form-item>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">确定</el-button>
+        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加节点' }}</el-button>
       </template>
     </el-dialog>
 
-    <!-- 配置对话框 -->
-    <el-dialog v-model="configDialogVisible" title="节点配置" width="800px">
-      <el-tabs v-model="configActiveTab" type="border-card">
-        <el-tab-pane label="服务(Services)" name="services">
-          <el-table :data="nodeConfig?.services || []" style="width: 100%" border size="small">
-             <el-table-column prop="name" label="名称" width="150" />
-             <el-table-column prop="addr" label="监听地址" width="180" />
-             <el-table-column prop="listener.type" label="协议" width="100">
-               <template #default="{ row }">
-                 <el-tag size="small">{{ row.handler?.type || '-' }}</el-tag>
-               </template>
-             </el-table-column>
-             <el-table-column prop="handler.chain" label="关联链" />
-             <el-table-column prop="forwarder.nodes" label="转发目标">
-                <template #default="{ row }">
-                   <span v-if="row.forwarder?.nodes?.length">{{ row.forwarder.nodes.length }} 个目标</span>
-                   <span v-else>-</span>
-                </template>
-             </el-table-column>
-             <el-table-column type="expand" label="详情" width="60">
-                <template #default="{ row }">
-                   <pre style="padding: 10px; background: #f5f7fa; border-radius: 4px; font-size: 12px;">{{ JSON.stringify(row, null, 2) }}</pre>
-                </template>
-             </el-table-column>
-          </el-table>
-        </el-tab-pane>
-        
-        <el-tab-pane label="转发链(Chains)" name="chains">
-          <el-table :data="nodeConfig?.chains || []" style="width: 100%" border size="small">
-             <el-table-column prop="name" label="名称" width="150" />
-             <el-table-column label="跳数 (Hops)">
-                <template #default="{ row }">
-                   {{ row.hops?.length || 0 }}
-                </template>
-             </el-table-column>
-             <el-table-column type="expand" label="详情" width="60">
-                <template #default="{ row }">
-                   <pre style="padding: 10px; background: #f5f7fa; border-radius: 4px; font-size: 12px;">{{ JSON.stringify(row, null, 2) }}</pre>
-                </template>
-             </el-table-column>
-          </el-table>
-        </el-tab-pane>
-
-
-
-        <el-tab-pane label="观察器(Observers)" name="observers">
-           <el-table :data="nodeConfig?.observers || []" style="width: 100%" border size="small">
-             <el-table-column prop="name" label="名称" width="150" />
-             <el-table-column prop="plugin.type" label="类型" width="100" />
-             <el-table-column prop="plugin.addr" label="地址" />
-             <el-table-column type="expand" label="详情" width="60">
-                <template #default="{ row }">
-                   <pre style="padding: 10px; background: #f5f7fa; border-radius: 4px; font-size: 12px;">{{ JSON.stringify(row, null, 2) }}</pre>
-                </template>
-             </el-table-column>
-          </el-table>
+    <el-dialog v-model="configDialogVisible" :title="'节点配置 · ' + (configNode?.name || '')" width="min(760px, calc(100vw - 24px))">
+      <div v-if="configLoading" class="inventory-state" role="status">
+        <el-skeleton :rows="4" animated />
+        <span class="ops-muted">正在读取节点配置</span>
+      </div>
+      <div v-else-if="configError" class="inventory-error" role="alert">
+        <span>无法读取该节点的配置。</span>
+        <el-button @click="handleViewConfig(configNode)">重新加载</el-button>
+      </div>
+      <el-tabs v-else v-model="configActiveTab" stretch>
+        <el-tab-pane v-for="tab in configTabs" :key="tab.name" :label="tab.label" :name="tab.name">
+          <p v-if="!nodeConfig?.[tab.name]?.length" class="config-empty ops-muted">暂无{{ tab.label }}</p>
+          <details v-for="entry in nodeConfig?.[tab.name] || []" :key="entry.name" class="config-entry">
+            <summary>
+              <strong>{{ entry.name || '未命名' }}</strong>
+              <span class="ops-mono ops-muted">{{ configSummary(tab.name, entry) }}</span>
+            </summary>
+            <pre class="config-code">{{ JSON.stringify(entry, null, 2) }}</pre>
+          </details>
         </el-tab-pane>
       </el-tabs>
+      <template #footer>
+        <el-button @click="configDialogVisible = false">关闭</el-button>
+      </template>
     </el-dialog>
 
-    <!-- 安装脚本对话框 -->
-    <el-dialog v-model="installDialogVisible" :title="'安装节点: ' + currentInstallNode?.name" width="650px" :close-on-click-modal="false">
-      <el-alert type="info" :closable="false" style="margin-bottom: 20px;">
-        <template #title>
-          在目标服务器上准备节点 TLS 证书和私钥，再运行命令安装 Gost 和 ycgp 节点桥接服务。
-        </template>
-      </el-alert>
-
-      <!-- 节点配置信息 -->
-      <div class="node-info-section" v-if="currentInstallNode">
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="节点 ID">{{ currentInstallNode.id }}</el-descriptions-item>
-          <el-descriptions-item label="gRPC 端口">{{ currentInstallNode.port }}</el-descriptions-item>
-        </el-descriptions>
-      </div>
-
-      <el-form :model="installSettings" label-width="135px">
-        <el-form-item label="面板上报地址">
-          <el-input v-model="installSettings.reportAddress" placeholder="panel.example.com:39101" />
-        </el-form-item>
-        <el-form-item label="节点证书路径">
-          <el-input v-model="installSettings.tlsCert" />
-        </el-form-item>
-        <el-form-item label="节点私钥路径">
-          <el-input v-model="installSettings.tlsKey" />
-        </el-form-item>
-        <el-form-item label="面板 CA 路径">
-          <el-input v-model="installSettings.reportCA" placeholder="使用私有 CA 时填写" />
-        </el-form-item>
-        <el-form-item label="本机管理端口">
-          <el-input-number v-model="installSettings.adminPort" :min="1" :max="65535" />
-        </el-form-item>
-        <el-form-item label="本机观察器端口">
-          <el-input-number v-model="installSettings.observerPort" :min="1" :max="65535" />
-        </el-form-item>
+    <el-dialog
+      v-model="installDialogVisible"
+      :title="'安装节点 · ' + (currentInstallNode?.name || '')"
+      width="min(680px, calc(100vw - 24px))"
+      :close-on-click-modal="false"
+    >
+      <p class="install-intro ops-muted">在目标服务器上准备 TLS 证书和私钥，再以 root 身份执行安装命令。</p>
+      <dl v-if="currentInstallNode" class="install-meta">
+        <div><dt>节点 ID</dt><dd class="ops-mono">#{{ currentInstallNode.id }}</dd></div>
+        <div><dt>gRPC 地址</dt><dd class="ops-mono">{{ nodeEndpoint(currentInstallNode) }}</dd></div>
+      </dl>
+      <el-form :model="installSettings" label-position="top">
+        <div class="inventory-form-grid">
+          <el-form-item label="面板上报地址" class="inventory-form-wide">
+            <el-input v-model="installSettings.reportAddress" placeholder="panel.example.com:39101" />
+          </el-form-item>
+          <el-form-item label="节点证书路径">
+            <el-input v-model="installSettings.tlsCert" />
+          </el-form-item>
+          <el-form-item label="节点私钥路径">
+            <el-input v-model="installSettings.tlsKey" />
+          </el-form-item>
+          <el-form-item label="面板 CA 路径" class="inventory-form-wide">
+            <el-input v-model="installSettings.reportCA" placeholder="使用私有 CA 时填写" />
+          </el-form-item>
+          <el-form-item label="本机管理端口">
+            <el-input-number v-model="installSettings.adminPort" :min="1" :max="65535" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="本机观察器端口">
+            <el-input-number v-model="installSettings.observerPort" :min="1" :max="65535" controls-position="right" />
+          </el-form-item>
+        </div>
       </el-form>
 
-      <div class="install-command-section">
-        <div class="command-header">
-          <span class="command-title">一键安装命令</span>
-          <el-button type="primary" size="small" :icon="CopyDocument" :disabled="!installCommand" @click="copyInstallCommand">复制命令</el-button>
+      <section class="install-command" aria-labelledby="node-install-command">
+        <div class="install-command-heading">
+          <h3 id="node-install-command">安装命令</h3>
+          <el-button :icon="CopyDocument" :disabled="!installCommand" @click="copyInstallCommand">复制命令</el-button>
         </div>
-        <div class="command-box">
-          <code>{{ installCommand || '请填写地址和证书路径，并为三个端口选择不同的值。' }}</code>
-        </div>
-      </div>
-
-      <div class="install-tips">
-        <p><strong>说明：</strong></p>
-        <ol>
-          <li>复制上方命令，在目标服务器上以 <strong>root</strong> 用户执行</li>
-          <li>节点证书必须覆盖面板中登记的节点 IP 或域名</li>
-          <li>同一服务器上为各实例分配不同的 gRPC、管理和观察器端口</li>
-        </ol>
-      </div>
+        <pre v-if="installCommand" class="config-code"><code>{{ installCommand }}</code></pre>
+        <p v-else class="ops-muted">填写上报地址和 TLS 路径，并为 gRPC、管理与观察器配置不同端口。</p>
+      </section>
+      <p class="install-hint ops-muted">证书须覆盖已登记的节点地址。同一台服务器运行多个实例时，请为每个实例分配独立端口。</p>
 
       <template #footer>
         <el-button @click="installDialogVisible = false">关闭</el-button>
@@ -260,37 +244,64 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Refresh, CopyDocument, Management, Link, User, Lock } from '@element-plus/icons-vue'
+import { ArrowDown, CircleCheck, CircleClose, CopyDocument, Monitor, Plus, Refresh, Search, Warning } from '@element-plus/icons-vue'
+import MetricStrip from '@/components/MetricStrip.vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { getNodeList, createNode, updateNode, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
 
-// 安装脚本 URL（GitHub Raw）
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/gostPanel/master/scripts/install_node.sh'
+const nodeStates = {
+  online: { label: '在线', icon: CircleCheck, tone: 'success' },
+  offline: { label: '离线', icon: CircleClose },
+  error: { label: '异常', icon: Warning, tone: 'danger' }
+}
+const configTabs = [
+  { name: 'services', label: '服务' },
+  { name: 'chains', label: '转发链' },
+  { name: 'observers', label: '观察器' }
+]
+const dateFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
 
-// 列表数据
 const nodeList = ref([])
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
-const total = ref(0)
-
-// 搜索
+const total = ref(null)
 const searchKeyword = ref('')
 const searchStatus = ref('')
+const filtered = computed(() => Boolean(searchKeyword.value.trim() || searchStatus.value))
+const nodeMetrics = computed(() => [
+  { label: '筛选结果', value: total.value, detail: '全部匹配节点', icon: Monitor },
+  ...Object.entries(nodeStates).map(([status, state]) => ({
+    ...state,
+    value: total.value === null ? null : nodeList.value.filter(node => node.status === status).length,
+    detail: '当前页'
+  }))
+])
 
-// 对话框
 const dialogVisible = ref(false)
-const isEdit = ref(false)
 const editId = ref(null)
+const isEdit = computed(() => editId.value !== null)
 const submitLoading = ref(false)
 const formRef = ref(null)
+const form = reactive({ name: '', address: '', port: 39000, username: '', password: '', remark: '' })
+const rules = {
+  name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
+  address: [{ required: true, message: '请输入 IP 或域名', trigger: 'blur' }],
+  port: [{ required: true, message: '请输入端口', trigger: 'blur' }],
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+}
 
-// 配置对话框
 const configDialogVisible = ref(false)
 const configActiveTab = ref('services')
+const configNode = ref(null)
 const nodeConfig = ref(null)
+const configLoading = ref(false)
+const configError = ref(false)
 
-// 安装脚本对话框
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
 const installSettings = reactive({
@@ -302,18 +313,29 @@ const installSettings = reactive({
   observerPort: 39002
 })
 
-// 格式化流量
 const formatBytes = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
+  if (!bytes) return '0 B'
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1)
+  return Number((bytes / 1024 ** index).toFixed(2)) + ' ' + sizes[index]
+}
+
+const formatTime = (value) => dateFormatter.format(new Date(value))
+
+const nodeEndpoint = (node) => {
+  const address = node.address.includes(':') && !node.address.startsWith('[') ? '[' + node.address + ']' : node.address
+  return address + ':' + node.port
+}
+
+const configSummary = (tab, entry) => {
+  if (tab === 'chains') return (entry.hops?.length || 0) + ' 跳'
+  if (tab === 'observers') return [entry.plugin?.type, entry.plugin?.addr].filter(Boolean).join(' · ')
+  return [entry.addr, entry.handler?.type, entry.handler?.chain, (entry.forwarder?.nodes?.length || 0) + ' 个目标']
+    .filter(Boolean).join(' · ')
 }
 
 const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "'"
 
-// 生成安装命令（根据当前节点配置）
 const installCommand = computed(() => {
   const node = currentInstallNode.value
   const { reportAddress, tlsCert, tlsKey, reportCA, adminPort, observerPort } = installSettings
@@ -336,7 +358,6 @@ const installCommand = computed(() => {
     args.map(([flag, value]) => flag + ' ' + shellQuote(value)).join(' ')
 })
 
-// 显示安装命令对话框
 const showInstallCommand = async (row) => {
   currentInstallNode.value = row
   installDialogVisible.value = true
@@ -350,38 +371,20 @@ const showInstallCommand = async (row) => {
   }
 }
 
-// 复制安装命令
 const copyInstallCommand = async () => {
   try {
     await navigator.clipboard.writeText(installCommand.value)
-    ElMessage.success('安装命令已复制到剪贴板')
-  } catch (error) {
-    ElMessage.error('复制失败，请手动复制')
+    ElMessage.success('安装命令已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动选择命令')
   }
 }
-
-const form = reactive({
-  name: '',
-  address: '',
-  port: 39000,
-  username: '',
-  password: '',
-  remark: ''
-})
 
 const generatePassword = () =>
   Array.from(crypto.getRandomValues(new Uint8Array(18)), (value) => value.toString(16).padStart(2, '0')).join('')
 
-const rules = {
-  name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
-  address: [{ required: true, message: '请输入 IP 或域名', trigger: 'blur' }],
-  port: [{ required: true, message: '请输入端口', trigger: 'blur' }],
-  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
-}
-
-// 获取数据
 const fetchData = async (isSilent = false) => {
+  if (isSilent && (loading.value || loadError.value)) return
   if (!isSilent) loading.value = true
   try {
     const res = await getNodeList({
@@ -392,325 +395,153 @@ const fetchData = async (isSilent = false) => {
     })
     nodeList.value = res.data.list || []
     total.value = res.data.total || 0
-  } catch (error) {
-    console.error('获取节点列表失败:', error)
+    loadError.value = false
+  } catch {
+    loadError.value = true
   } finally {
     if (!isSilent) loading.value = false
   }
 }
 
-// 搜索
 const handleSearch = () => {
   page.value = 1
   fetchData()
 }
 
-// 打开对话框
+const clearFilters = () => {
+  searchKeyword.value = ''
+  searchStatus.value = ''
+  handleSearch()
+}
+
 const openDialog = (row = null) => {
-  isEdit.value = !!row
-  editId.value = row?.id || null
-  
-  if (row) {
-    Object.assign(form, {
-      name: row.name,
-      address: row.address,
-      port: row.port,
-      username: row.username,
-      password: row.password,
-      remark: row.remark
-    })
-  } else {
-    Object.assign(form, {
-      name: '',
-      address: '127.0.0.1',
-      port: 39000,
-      username: 'admin',
-      password: generatePassword(),
-      remark: ''
-    })
-  }
-  
-  dialogVisible.value = true
-}
-
-// 提交表单
-const handleSubmit = async () => {
-  if (!formRef.value) return
-  
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    
-    submitLoading.value = true
-    try {
-      if (isEdit.value) {
-        await updateNode(editId.value, form)
-        ElMessage.success('更新成功')
-      } else {
-        await createNode(form)
-        ElMessage.success('创建成功')
-      }
-      dialogVisible.value = false
-      fetchData()
-    } catch (error) {
-      console.error('操作失败:', error)
-    } finally {
-      submitLoading.value = false
-    }
-  })
-}
-
-// 删除节点
-const handleDelete = async (row) => {
-  try {
-    await ElMessageBox.confirm(`确定要删除节点 "${row.name}" 吗？`, '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    
-    await deleteNode(row.id)
-    ElMessage.success('删除成功')
-    fetchData()
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('删除失败:', error)
-    }
-  }
-}
-
-// 复制节点
-const handleCopy = (row) => {
-  isEdit.value = false
-  editId.value = null
-  
-  Object.assign(form, {
+  editId.value = row?.id ?? null
+  Object.assign(form, row ? {
     name: row.name,
     address: row.address,
     port: row.port,
-    username: row.username || '',
-    password: generatePassword(),
+    username: row.username,
+    password: row.password,
     remark: row.remark || ''
+  } : {
+    name: '',
+    address: '127.0.0.1',
+    port: 39000,
+    username: 'admin',
+    password: generatePassword(),
+    remark: ''
   })
-  
+  formRef.value?.clearValidate()
   dialogVisible.value = true
 }
 
-// 查看配置
+const handleSubmit = async () => {
+  if (!formRef.value || submitLoading.value) return
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
+
+  submitLoading.value = true
+  try {
+    if (isEdit.value) {
+      await updateNode(editId.value, form)
+      ElMessage.success('节点已更新')
+    } else {
+      await createNode(form)
+      ElMessage.success('节点已添加')
+    }
+    dialogVisible.value = false
+    fetchData()
+  } catch (error) {
+    console.error('保存节点失败:', error)
+  } finally {
+    submitLoading.value = false
+  }
+}
+
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要删除节点「' + row.name + '」吗？', '删除节点', {
+      confirmButtonText: '删除节点',
+      confirmButtonClass: 'el-button--danger',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await deleteNode(row.id)
+    ElMessage.success('节点已删除')
+    fetchData()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') console.error('删除节点失败:', error)
+  }
+}
+
+const handleNodeAction = (action, row) => {
+  if (action === 'edit') openDialog(row)
+  if (action === 'delete') handleDelete(row)
+  if (action === 'copy') {
+    openDialog(row)
+    editId.value = null
+    form.name = row.name.slice(0, 95) + '-copy'
+    form.password = generatePassword()
+  }
+}
+
 const handleViewConfig = async (row) => {
+  configNode.value = row
+  configActiveTab.value = 'services'
+  configLoading.value = true
+  configError.value = false
+  configDialogVisible.value = true
   try {
     const res = await getNodeConfig(row.id)
     nodeConfig.value = res.data
-    configActiveTab.value = 'services'
-    configDialogVisible.value = true
-  } catch (error) {
-    console.error('获取配置失败:', error)
-    ElMessage.error('获取节点配置失败')
+  } catch {
+    configError.value = true
+  } finally {
+    configLoading.value = false
   }
 }
 
-
-
-
-// 定时刷新
-let refreshTimer = null
-
+let refreshTimer
 onMounted(() => {
   fetchData()
-  
-  // 每 5 秒刷新一次 (静默刷新)
-  refreshTimer = setInterval(() => {
-    fetchData(true)
-  }, 5000)
+  refreshTimer = setInterval(() => fetchData(true), 5000)
 })
-
-onBeforeUnmount(() => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-  }
-})
+onBeforeUnmount(() => clearInterval(refreshTimer))
 </script>
 
+<style scoped src="../inventory.css"></style>
+
 <style scoped>
-.page-container {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.page-header h3 {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.search-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.filters {
-  display: flex;
-  gap: 12px;
-}
-
-.pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
-/* 表格行高优化 */
-:deep(.el-table .el-table__cell) {
-  padding: 12px 0;
-}
-
-/* 安装命令相关样式 */
-.node-info-section {
-  margin-bottom: 20px;
-}
-
-.install-command-section {
-  margin-top: 24px;
-  padding: 16px;
-  background: #f5f7fa;
-  border-radius: 8px;
-}
-
-.command-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.command-title {
-  font-weight: 600;
-  color: #303133;
-}
-
-.command-box {
-  background: #1e1e1e;
+.config-empty { text-align: center; padding: 24px 12px; }
+.config-entry { border: 1px solid var(--ops-border); border-radius: 8px; margin-bottom: 8px; min-width: 0; }
+.config-entry summary { padding: 10px 12px; cursor: pointer; overflow-wrap: anywhere; }
+.config-entry summary > span { margin-left: 8px; font-size: 12px; }
+.config-code {
   border-radius: 6px;
-  padding: 16px;
-  overflow-x: auto;
-}
-
-.command-box code {
-  color: #4fc08d;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 13px;
-  word-break: break-all;
-  white-space: pre-wrap;
-}
-
-.install-tips {
-  margin-top: 20px;
-  padding: 12px;
-  background: #fdf6ec;
-  border-radius: 6px;
-  border-left: 4px solid #e6a23c;
-}
-
-.install-tips p {
-  margin: 0 0 8px 0;
-  color: #606266;
-}
-
-.install-tips ol {
+  background: var(--ops-inset);
+  color: var(--ops-text);
   margin: 0;
-  padding-left: 20px;
-  color: #606266;
+  padding: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.6 var(--ops-mono);
 }
-
-.install-tips li {
-  margin-bottom: 4px;
+.config-entry .config-code { margin: 0 8px 8px; }
+.install-intro { margin: 0 0 12px; }
+.install-meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  border-radius: 8px;
+  background: var(--ops-inset);
+  padding: 12px;
+  margin: 0 0 14px;
 }
-
-/* ========== 移动端适配 ========== */
-@media screen and (max-width: 768px) {
-  .page-header h3 {
-    font-size: 16px;
-    margin-bottom: 12px;
-  }
-  
-  .search-bar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-  
-  .filters {
-    flex-wrap: wrap;
-  }
-  
-  .filters .el-input,
-  .filters .el-select {
-    width: 100% !important;
-  }
-  
-  :deep(.el-dialog) {
-    width: 95% !important;
-    margin: 10px auto !important;
-  }
-  
-  :deep(.el-dialog__body) {
-    padding: 15px;
-  }
-  
-  :deep(.el-form-item) {
-    margin-bottom: 12px;
-    display: block !important;
-  }
-  
-  :deep(.el-form-item__label) {
-    float: none;
-    display: block;
-    text-align: left;
-    padding-bottom: 4px;
-    width: auto !important;
-    margin-bottom: 4px;
-  }
-  
-  :deep(.el-form-item__content) {
-    margin-left: 0 !important;
-    display: block !important;
-    width: 100% !important;
-  }
-  
-  :deep(.el-card__body) {
-    padding: 12px;
-    overflow-x: auto;
-  }
-  
-  :deep(.el-table) {
-    font-size: 12px;
-    min-width: 500px;
-  }
-  
-  .command-box code {
-    font-size: 11px;
-  }
-  
-  /* 操作列按钮调整 */
-  :deep(.el-table .cell) {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 4px;
-    padding: 0 4px;
-  }
-  :deep(.el-button--small) {
-    margin-left: 0 !important;
-    padding: 2px 4px;
-  }
-}
+.install-meta dt { font-size: 12px; color: var(--ops-muted); }
+.install-meta dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.install-command { border: 1px solid var(--ops-border); border-radius: 8px; padding: 12px; }
+.install-command-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.install-command-heading h3 { font-size: 14px; margin: 0; }
+.install-command > :not(:first-child) { margin-top: 8px; }
+.install-hint { font-size: 12px; margin: 10px 0 0; }
 </style>
