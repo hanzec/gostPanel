@@ -1,268 +1,384 @@
 <template>
-  <div class="system-container">
-    <el-card class="box-card">
-      <template #header>
-        <div class="card-header">
-          <span>系统设置</span>
-        </div>
+  <div class="ops-page settings-page">
+    <PageHeader eyebrow="CONFIGURATION" title="系统设置" description="管理面板品牌、SMTP 邮件和数据库备份。">
+      <template #actions>
+        <el-button type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
+          保存设置
+        </el-button>
       </template>
+    </PageHeader>
 
-      <el-tabs v-model="activeTab" class="demo-tabs">
-        <!-- 面板配置 -->
-        <el-tab-pane label="面板配置" name="config">
-          <el-form ref="configFormRef" :model="configForm" label-width="120px" class="setting-form">
-            <el-form-item label="站点标题" prop="siteTitle">
-              <el-input v-model="configForm.siteTitle" placeholder="ycgp" />
-            </el-form-item>
+    <div v-if="loading" class="ops-panel settings-state" role="status" aria-label="正在加载系统设置">
+      <el-skeleton :rows="5" animated />
+    </div>
+    <div v-else-if="loadError" class="ops-panel settings-state settings-feedback" role="alert">
+      <div><strong>无法加载系统设置</strong><p>请重新获取当前配置后再编辑。</p></div>
+      <el-button @click="loadSettings">重试</el-button>
+    </div>
 
-            <el-form-item label="Logo地址" prop="logoUrl">
-              <el-input v-model="configForm.logoUrl" placeholder="请输入Logo URL" />
-            </el-form-item>
-            <el-form-item label="版权信息" prop="copyright">
-              <el-input v-model="configForm.copyright" placeholder="请输入版权信息" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" :loading="loading" @click="handleSave('config')">保存设置</el-button>
-            </el-form-item>
-          </el-form>
-        </el-tab-pane>
+    <template v-else-if="ready">
+      <div v-if="saveError" class="ops-panel settings-state settings-feedback" role="alert">
+        <div><strong>设置保存失败</strong><p>输入内容仍在表单中，可以再次保存。</p></div>
+      </div>
 
-        <!-- 邮箱配置 -->
-        <el-tab-pane label="邮箱配置" name="email">
-          <el-form ref="emailFormRef" :model="emailForm" label-width="120px" class="setting-form">
-            <el-form-item label="SMTP服务器" prop="host">
-              <el-input v-model="emailForm.host" placeholder="例如: smtp.gmail.com" />
-            </el-form-item>
-            <el-form-item label="SMTP端口" prop="port">
-              <el-input v-model.number="emailForm.port" placeholder="例如: 465 或 587" />
-            </el-form-item>
-            <el-form-item label="用户名" prop="username">
-              <el-input v-model="emailForm.username" placeholder="请输入SMTP用户名" />
-            </el-form-item>
-            <el-form-item label="密码" prop="password">
-              <el-input v-model="emailForm.password" type="password" show-password placeholder="请输入SMTP密码" />
-            </el-form-item>
-            <el-form-item label="发件人邮箱" prop="fromEmail">
-              <el-input v-model="emailForm.fromEmail" placeholder="例如: noreply@example.com" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" :loading="loading" @click="handleSave('email')">保存设置</el-button>
-              <el-button @click="handleTestEmail">测试邮件</el-button>
-            </el-form-item>
-          </el-form>
-        </el-tab-pane>
+      <div class="settings-layout">
+        <section class="ops-panel settings-workspace" aria-label="配置表单">
+          <el-tabs v-model="activeTab" class="settings-tabs">
+            <el-tab-pane name="config" label="面板品牌">
+              <header class="settings-section-heading">
+                <h2>品牌与显示</h2>
+                <p>设置管理员看到的面板标识。</p>
+              </header>
+              <el-form :model="configForm" label-position="top" :disabled="saving" @submit.prevent="saveSettings">
+                <div class="settings-fields">
+                  <el-form-item label="站点标题" prop="siteTitle">
+                    <el-input v-model="configForm.siteTitle" placeholder="ycgp" />
+                  </el-form-item>
+                  <el-form-item label="Logo 地址" prop="logoUrl">
+                    <el-input v-model.trim="configForm.logoUrl" inputmode="url" placeholder="https://example.com/logo.svg" />
+                  </el-form-item>
+                  <el-form-item class="settings-full-field" label="版权信息" prop="copyright">
+                    <el-input v-model="configForm.copyright" placeholder="输入版权信息" />
+                  </el-form-item>
+                </div>
+              </el-form>
+            </el-tab-pane>
 
+            <el-tab-pane name="email" label="SMTP 邮件">
+              <header class="settings-section-heading">
+                <h2>邮件连接</h2>
+                <p>填写邮件服务器和发件人信息，发送测试邮件验证连接。</p>
+              </header>
+              <el-form :model="emailForm" label-position="top" :disabled="saving" @submit.prevent="saveSettings">
+                <div class="settings-fields">
+                  <el-form-item label="SMTP 服务器" prop="host">
+                    <el-input v-model.trim="emailForm.host" placeholder="smtp.example.com" />
+                  </el-form-item>
+                  <el-form-item label="SMTP 端口" prop="port">
+                    <el-input-number v-model="emailForm.port" :min="1" :max="65535" :step="1" controls-position="right" placeholder="465 或 587" />
+                  </el-form-item>
+                  <el-form-item label="用户名" prop="username">
+                    <el-input v-model="emailForm.username" autocomplete="off" />
+                  </el-form-item>
+                  <el-form-item label="密码" prop="password">
+                    <el-input v-model="emailForm.password" type="password" show-password autocomplete="new-password" />
+                  </el-form-item>
+                  <el-form-item class="settings-full-field" label="发件人邮箱" prop="fromEmail">
+                    <el-input v-model.trim="emailForm.fromEmail" type="email" placeholder="noreply@example.com" />
+                  </el-form-item>
+                </div>
+              </el-form>
+              <div class="settings-section-actions">
+                <el-button :icon="Message" :disabled="saving" @click="openTestEmail">发送测试邮件</el-button>
+              </div>
+            </el-tab-pane>
 
+            <el-tab-pane name="backup" label="数据库备份">
+              <header class="settings-section-heading">
+                <h2>数据库备份</h2>
+                <p>配置备份策略，或手动创建一份当前数据库的备份。</p>
+              </header>
+              <div v-if="!backupSupported" class="settings-notice">
+                <el-icon aria-hidden="true"><InfoFilled /></el-icon>
+                <div>
+                  <strong>由数据库服务管理备份</strong>
+                  <p>面板内的自动备份和手动备份适用于 SQLite。</p>
+                </div>
+              </div>
+              <template v-else>
+                <el-form :model="backupForm" label-position="top" :disabled="saving || backupRunning" @submit.prevent="saveSettings">
+                  <div class="settings-fields backup-fields">
+                    <el-form-item label="自动备份" prop="autoBackup">
+                      <el-switch v-model="backupForm.autoBackup" aria-label="自动备份" />
+                      <span class="settings-field-hint">启用后每天生成一份备份。</span>
+                    </el-form-item>
+                    <el-form-item label="保留份数" prop="retentionCount">
+                      <el-input-number v-model="backupForm.retentionCount" :min="1" :max="100" :step="1" controls-position="right" />
+                      <span class="settings-field-hint">保留最近生成的备份文件。</span>
+                    </el-form-item>
+                  </div>
+                </el-form>
+                <div class="settings-section-actions">
+                  <el-button :icon="Coin" :loading="backupRunning" :disabled="saving" @click="createBackup">立即备份</el-button>
+                </div>
+              </template>
+            </el-tab-pane>
+          </el-tabs>
+        </section>
 
-        <!-- 备份 -->
-        <el-tab-pane label="备份" name="backup">
-          <el-alert v-if="!backupSupported" title="MySQL 备份由数据库服务负责" type="info" :closable="false" show-icon />
-          <el-form v-else ref="backupFormRef" :model="backupForm" label-width="120px" class="setting-form">
-            <el-form-item label="自动备份" prop="autoBackup">
-              <el-switch v-model="backupForm.autoBackup" />
-            </el-form-item>
-            <el-form-item label="保留份数" prop="retentionCount">
-              <el-input-number v-model="backupForm.retentionCount" :min="1" :max="100" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" :loading="loading" @click="handleSave('backup')">保存设置</el-button>
-              <el-divider direction="vertical" />
-              <el-button type="success" @click="handleBackupNow">立即备份</el-button>
-            </el-form-item>
-          </el-form>
-        </el-tab-pane>
-      </el-tabs>
-    </el-card>
+        <aside class="ops-panel settings-context" aria-label="当前配置说明">
+          <div class="settings-context-icon" aria-hidden="true"><el-icon><component :is="context.icon" /></el-icon></div>
+          <p class="settings-context-label ops-mono">{{ context.label }}</p>
+          <h2>{{ context.title }}</h2>
+          <p>{{ context.description }}</p>
+          <dl>
+            <div><dt>{{ context.factLabel }}</dt><dd>{{ context.factValue }}</dd></div>
+          </dl>
+        </aside>
+      </div>
+    </template>
 
-    <!-- 测试邮件弹窗 -->
-    <el-dialog v-model="testEmailVisible" title="发送测试邮件" width="400px">
-      <el-form :model="testEmailForm" label-width="80px">
-        <el-form-item label="收件人">
-          <el-input v-model="testEmailForm.toEmail" placeholder="请输入接收测试邮件的邮箱" />
+    <el-dialog v-model="testEmailVisible" title="发送测试邮件" width="min(440px, calc(100vw - 32px))" destroy-on-close>
+      <p class="settings-dialog-copy">使用当前邮件表单的连接参数发送测试邮件。</p>
+      <el-form
+        id="settings-test-email"
+        ref="testEmailFormRef"
+        :model="testEmailForm"
+        :rules="testEmailRules"
+        label-position="top"
+        :disabled="testEmailSending"
+        @submit.prevent="confirmTestEmail"
+      >
+        <el-form-item label="收件人邮箱" prop="toEmail">
+          <el-input v-model.trim="testEmailForm.toEmail" type="email" placeholder="admin@example.com" />
         </el-form-item>
+        <p v-if="testEmailError" class="settings-inline-error" role="alert">发送失败，请核对 SMTP 连接和发件人配置。</p>
       </el-form>
       <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="testEmailVisible = false">取消</el-button>
-          <el-button type="primary" :loading="testEmailLoading" @click="confirmTestEmail">
-            发送
-          </el-button>
-        </span>
+        <el-button @click="testEmailVisible = false">取消</el-button>
+        <el-button type="primary" native-type="submit" form="settings-test-email" :loading="testEmailSending">发送</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Coin, InfoFilled, Message, Monitor } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getSystemConfig, updateSystemConfig, sendTestEmail, backupSystem } from '@/api/system'
+import { backupSystem, getSystemConfig, sendTestEmail, updateSystemConfig } from '@/api/system'
+import PageHeader from '@/components/PageHeader.vue'
+import { useSystemStore } from '@/store/system'
 
+const systemStore = useSystemStore()
 const activeTab = ref('config')
-const loading = ref(false)
+const loading = ref(true)
+const saving = ref(false)
+const loadError = ref(false)
+const saveError = ref(false)
+const backupSupported = ref(false)
+const backupRunning = ref(false)
 const testEmailVisible = ref(false)
-const testEmailLoading = ref(false)
-const testEmailForm = reactive({
-    toEmail: ''
+const testEmailSending = ref(false)
+const testEmailError = ref(false)
+const testEmailFormRef = ref()
+const ready = computed(() => !loading.value && !loadError.value)
+
+const configForm = reactive({ siteTitle: '', logoUrl: '', copyright: '' })
+const emailForm = reactive({ host: '', port: undefined, username: '', password: '', fromEmail: '' })
+const backupForm = reactive({ autoBackup: false, retentionCount: 7 })
+const testEmailForm = reactive({ toEmail: '' })
+const testEmailRules = {
+  toEmail: [
+    { required: true, message: '请输入收件人邮箱', trigger: 'blur' },
+    { type: 'email', message: '请输入有效的邮箱地址', trigger: 'blur' }
+  ]
+}
+let savedLogSettings
+
+const context = computed(() => {
+  if (activeTab.value === 'email') {
+    return {
+      icon: Message, label: 'MAIL', title: '连接验证',
+      description: '测试邮件使用当前输入的连接参数。验证成功后，选择「保存设置」以应用修改。',
+      factLabel: '发件人', factValue: emailForm.fromEmail || '未配置'
+    }
+  }
+  if (activeTab.value === 'backup') {
+    return {
+      icon: Coin, label: 'BACKUP', title: '备份方式',
+      description: backupSupported.value ? 'SQLite 备份文件存放在面板服务的 backups 目录。' : '请使用数据库服务提供的工具创建和管理备份。',
+      factLabel: '管理方式', factValue: backupSupported.value ? '面板内备份' : '数据库服务'
+    }
+  }
+  return {
+    icon: Monitor, label: 'IDENTITY', title: '显示预览',
+    description: '站点标题和 Logo 保存后会应用到控制台导航。',
+    factLabel: '站点标题', factValue: configForm.siteTitle || systemStore.siteTitle
+  }
 })
 
-
-const emailForm = reactive({
-  host: '',
-  port: 465,
-  username: '',
-  password: '',
-  fromEmail: ''
-})
-
-const configForm = reactive({
-  siteTitle: 'ycgp',
-  logoUrl: '',
-  copyright: ''
-})
-
-
-
-const backupSupported = ref(true)
-const backupForm = reactive({
-  autoBackup: false,
-  retentionCount: 7
-})
-
-// 获取配置
-const fetchConfig = async () => {
-    loading.value = true
-    try {
-        const res = await getSystemConfig()
-        if (res.data) {
-            // 根据后端返回的数据结构填充表单
-            const { email, config, backup } = res.data
-            if (email) Object.assign(emailForm, email)
-            if (config) Object.assign(configForm, config)
-            if (backup) {
-                const { supported, autoBackup, retentionCount } = backup
-                backupSupported.value = supported
-                Object.assign(backupForm, { autoBackup, retentionCount })
-            }
-        }
-    } catch (error) {
-        console.error('获取系统配置失败:', error)
-    } finally {
-        loading.value = false
-    }
+async function loadSettings() {
+  loading.value = true
+  loadError.value = false
+  try {
+    const { data } = await getSystemConfig()
+    Object.assign(configForm, data.config)
+    Object.assign(emailForm, data.email, { port: data.email.port || undefined })
+    Object.assign(backupForm, { autoBackup: data.backup.autoBackup, retentionCount: data.backup.retentionCount })
+    savedLogSettings = data.log
+    backupSupported.value = data.backup.supported
+  } catch {
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
 }
 
-// 保存配置
-const handleSave = async (type) => {
-    loading.value = true
-    try {
-        let data = {}
-        // 根据当前tab类型构建提交数据
-        const payload = {
-            email: emailForm,
-            config: {
-                siteTitle: configForm.siteTitle,
-                logoUrl: configForm.logoUrl,
-                copyright: configForm.copyright
-            },
-            backup: backupForm
-        }
-        
-        await updateSystemConfig(payload)
-        ElMessage.success('保存成功')
-    } catch (error) {
-        console.error('保存失败:', error)
-    } finally {
-        loading.value = false
-    }
+async function saveSettings() {
+  if (!ready.value || saving.value || backupRunning.value) return
+  if (backupSupported.value && backupForm.retentionCount == null) {
+    activeTab.value = 'backup'
+    ElMessage.warning('请填写备份保留份数')
+    return
+  }
+
+  saving.value = true
+  saveError.value = false
+  try {
+    await updateSystemConfig({
+      config: { ...configForm },
+      email: { ...emailForm, port: emailForm.port ?? 0 },
+      log: savedLogSettings,
+      backup: { ...backupForm }
+    })
+    await systemStore.fetchSystemConfig()
+    ElMessage.success('设置已保存')
+  } catch {
+    saveError.value = true
+  } finally {
+    saving.value = false
+  }
 }
 
-const handleTestEmail = () => {
-    // 简单校验
-    if (!emailForm.host || !emailForm.port || !emailForm.fromEmail) {
-        ElMessage.warning('请先完善邮箱配置信息')
-        return
-    }
-    testEmailForm.toEmail = emailForm.fromEmail
-    testEmailVisible.value = true
+function openTestEmail() {
+  if (!emailForm.host || !emailForm.port || !emailForm.fromEmail) {
+    ElMessage.warning('请先填写 SMTP 服务器、端口和发件人邮箱')
+    return
+  }
+  testEmailForm.toEmail = emailForm.fromEmail
+  testEmailError.value = false
+  testEmailVisible.value = true
 }
 
-const confirmTestEmail = async () => {
-    if (!testEmailForm.toEmail) {
-        ElMessage.warning('请输入收件人邮箱')
-        return
-    }
-
-    testEmailLoading.value = true
-    try {
-        const payload = {
-            ...emailForm,
-            toEmail: testEmailForm.toEmail
-        }
-        await sendTestEmail(payload)
-        ElMessage.success('测试邮件发送成功')
-        testEmailVisible.value = false
-    } catch (error) {
-        console.error('测试邮件发送失败:', error)
-    } finally {
-        testEmailLoading.value = false
-    }
+async function confirmTestEmail() {
+  if (testEmailSending.value || !await testEmailFormRef.value.validate().catch(() => false)) return
+  testEmailSending.value = true
+  testEmailError.value = false
+  try {
+    await sendTestEmail({ ...emailForm, toEmail: testEmailForm.toEmail })
+    testEmailVisible.value = false
+    ElMessage.success('测试邮件已发送')
+  } catch {
+    testEmailError.value = true
+  } finally {
+    testEmailSending.value = false
+  }
 }
 
-const handleBackupNow = async () => {
-    try {
-        await ElMessageBox.confirm('确定要立即执行数据库备份吗？', '提示', {
-            confirmButtonText: '确定',
-            cancelButtonText: '取消',
-            type: 'warning'
-        })
-        
-        loading.value = true
-        await backupSystem()
-        ElMessage.success('备份成功')
-    } catch (error) {
-        if (error !== 'cancel') {
-            console.error('备份失败:', error)
-        }
-    } finally {
-        loading.value = false
-    }
+async function createBackup() {
+  try {
+    await ElMessageBox.confirm('将创建一份当前数据库的备份。', '立即备份', {
+      confirmButtonText: '创建备份',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  backupRunning.value = true
+  try {
+    await backupSystem()
+    ElMessage.success('数据库备份已创建')
+  } catch {
+    // The request layer displays the server error.
+  } finally {
+    backupRunning.value = false
+  }
 }
 
-onMounted(() => {
-    fetchConfig()
-})
+onMounted(loadSettings)
 </script>
 
 <style scoped>
-.system-container {
-  padding: 20px;
-}
-.setting-form {
-    max-width: 600px;
-    margin-top: 20px;
-}
-.ml-2 {
-  margin-left: 8px;
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
 }
 
-/* ========== 移动端适配 ========== */
-@media screen and (max-width: 768px) {
-  .system-container {
-    padding: 8px;
-  }
-  
-  .setting-form {
-    max-width: 100%;
-  }
-  
-  .setting-form :deep(.el-form-item__label) {
-    width: 100px !important;
-  }
-  
-  :deep(.el-dialog) {
-    width: 95% !important;
-    margin: 10px auto !important;
-  }
+.settings-workspace { min-width: 0; padding: 4px 24px 24px; }
+.settings-tabs :deep(.el-tabs__header) { margin-bottom: 24px; }
+.settings-tabs :deep(.el-tabs__item) { min-height: 48px; font-weight: 600; }
+
+.settings-section-heading { margin-bottom: 24px; }
+.settings-section-heading h2 { margin: 0 0 8px; font-size: 20px; font-weight: 650; }
+.settings-section-heading p { margin: 0; color: var(--ops-muted); font-size: 14px; }
+
+.settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
+.settings-full-field { grid-column: 1 / -1; }
+.settings-fields :deep(.el-input-number) { width: 100%; }
+.backup-fields :deep(.el-form-item__content) { align-items: flex-start; flex-direction: column; }
+.settings-field-hint { color: var(--ops-muted); line-height: 1.5; }
+.settings-section-actions { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--ops-border); }
+
+.settings-context { padding: 20px; }
+
+.settings-context-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--ops-border);
+  border-radius: 10px;
+  background: var(--ops-inset);
+  color: var(--ops-accent);
+  font-size: 18px;
+}
+
+.settings-context .settings-context-label {
+  margin: 16px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+}
+
+.settings-context h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.settings-context p { margin: 8px 0 0; color: var(--ops-muted); font-size: 14px; }
+.settings-context dl { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--ops-border); }
+.settings-context dt { color: var(--ops-muted); font-size: 12px; }
+.settings-context dd { margin: 4px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+
+.settings-state { padding: 20px 24px; }
+
+.settings-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ops-warning);
+}
+
+.settings-feedback p { margin: 4px 0 0; color: var(--ops-muted); }
+
+.settings-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  background: var(--ops-inset);
+}
+
+.settings-notice > .el-icon { margin-top: 3px; color: var(--ops-accent); }
+.settings-notice p { margin: 4px 0 0; color: var(--ops-muted); }
+.settings-dialog-copy { margin: 0 0 20px; color: var(--ops-muted); }
+.settings-inline-error { margin: 0; color: var(--ops-danger); }
+
+@media (max-width: 960px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .settings-fields { grid-template-columns: minmax(0, 1fr); }
+  .settings-fields :deep(.el-input__wrapper) { min-height: 44px; }
+  .settings-workspace { padding-inline: 16px; }
+  .settings-tabs :deep(.el-tabs__item) { padding-inline: 8px; }
+  .settings-context { padding: 16px; }
 }
 </style>
