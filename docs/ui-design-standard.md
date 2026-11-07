@@ -1,6 +1,6 @@
-# ycgp 界面设计标准
+# yagp 界面设计标准
 
-ycgp 的「Midnight Relay」界面面向日常维护 Gost 节点的管理员。UI/UX Pro Max 的设计系统查询选出了高对比深色、状态色、紧凑数据布局和等宽数字。交互标准来自它的可访问性、响应式表格和表单指引。Google Stitch MCP 用同一个设计资产生成页面参考稿，Vue 负责渲染实际数据和执行操作。 [UI/UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) · [Stitch 项目](https://stitch.withgoogle.com/projects/1488212784564018110)
+yagp 的「Midnight Relay」界面面向日常维护 Gost 节点的管理员。UI/UX Pro Max 的设计系统查询选出了高对比深色、状态色、紧凑数据布局和等宽数字。交互标准来自它的可访问性、响应式表格和表单指引。Google Stitch MCP 用同一个设计资产生成页面参考稿，Vue 负责渲染实际数据和执行操作。 [UI/UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) · [Stitch 项目](https://stitch.withgoogle.com/projects/1488212784564018110)
 
 ## 视觉和布局
 

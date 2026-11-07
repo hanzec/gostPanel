@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ycgp Binary Installation Script
+# yagp Binary Installation Script
 # Original author: code-gopher
 # Upstream project: https://github.com/code-gopher/gostPanel
 
@@ -19,13 +19,13 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Configuration
-APP_NAME="ycgp"
+APP_NAME="yagp"
 INSTALL_DIR="/usr/local/bin"
 # Keep the existing unit and working directory for in-place upgrades.
 SERVICE_NAME="gost-panel"
 CONFIG_DIR="/etc/gost-panel"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-REPO=${YCGP_REPO:-hanzec/gostPanel}
+REPO=${YAGP_REPO:-${YCGP_REPO:-hanzec/gostPanel}}
 GH_PROXY=${GH_PROXY:-""}
 
 # Detect Architecture
@@ -69,7 +69,7 @@ function install_panel() {
     info "正在下载发布包: $DOWNLOAD_URL"
     if ! curl -fL "$DOWNLOAD_URL" -o "$TAR_FILE"; then
         rm -rf "$TEMP_DIR"
-        error "无法下载 $APP_NAME-$PLATFORM.tar.gz，请确认 $REPO 已发布 ycgp 安装包。"
+        error "无法下载 $APP_NAME-$PLATFORM.tar.gz，请确认 $REPO 已发布 yagp 安装包。"
     fi
     
     info "正在解压..."
@@ -115,7 +115,7 @@ function install_panel() {
     info "创建系统服务..."
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=ycgp Service
+Description=yagp Service
 After=network.target
 
 [Service]
@@ -134,7 +134,7 @@ EOF
     systemctl enable "$SERVICE_NAME"
     systemctl restart "$SERVICE_NAME"
 
-    info "ycgp 安装完成并已启动！"
+    info "yagp 安装完成并已启动！"
     systemctl status "$SERVICE_NAME" --no-pager
     
     # 获取最终端口
@@ -152,7 +152,7 @@ EOF
     [ -z "$INTERNAL_IP" ] && INTERNAL_IP="127.0.0.1"
     
     echo -e "\n${GREEN}==============================================${NC}"
-    echo -e "   ycgp 安装成功！"
+    echo -e "   yagp 安装成功！"
     echo -e "   外网访问: http://${PUBLIC_IP}:${FINAL_PORT}"
     echo -e "   内网访问: http://${INTERNAL_IP}:${FINAL_PORT}"
     echo -e "   管理员登录由 Authentik 正向认证代理处理"
@@ -160,7 +160,7 @@ EOF
 }
 
 function uninstall_panel() {
-    info "正在卸载 ycgp..."
+    info "正在卸载 yagp..."
     systemctl stop "$SERVICE_NAME" || true
     systemctl disable "$SERVICE_NAME" || true
     rm -f "$SERVICE_FILE"

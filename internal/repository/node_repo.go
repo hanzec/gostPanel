@@ -2,7 +2,7 @@ package repository
 
 import (
 	"time"
-	"ycgp/internal/model"
+	"yagp/internal/model"
 
 	"gorm.io/gorm"
 )

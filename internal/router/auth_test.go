@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"ycgp/internal/config"
-	"ycgp/pkg/logger"
+	"yagp/internal/config"
+	"yagp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -29,7 +29,7 @@ func TestAdminRouteBoundary(t *testing.T) {
 
 	routes, err := NewRouter(db, config.AuthentikConfig{
 		TrustedProxies: []string{"192.0.2.20"},
-		AdminGroup:     "ycgp-admins",
+		AdminGroup:     "yagp-admins",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -45,8 +45,8 @@ func TestAdminRouteBoundary(t *testing.T) {
 	}{
 		{http.MethodGet, "/", "", http.StatusUnauthorized},
 		{http.MethodGet, "/", "staff", http.StatusForbidden},
-		{http.MethodGet, "/", "ycgp-admins", http.StatusOK},
-		{http.MethodGet, "/api/v1/auth/info", "ycgp-admins", http.StatusOK},
+		{http.MethodGet, "/", "yagp-admins", http.StatusOK},
+		{http.MethodGet, "/api/v1/auth/info", "yagp-admins", http.StatusOK},
 		{http.MethodGet, "/api/v1/nodes", "", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v1/system/public-config", "", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v1/health", "", http.StatusOK},

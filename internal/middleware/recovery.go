@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
-	"ycgp/internal/errors"
-	"ycgp/pkg/logger"
+	"yagp/internal/errors"
+	"yagp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

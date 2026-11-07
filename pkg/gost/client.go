@@ -8,10 +8,10 @@ import (
 	"io"
 	"net/http"
 	"time"
-	"ycgp/internal/errors"
+	"yagp/internal/errors"
 
-	"ycgp/pkg/logger"
-	"ycgp/pkg/nodegrpc"
+	"yagp/pkg/logger"
+	"yagp/pkg/nodegrpc"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"

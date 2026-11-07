@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"ycgp/internal/model"
-	"ycgp/internal/service"
-	"ycgp/pkg/logger"
-	"ycgp/pkg/nodegrpc"
+	"yagp/internal/model"
+	"yagp/internal/service"
+	"yagp/pkg/logger"
+	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc/codes"

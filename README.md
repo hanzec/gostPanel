@@ -1,4 +1,4 @@
-# ycgp
+# yagp
 
 <div align="center">
 
@@ -10,7 +10,7 @@
 
 </div>
 
-ycgp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证。[上游项目](https://github.com/code-gopher/gostPanel) · [许可证](./LICENSE)
+yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证。[上游项目](https://github.com/code-gopher/gostPanel) · [许可证](./LICENSE)
 
 改名、管理员认证、数据库和节点通信改造使用了 OpenAI Codex 辅助。[AGENTS.md](./AGENTS.md)
 
@@ -39,9 +39,11 @@ docker compose up -d --build
 
 Compose 将管理端口 `39100` 发布到宿主机的 `127.0.0.1`，将节点流量上报端口 `39101` 发布到宿主机。`config/` 以只读方式挂载到 `/app/config`。部署前配置下面的 Authentik、数据库和节点上报参数。
 
+已有 Compose 部署时，在原部署目录执行 `docker compose down --remove-orphans` 释放旧容器占用的端口，再用新版配置启动。
+
 **方式 B · Linux 二进制部署**
 
-安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从当前 GitHub 仓库 `hanzec/gostPanel` 下载最新发布包，也可通过 `YCGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `ycgp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
+安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从当前 GitHub 仓库 `hanzec/gostPanel` 下载最新发布包，也可通过 `YAGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `yagp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
 
 在本项目根目录以 root 身份运行脚本。默认端口为 `39100`。
 
@@ -55,7 +57,7 @@ bash scripts/install_panel.sh
 bash scripts/install_panel.sh install --port 8080
 ```
 
-脚本将程序安装到 `/usr/local/bin/ycgp`，服务单元为 `gost-panel.service`，配置位于 `/etc/gost-panel`。卸载面板时保留配置和数据库。
+脚本将程序安装到 `/usr/local/bin/yagp`，服务单元为 `gost-panel.service`，配置位于 `/etc/gost-panel`。卸载面板时保留配置和数据库。
 
 ```bash
 bash scripts/install_panel.sh uninstall
@@ -63,26 +65,26 @@ bash scripts/install_panel.sh uninstall
 
 ### Authentik 正向认证
 
-1. 在 Authentik 创建 Proxy Provider，模式选 **Forward auth (single application)**，External host 设为面板的 HTTPS 地址。将应用授权给管理员组，例如 `ycgp-admins`。
+1. 在 Authentik 创建 Proxy Provider，模式选 **Forward auth (single application)**，External host 设为面板的 HTTPS 地址。将应用授权给管理员组，例如 `yagp-admins`。
 2. 在反向代理上对管理页面和 `/api/v1` 启用 forward auth。把 `/outpost.goauthentik.io/` 交给 Authentik outpost 处理登录、回调和退出。代理应使用认证子请求返回的 `X-Authentik-Username` 和 `X-Authentik-Groups` 覆盖客户端同名请求头，保留原始 `Host`，并设置外部协议的 `X-Forwarded-Proto`。[Authentik 正向认证配置](https://docs.goauthentik.io/add-secure-apps/providers/proxy/forward_auth)
 3. 在 `config/config.yaml` 中填写面板实际看到的代理对端 IP 或 CIDR，并设定同一个管理员组。宿主机代理访问容器时，使用容器看到的代理源地址。只允许可信代理访问管理端口。
 
 ```yaml
 authentik:
   trusted_proxies: ["127.0.0.1", "::1"]
-  admin_group: "ycgp-admins"
+  admin_group: "yagp-admins"
 ```
 
 浏览器访问面板的 HTTPS 地址，由 Authentik 处理登录。面板读取管理员身份并执行组校验。
 
 ### 数据库
 
-默认使用 SQLite。使用 MySQL 时，先创建数据库，并给面板账号分配该数据库的读写和建表权限。面板启动时创建表。连接串可通过 `YCGP_DATABASE_DSN` 注入，数据库类型也可通过 `YCGP_DATABASE_TYPE` 指定。
+默认使用 SQLite。使用 MySQL 时，先创建数据库，并给面板账号分配该数据库的读写和建表权限。面板启动时创建表。连接串可通过 `YAGP_DATABASE_DSN` 注入，数据库类型也可通过 `YAGP_DATABASE_TYPE` 指定。
 
 ```yaml
 database:
   type: mysql
-  dsn: "ycgp:<password>@tcp(mysql.internal:3306)/ycgp?charset=utf8mb4&loc=Local"
+  dsn: "yagp:<password>@tcp(mysql.internal:3306)/yagp?charset=utf8mb4&loc=Local"
 ```
 
 面板备份功能适用于 SQLite。MySQL 使用数据库服务的备份机制。
@@ -138,22 +140,26 @@ node_tls:
 2. 打开该实例的 **安装** 操作，填写证书和私钥路径，并在目标服务器执行生成的命令。多个实例部署到同一台服务器时，为每个实例分配独立端口。
 3. 节点在线后创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 gRPC `Panel.Report`。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
-Gost 的管理 Web API 绑定在节点本机，面板通过 `ycgp-node` 的 TLS gRPC 接口下发配置。同一节点的上报使用其面板登记的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
+Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS gRPC 接口下发配置。同一节点的上报使用其面板登记的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
-使用私有 CA 签发面板证书时，在安装窗口填写节点上的上报 CA 文件路径。安装脚本会下载 `ycgp-node` 发布包，也可在目标节点用 `YCGP_NODE_BIN=/path/to/ycgp-node` 指定已构建的二进制。卸载某个实例时，执行 `bash scripts/install_node.sh uninstall --node-id <ID>`。
+使用私有 CA 签发面板证书时，在安装窗口填写节点上的上报 CA 文件路径。安装脚本会下载 `yagp-node` 发布包，也可在目标节点用 `YAGP_NODE_BIN=/path/to/yagp-node` 指定已构建的二进制。卸载某个实例时，执行 `bash scripts/install_node.sh uninstall --node-id <ID>`。
+
+创建节点时，浏览器生成一个可编辑的随机密码，面板保存凭据并分配节点 ID。安装命令将同一组凭据和节点 ID 带到目标服务器，安装脚本把它们写入节点配置。证书、私钥和所需的 CA 文件由管理员预先部署。安装命令包含可读密码，请通过可信渠道传递。
+
+已安装的节点桥可以继续与新版面板通信。新安装使用 `/etc/yagp-node/<ID>` 和 `yagp-node-<ID>` 服务名。
 
 ---
 
 ## 📦 预编译下载
 
-新版发布包以 `ycgp-` 开头。发布流程支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。[查看当前仓库的 Releases](https://github.com/hanzec/gostPanel/releases)
+新版发布包以 `yagp-` 开头。发布流程支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。[查看当前仓库的 Releases](https://github.com/hanzec/gostPanel/releases)
 
 ### 开发与编译
 
 使用 Go 1.23+ 和 Node.js 20.19+（20.x）或 22.12+ 构建。Go 编译时会嵌入前端产物，首次编译后端前需先构建前端。
 
 ```bash
-# 完整构建，产物为 ycgp 和 ycgp-node
+# 完整构建，产物为 yagp 和 yagp-node
 make build
 
 # 只构建前端
@@ -176,7 +182,7 @@ make release
 
 ```bash
 mkdir -p data
-./ycgp -c config/config.yaml
+./yagp -c config/config.yaml
 ```
 
 ---

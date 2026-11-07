@@ -1,4 +1,4 @@
-module ycgp
+module yagp
 
 go 1.23.0
 

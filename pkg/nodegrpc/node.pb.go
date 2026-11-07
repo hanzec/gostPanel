@@ -253,7 +253,7 @@ const file_pkg_nodegrpc_node_proto_rawDesc = "" +
 	"\aExecute\x12\x1c.ycgp.node.v1.CommandRequest\x1a\x1a.ycgp.node.v1.CommandReply\x12M\n" +
 	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.ycgp.node.v1.ObserverEndpoint2C\n" +
 	"\x05Panel\x12:\n" +
-	"\x06Report\x12\x1b.ycgp.node.v1.ReportRequest\x1a\x13.proto.ObserveReplyB\x13Z\x11ycgp/pkg/nodegrpcb\x06proto3"
+	"\x06Report\x12\x1b.ycgp.node.v1.ReportRequest\x1a\x13.proto.ObserveReplyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var (
 	file_pkg_nodegrpc_node_proto_rawDescOnce sync.Once

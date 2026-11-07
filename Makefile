@@ -1,6 +1,6 @@
 # 版本信息
 VERSION ?= $(shell git describe --tags --always)
-LDFLAGS := -s -w -X 'ycgp/internal/config.Version=$(VERSION)'
+LDFLAGS := -s -w -X 'yagp/internal/config.Version=$(VERSION)'
 
 .PHONY: all build build-web build-server build-node clean dev help release
 
@@ -23,7 +23,7 @@ help:
 
 # 完整构建
 build: build-web build-server build-node
-	@echo "Build complete! Binaries: ycgp and ycgp-node"
+	@echo "Build complete! Binaries: yagp and yagp-node"
 
 # 构建前端
 build-web:
@@ -34,11 +34,11 @@ build-web:
 # 构建后端（包含嵌入的前端）
 build-server:
 	@echo "Building server..."
-	go build -ldflags="$(LDFLAGS)" -o ycgp cmd/server/main.go
+	go build -ldflags="$(LDFLAGS)" -o yagp cmd/server/main.go
 	@echo "Server build complete"
 
 build-node:
-	go build -ldflags="-s -w" -o ycgp-node ./cmd/ycgp-node
+	go build -ldflags="-s -w" -o yagp-node ./cmd/yagp-node
 
 # 运行（构建前端并启动后端）
 run: build-web
@@ -48,22 +48,22 @@ run: build-web
 # 构建多平台发布版本
 release: build-web
 	@echo "Building release binaries..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o ycgp-linux-amd64 cmd/server/main.go
-	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o ycgp-linux-arm64 cmd/server/main.go
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o ycgp-darwin-amd64 cmd/server/main.go
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o ycgp-darwin-arm64 cmd/server/main.go
-	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o ycgp-windows-amd64.exe cmd/server/main.go
-	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ycgp-node-linux-amd64 ./cmd/ycgp-node
-	GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ycgp-node-linux-arm64 ./cmd/ycgp-node
+	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-linux-amd64 cmd/server/main.go
+	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-linux-arm64 cmd/server/main.go
+	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-amd64 cmd/server/main.go
+	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-arm64 cmd/server/main.go
+	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-windows-amd64.exe cmd/server/main.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o yagp-node-linux-amd64 ./cmd/yagp-node
+	GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o yagp-node-linux-arm64 ./cmd/yagp-node
 	@echo "Release build complete"
 
 # 清理构建产物
 clean:
 	@echo "Cleaning artifacts..."
-	rm -f ycgp
-	rm -f ycgp.exe
-	rm -f ycgp-node
-	rm -f ycgp-node.exe
+	rm -f yagp
+	rm -f yagp.exe
+	rm -f yagp-node
+	rm -f yagp-node.exe
 	rm -f main
 	rm -f main.exe
 	rm -rf internal/router/dist

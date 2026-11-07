@@ -5,10 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"ycgp/internal/model"
-	"ycgp/internal/repository"
-	"ycgp/internal/utils"
-	"ycgp/pkg/logger"
+	"yagp/internal/model"
+	"yagp/internal/repository"
+	"yagp/internal/utils"
+	"yagp/pkg/logger"
 
 	"gorm.io/gorm"
 )

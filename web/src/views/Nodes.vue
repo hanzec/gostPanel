@@ -306,8 +306,8 @@ const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
 const installSettings = reactive({
   reportAddress: '',
-  tlsCert: '/etc/ycgp-node/tls/node.pem',
-  tlsKey: '/etc/ycgp-node/tls/node.key',
+  tlsCert: '/etc/yagp-node/tls/node.pem',
+  tlsKey: '/etc/yagp-node/tls/node.key',
   reportCA: '',
   adminPort: 39001,
   observerPort: 39002

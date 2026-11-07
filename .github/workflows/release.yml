@@ -34,24 +34,24 @@ jobs:
       - name: Package binaries
         run: |
           # 打包 Linux amd64
-          tar -czvf ycgp-linux-amd64.tar.gz ycgp-linux-amd64 config/config.yaml LICENSE
+          tar -czvf yagp-linux-amd64.tar.gz yagp-linux-amd64 config/config.yaml LICENSE
           # 打包 Linux arm64
-          tar -czvf ycgp-linux-arm64.tar.gz ycgp-linux-arm64 config/config.yaml LICENSE
+          tar -czvf yagp-linux-arm64.tar.gz yagp-linux-arm64 config/config.yaml LICENSE
           # 打包 macOS amd64
-          tar -czvf ycgp-darwin-amd64.tar.gz ycgp-darwin-amd64 config/config.yaml LICENSE
+          tar -czvf yagp-darwin-amd64.tar.gz yagp-darwin-amd64 config/config.yaml LICENSE
           # 打包 macOS arm64
-          tar -czvf ycgp-darwin-arm64.tar.gz ycgp-darwin-arm64 config/config.yaml LICENSE
+          tar -czvf yagp-darwin-arm64.tar.gz yagp-darwin-arm64 config/config.yaml LICENSE
           # 打包 Windows
-          zip ycgp-windows-amd64.zip ycgp-windows-amd64.exe config/config.yaml LICENSE
-          tar -czvf ycgp-node-linux-amd64.tar.gz ycgp-node-linux-amd64 LICENSE
-          tar -czvf ycgp-node-linux-arm64.tar.gz ycgp-node-linux-arm64 LICENSE
+          zip yagp-windows-amd64.zip yagp-windows-amd64.exe config/config.yaml LICENSE
+          tar -czvf yagp-node-linux-amd64.tar.gz yagp-node-linux-amd64 LICENSE
+          tar -czvf yagp-node-linux-arm64.tar.gz yagp-node-linux-arm64 LICENSE
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            ycgp-*.tar.gz
-            ycgp-*.zip
+            yagp-*.tar.gz
+            yagp-*.zip
           generate_release_notes: true
           draft: false
           prerelease: false

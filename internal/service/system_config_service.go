@@ -1,9 +1,9 @@
 package service
 
 import (
-	"ycgp/internal/config"
-	"ycgp/internal/dto"
-	"ycgp/internal/repository"
+	"yagp/internal/config"
+	"yagp/internal/dto"
+	"yagp/internal/repository"
 )
 
 // SystemConfigService 系统配置服务

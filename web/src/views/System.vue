@@ -32,7 +32,7 @@
               <el-form :model="configForm" label-position="top" :disabled="saving" @submit.prevent="saveSettings">
                 <div class="settings-fields">
                   <el-form-item label="站点标题" prop="siteTitle">
-                    <el-input v-model="configForm.siteTitle" placeholder="ycgp" />
+                    <el-input v-model="configForm.siteTitle" placeholder="yagp" />
                   </el-form-item>
                   <el-form-item label="Logo 地址" prop="logoUrl">
                     <el-input v-model.trim="configForm.logoUrl" inputmode="url" placeholder="https://example.com/logo.svg" />

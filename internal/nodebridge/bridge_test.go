@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"ycgp/pkg/gost"
-	"ycgp/pkg/nodegrpc"
+	"yagp/pkg/gost"
+	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc"

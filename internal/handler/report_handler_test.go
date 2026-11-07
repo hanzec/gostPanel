@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-	"ycgp/internal/model"
-	"ycgp/pkg/nodegrpc"
+	"yagp/internal/model"
+	"yagp/pkg/nodegrpc"
 
 	"github.com/glebarez/sqlite"
 	observer "github.com/go-gost/plugin/observer/proto"

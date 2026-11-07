@@ -9,13 +9,13 @@ import (
 	"strings"
 	"syscall"
 
-	"ycgp/internal/config"
-	"ycgp/internal/handler"
-	"ycgp/internal/model"
-	"ycgp/internal/router"
-	"ycgp/internal/service"
-	"ycgp/pkg/logger"
-	"ycgp/pkg/nodegrpc"
+	"yagp/internal/config"
+	"yagp/internal/handler"
+	"yagp/internal/model"
+	"yagp/internal/router"
+	"yagp/internal/service"
+	"yagp/pkg/logger"
+	"yagp/pkg/nodegrpc"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -52,7 +52,7 @@ func main() {
 		_ = logger.Sync()
 	}()
 
-	logger.Info("ycgp 启动中...")
+	logger.Info("yagp 启动中...")
 
 	// 设置 Gin 模式
 	if cfg.Server.Mode == "release" {
@@ -121,7 +121,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	logger.Info("ycgp 正在关闭...")
+	logger.Info("yagp 正在关闭...")
 
 	// 停止相关的后台服务
 	healthService.Stop()
@@ -177,7 +177,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		return gorm.Open(sqlite.Open(cfg.Database.Path), gormConfig)
 	case "mysql":
 		if strings.TrimSpace(cfg.Database.DSN) == "" {
-			return nil, fmt.Errorf("MySQL 需要配置 database.dsn 或 YCGP_DATABASE_DSN")
+			return nil, fmt.Errorf("MySQL 需要配置 database.dsn 或 YAGP_DATABASE_DSN")
 		}
 		dsn, err := mysqldriver.ParseDSN(cfg.Database.DSN)
 		if err != nil || dsn.DBName == "" {
@@ -218,7 +218,7 @@ func initSystemConfig(db *gorm.DB) error {
 	if count == 0 {
 		// 设置默认值
 		sysConfig := &model.SystemConfig{
-			SiteTitle:            "ycgp",
+			SiteTitle:            "yagp",
 			LogoURL:              "https://gost.run/images/gost.png",
 			Copyright:            upstreamURL,
 			LogRetentionDays:     7,
@@ -233,8 +233,8 @@ func initSystemConfig(db *gorm.DB) error {
 		return nil
 	}
 
-	// 仅更新沿用原项目默认标题和版权设置的站点。
+	// 更新曾用的默认标题，保留管理员设置的其他标题。
 	return db.Model(&model.SystemConfig{}).
-		Where("site_title = ? AND copyright = ?", "Gost Panel", upstreamURL).
-		Update("site_title", "ycgp").Error
+		Where("site_title = ? OR (site_title = ? AND copyright = ?)", "ycgp", "Gost Panel", upstreamURL).
+		Update("site_title", "yagp").Error
 }

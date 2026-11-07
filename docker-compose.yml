@@ -1,8 +1,8 @@
 services:
-  ycgp:
+  yagp:
     build: .
-    image: ycgp:local
-    container_name: ycgp
+    image: yagp:local
+    container_name: yagp
     ports:
       - "127.0.0.1:39100:39100"
       - "39101:39101"
@@ -13,6 +13,8 @@ services:
     environment:
       - GIN_MODE=release
       - TZ=Asia/Shanghai
+      - YAGP_DATABASE_TYPE
+      - YAGP_DATABASE_DSN
       - YCGP_DATABASE_TYPE
       - YCGP_DATABASE_DSN
     restart: unless-stopped

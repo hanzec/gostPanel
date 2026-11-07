@@ -1,9 +1,9 @@
 package service
 
 import (
-	"ycgp/internal/config"
-	"ycgp/internal/model"
-	"ycgp/internal/repository"
+	"yagp/internal/config"
+	"yagp/internal/model"
+	"yagp/internal/repository"
 
 	"gorm.io/gorm"
 )

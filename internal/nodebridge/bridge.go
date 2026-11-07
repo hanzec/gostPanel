@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"ycgp/pkg/nodegrpc"
+	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc"

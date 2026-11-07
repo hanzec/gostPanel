@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# ycgp Gost 节点安装脚本
+# yagp Gost 节点安装脚本
 # 原作者: code-gopher
 set -euo pipefail
 umask 077
@@ -56,9 +56,9 @@ while (($#)); do
 done
 
 [[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "请填写面板中的节点 ID"
-base_path="/etc/ycgp-node/$node_id"
-gost_unit="ycgp-gost-$node_id"
-bridge_unit="ycgp-node-$node_id"
+base_path="/etc/yagp-node/$node_id"
+gost_unit="yagp-gost-$node_id"
+bridge_unit="yagp-node-$node_id"
 
 if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
     manager=systemd
@@ -80,7 +80,7 @@ if [[ "$action" == uninstall ]]; then
             rm -f -- "/etc/init.d/$unit"
         done
     fi
-    rm -f -- "$base_path/ycgp-node" "$base_path/gost"
+    rm -f -- "$base_path/yagp-node" "$base_path/gost"
     printf '节点 %s 服务已卸载，配置位于 %s\n' "$node_id" "$base_path"
     exit 0
 fi
@@ -120,10 +120,11 @@ case "$(uname -m)" in
 esac
 
 gost_version=3.2.6
-repo="${YCGP_REPO:-hanzec/gostPanel}"
+repo="${YAGP_REPO:-${YCGP_REPO:-hanzec/gostPanel}}"
 release_path=latest/download
-if [[ -n "${YCGP_NODE_VERSION:-}" ]]; then
-    release_path="download/$YCGP_NODE_VERSION"
+node_version="${YAGP_NODE_VERSION:-${YCGP_NODE_VERSION:-}}"
+if [[ -n "$node_version" ]]; then
+    release_path="download/$node_version"
 fi
 
 tmp_dir=$(mktemp -d)
@@ -161,19 +162,18 @@ EOF
 curl -fsSL "${GH_PROXY:-}https://github.com/go-gost/gost/releases/download/v$gost_version/gost_${gost_version}_linux_$arch.tar.gz" \
     -o "$tmp_dir/gost.tar.gz"
 tar -xzf "$tmp_dir/gost.tar.gz" -C "$tmp_dir/gost"
-if [[ -n "${YCGP_NODE_BIN:-}" ]]; then
-    bridge_bin="$YCGP_NODE_BIN"
-else
-    curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/ycgp-node-linux-$arch.tar.gz" \
+bridge_bin="${YAGP_NODE_BIN:-${YCGP_NODE_BIN:-}}"
+if [[ -z "$bridge_bin" ]]; then
+    curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-node-linux-$arch.tar.gz" \
         -o "$tmp_dir/bridge.tar.gz"
     tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
-    bridge_bin="$tmp_dir/bridge/ycgp-node-linux-$arch"
+    bridge_bin="$tmp_dir/bridge/yagp-node-linux-$arch"
 fi
-[[ -f "$tmp_dir/gost/gost" && -f "$bridge_bin" ]] || die "安装包缺少 Gost 或 ycgp-node 程序"
+[[ -f "$tmp_dir/gost/gost" && -f "$bridge_bin" ]] || die "安装包缺少 Gost 或 yagp-node 程序"
 
 install -d -m 0700 -- "$base_path"
 install -m 0700 -- "$tmp_dir/gost/gost" "$base_path/gost"
-install -m 0700 -- "$bridge_bin" "$base_path/ycgp-node"
+install -m 0700 -- "$bridge_bin" "$base_path/yagp-node"
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
     install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$base_path/LICENSE"
 fi
@@ -219,8 +219,8 @@ EOF
     fi
 }
 
-write_service "$bridge_unit" "ycgp node $node_id bridge" ycgp-node -c node.yaml
-write_service "$gost_unit" "ycgp node $node_id Gost" gost -C gost.yaml
+write_service "$bridge_unit" "yagp node $node_id bridge" yagp-node -c node.yaml
+write_service "$gost_unit" "yagp node $node_id Gost" gost -C gost.yaml
 if [[ "$manager" == systemd ]]; then
     systemctl daemon-reload
     systemctl enable "$bridge_unit" "$gost_unit"

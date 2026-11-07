@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"ycgp/internal/config"
-	"ycgp/internal/model"
-	"ycgp/pkg/gost"
+	"yagp/internal/config"
+	"yagp/internal/model"
+	"yagp/pkg/gost"
 )
 
 // GetGostClient 根据节点配置创建 Gost 客户端

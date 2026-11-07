@@ -4,8 +4,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/smtp"
-	"ycgp/internal/dto"
-	"ycgp/internal/errors"
+	"yagp/internal/dto"
+	"yagp/internal/errors"
 )
 
 // SendTestEmail 发送测试邮件
@@ -25,9 +25,9 @@ func (s *SystemConfigService) SendTestEmail(req *dto.EmailConfigReq) error {
 	to := []string{toEmail}
 
 	msg := []byte(fmt.Sprintf("To: %s\r\n"+
-		"Subject: ycgp 测试邮件\r\n"+
+		"Subject: yagp 测试邮件\r\n"+
 		"\r\n"+
-		"这是一封来自 ycgp 的测试邮件。\r\n"+
+		"这是一封来自 yagp 的测试邮件。\r\n"+
 		"如果您收到这封邮件，说明您的 SMTP 配置正确。\r\n", toEmail))
 
 	addr := fmt.Sprintf("%s:%d", req.Host, req.Port)

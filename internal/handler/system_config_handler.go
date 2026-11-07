@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"ycgp/internal/dto"
-	"ycgp/internal/errors"
-	"ycgp/internal/service"
-	"ycgp/pkg/response"
+	"yagp/internal/dto"
+	"yagp/internal/errors"
+	"yagp/internal/service"
+	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )

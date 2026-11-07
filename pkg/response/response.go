@@ -2,8 +2,8 @@ package response
 
 import (
 	"net/http"
-	"ycgp/internal/errors"
-	"ycgp/pkg/logger"
+	"yagp/internal/errors"
+	"yagp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

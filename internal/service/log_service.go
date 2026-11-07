@@ -2,10 +2,10 @@
 package service
 
 import (
-	"ycgp/internal/dto"
-	"ycgp/internal/model"
-	"ycgp/internal/repository"
-	"ycgp/pkg/logger"
+	"yagp/internal/dto"
+	"yagp/internal/model"
+	"yagp/internal/repository"
+	"yagp/pkg/logger"
 
 	"gorm.io/gorm"
 )

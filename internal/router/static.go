@@ -8,7 +8,7 @@ import (
 	"path"
 	"strings"
 
-	"ycgp/pkg/logger"
+	"yagp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

@@ -40,8 +40,8 @@ build/
 internal/router/dist/
 main
 gost-panel
-ycgp
-/ycgp-node
+/yagp
+/yagp-node
 /config/**/*.key
 
 # Frontend (Web)

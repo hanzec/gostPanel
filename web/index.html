@@ -5,10 +5,14 @@
   <meta charset="UTF-8" />
   <link rel="icon" href="/favicon.ico" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ycgp</title>
+  <title>yagp</title>
   <script>
     (function () {
       var savedTitle = localStorage.getItem('siteTitle');
+      if (savedTitle === 'ycgp') {
+        savedTitle = 'yagp';
+        localStorage.setItem('siteTitle', savedTitle);
+      }
       if (savedTitle) {
         document.title = savedTitle;
       }

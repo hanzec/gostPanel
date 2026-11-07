@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"ycgp/internal/model"
-	"ycgp/internal/repository"
+	"yagp/internal/model"
+	"yagp/internal/repository"
 
 	"gorm.io/gorm"
 )

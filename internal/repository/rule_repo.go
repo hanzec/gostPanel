@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"ycgp/internal/model"
+	"yagp/internal/model"
 
 	"gorm.io/gorm"
 )

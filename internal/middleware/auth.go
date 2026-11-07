@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"ycgp/internal/config"
-	"ycgp/pkg/response"
+	"yagp/internal/config"
+	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )

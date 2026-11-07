@@ -1,11 +1,11 @@
 package router
 
 import (
-	"ycgp/internal/config"
-	"ycgp/internal/handler"
-	"ycgp/internal/middleware"
-	"ycgp/internal/repository"
-	"ycgp/internal/service"
+	"yagp/internal/config"
+	"yagp/internal/handler"
+	"yagp/internal/middleware"
+	"yagp/internal/repository"
+	"yagp/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

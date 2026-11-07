@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"ycgp/internal/config"
-	"ycgp/internal/errors"
-	"ycgp/internal/repository"
-	"ycgp/pkg/logger"
+	"yagp/internal/config"
+	"yagp/internal/errors"
+	"yagp/internal/repository"
+	"yagp/pkg/logger"
 
 	"gorm.io/gorm"
 )

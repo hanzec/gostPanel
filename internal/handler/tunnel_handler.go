@@ -3,9 +3,9 @@ package handler
 import (
 	"strconv"
 
-	"ycgp/internal/dto"
-	"ycgp/internal/service"
-	"ycgp/pkg/response"
+	"yagp/internal/dto"
+	"yagp/internal/service"
+	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )

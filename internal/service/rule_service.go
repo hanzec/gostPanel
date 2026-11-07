@@ -5,14 +5,14 @@ import (
 	stderrors "errors"
 	"fmt"
 
-	"ycgp/internal/config"
-	"ycgp/internal/dto"
-	"ycgp/internal/errors"
-	"ycgp/internal/model"
-	"ycgp/internal/repository"
-	"ycgp/internal/utils"
-	"ycgp/pkg/gost"
-	"ycgp/pkg/logger"
+	"yagp/internal/config"
+	"yagp/internal/dto"
+	"yagp/internal/errors"
+	"yagp/internal/model"
+	"yagp/internal/repository"
+	"yagp/internal/utils"
+	"yagp/pkg/gost"
+	"yagp/pkg/logger"
 
 	"gorm.io/gorm"
 )

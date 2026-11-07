@@ -3,13 +3,13 @@ server:
   mode: "release"  # debug, release
 
 database:
-  type: "sqlite"  # sqlite 或 mysql，也可用 YCGP_DATABASE_TYPE
+  type: "sqlite"  # sqlite 或 mysql，也可用 YAGP_DATABASE_TYPE
   path: "./data/gost-panel.db"  # SQLite 文件路径
-  dsn: ""  # MySQL 连接串，也可用 YCGP_DATABASE_DSN
+  dsn: ""  # MySQL 连接串，也可用 YAGP_DATABASE_DSN
 
 authentik:
   trusted_proxies: ["127.0.0.1", "::1"]
-  admin_group: "ycgp-admins"
+  admin_group: "yagp-admins"
 
 report:
   listen: ""

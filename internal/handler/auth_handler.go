@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"ycgp/pkg/response"
+	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )

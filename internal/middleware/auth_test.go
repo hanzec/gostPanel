@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"ycgp/internal/config"
+	"yagp/internal/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,7 +13,7 @@ import (
 func TestAuthentikAuth(t *testing.T) {
 	auth, err := NewAuthentikAuth(config.AuthentikConfig{
 		TrustedProxies: []string{"192.0.2.20"},
-		AdminGroup:     "ycgp-admin",
+		AdminGroup:     "yagp-admin",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestAuthentikAuth(t *testing.T) {
 		{
 			name:   "different group with shared prefix",
 			method: http.MethodGet,
-			edit:   func(req *http.Request) { req.Header.Set("X-Authentik-Groups", "ycgp-admin-readonly") },
+			edit:   func(req *http.Request) { req.Header.Set("X-Authentik-Groups", "yagp-admin-readonly") },
 			want:   http.StatusForbidden,
 		},
 		{
@@ -92,7 +92,7 @@ func TestAuthentikAuth(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "http://panel.example/", nil)
 			req.RemoteAddr = "192.0.2.20:8100"
 			req.Header.Set("X-Authentik-Username", "alice")
-			req.Header.Set("X-Authentik-Groups", "staff|ycgp-admin")
+			req.Header.Set("X-Authentik-Groups", "staff|yagp-admin")
 			if tt.edit != nil {
 				tt.edit(req)
 			}
@@ -110,9 +110,9 @@ func TestAuthentikAuth(t *testing.T) {
 
 func TestAuthentikAuthRejectsUnsafeConfiguration(t *testing.T) {
 	for _, cfg := range []config.AuthentikConfig{
-		{AdminGroup: "ycgp-admin"},
+		{AdminGroup: "yagp-admin"},
 		{TrustedProxies: []string{"192.0.2.20"}},
-		{AdminGroup: "ycgp-admin", TrustedProxies: []string{"0.0.0.0/0"}},
+		{AdminGroup: "yagp-admin", TrustedProxies: []string{"0.0.0.0/0"}},
 	} {
 		if _, err := NewAuthentikAuth(cfg); err == nil {
 			t.Errorf("expected invalid configuration to fail: %+v", cfg)

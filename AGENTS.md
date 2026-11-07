@@ -1,15 +1,15 @@
-# ycgp 仓库指南
+# yagp 仓库指南
 
 ## 项目来源与 AI 使用
 
-ycgp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证。修改或分发时保留原始版权声明和许可文本。[上游项目](https://github.com/code-gopher/gostPanel) · [许可证](./LICENSE)
+yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证。修改或分发时保留原始版权声明和许可文本。[上游项目](https://github.com/code-gopher/gostPanel) · [许可证](./LICENSE)
 
 项目改名、移除推广、管理员认证、数据库与节点通信改造使用了 OpenAI Codex 辅助。
 
 ## 开发与验证
 
-- `cmd/server` 是面板入口，`cmd/ycgp-node` 是节点桥入口，`internal` 包含 API、业务逻辑和持久化代码。`web` 包含 Vue 前端。
-- 项目名使用 `ycgp`，转发节点继续使用 Gost 名称。涉及构建产物命名时，同步核对 Makefile、Dockerfile、发布工作流和面板安装脚本。
+- `cmd/server` 是面板入口，`cmd/yagp-node` 是节点桥入口，`internal` 包含 API、业务逻辑和持久化代码。`web` 包含 Vue 前端。
+- 项目名使用 `yagp`，转发节点继续使用 Gost 名称。涉及构建产物命名时，同步核对 Makefile、Dockerfile、发布工作流和面板安装脚本。
 - 使用 Go 1.23+ 和 Node.js 20.19+（20.x）或 22.12+。前端产物输出到 `internal/router/dist`，由 Go 编译时嵌入。验证后端前先构建前端。
 
 ```bash

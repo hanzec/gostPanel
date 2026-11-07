@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"ycgp/internal/nodebridge"
+	"yagp/internal/nodebridge"
 
 	"gopkg.in/yaml.v3"
 )
