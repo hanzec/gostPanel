@@ -22,8 +22,15 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	if len(args) > 0 && args[0] == "enroll" {
-		return enroll(ctx, args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "enroll":
+			return enroll(ctx, args[1:])
+		case "prepare-gost":
+			return prepareGost(ctx, args[1:])
+		case "ensure-gost":
+			return ensureGost(ctx, parseConfigFlag(args[0], args[1:]))
+		}
 	}
 	config, err := readConfig(parseConfigFlag("yagp-node", args))
 	if err != nil {

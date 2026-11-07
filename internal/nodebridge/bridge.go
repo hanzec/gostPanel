@@ -41,7 +41,7 @@ func Run(ctx context.Context, cfg Config) error {
 	if cfg.NodeID == 0 || cfg.Username == "" || cfg.Password == "" || strings.Contains(cfg.Username, ":") {
 		return errors.New("node ID and credentials are required (username cannot contain a colon)")
 	}
-	if !isLoopbackAddress(cfg.AdminAddress) || !isLoopbackAddress(cfg.ObserverListen) {
+	if !IsLoopbackAddress(cfg.AdminAddress) || !IsLoopbackAddress(cfg.ObserverListen) {
 		return errors.New("Gost admin and observer addresses must be loopback IP addresses with ports")
 	}
 	if host, _, err := net.SplitHostPort(cfg.ReportAddress); err != nil || host == "" {
@@ -104,7 +104,7 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-func isLoopbackAddress(address string) bool {
+func IsLoopbackAddress(address string) bool {
 	host, _, err := net.SplitHostPort(address)
 	return err == nil && net.ParseIP(host).IsLoopback()
 }

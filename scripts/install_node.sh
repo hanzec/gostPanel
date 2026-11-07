@@ -77,7 +77,6 @@ case "$(uname -m)" in
     *) die "当前发布支持 Linux amd64 和 arm64" ;;
 esac
 
-gost_version=3.2.6
 repo="${YAGP_REPO:-${YCGP_REPO:-hanzec/gostPanel}}"
 release_path=latest/download
 node_version="${YAGP_NODE_VERSION:-${YCGP_NODE_VERSION:-}}"
@@ -91,20 +90,21 @@ stage="$tmp_dir/node"
 cleanup() {
     local result=$?
     if (( result != 0 )) && [[ -n "$node_id" ]]; then
+        printf '节点已完成注册，token 已失效\n' >&2
         if [[ -d "$stage" ]]; then
             printf '注册文件已保留在 %s\n' "$stage" >&2
             return
         fi
         printf '节点配置已保留在 %s，请检查服务后重新启动\n' "$base_path" >&2
+        if [[ "$manager" == systemd ]]; then
+            printf '查看日志: journalctl -u %s -u %s\n' "$bridge_unit" "$gost_unit" >&2
+        fi
     fi
     rm -rf -- "$tmp_dir"
 }
 trap cleanup EXIT
-mkdir -p -- "$tmp_dir/gost" "$tmp_dir/bridge" "$stage"
+mkdir -p -- "$tmp_dir/bridge" "$stage"
 
-curl -fsSL "${GH_PROXY:-}https://github.com/go-gost/gost/releases/download/v$gost_version/gost_${gost_version}_linux_$arch.tar.gz" \
-    -o "$tmp_dir/gost.tar.gz"
-tar -xzf "$tmp_dir/gost.tar.gz" -C "$tmp_dir/gost"
 bridge_bin="${YAGP_NODE_BIN:-${YCGP_NODE_BIN:-}}"
 if [[ -z "$bridge_bin" ]]; then
     curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-node-linux-$arch.tar.gz" \
@@ -112,16 +112,16 @@ if [[ -z "$bridge_bin" ]]; then
     tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
     bridge_bin="$tmp_dir/bridge/yagp-node-linux-$arch"
 fi
-[[ -f "$tmp_dir/gost/gost" && -f "$bridge_bin" ]] || die "安装包缺少 Gost 或 yagp-node 程序"
+[[ -f "$bridge_bin" ]] || die "安装包缺少 yagp-node 程序"
 
-install -m 0700 -- "$tmp_dir/gost/gost" "$stage/gost"
 install -m 0700 -- "$bridge_bin" "$stage/yagp-node"
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
     install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$stage/LICENSE"
 fi
+"$stage/yagp-node" prepare-gost --output "$stage/gost"
 
 if ! node_id=$(printf '%s' "$token" | "$stage/yagp-node" enroll --panel-address "$panel_address" --output "$stage"); then
-    die "节点注册未完成。若 token 已失效，请在面板生成新的 token 后重试。"
+    die "节点未安装。若 token 已失效，请在面板生成新的 token 后重试。"
 fi
 unset token
 [[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "yagp-node 未返回有效的节点 ID"
@@ -133,14 +133,17 @@ mv -T -n -- "$stage" "$base_path"
 
 write_service() {
     local name=$1 description=$2 executable=$3 config_flag=$4 config_file=$5
+    local unit_path
     if [[ "$manager" == systemd ]]; then
-        cat > "/etc/systemd/system/$name.service" <<EOF
+        unit_path="/etc/systemd/system/$name.service"
+        (set -o noclobber; cat > "$unit_path") <<EOF
 [Unit]
 Description=$description
 After=network.target
 
 [Service]
 WorkingDirectory=$base_path
+ExecStartPre=$base_path/yagp-node ensure-gost -c $base_path/node.yaml
 ExecStart=$base_path/$executable $config_flag $base_path/$config_file
 Restart=on-failure
 RestartSec=2
@@ -148,9 +151,10 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 EOF
-        chmod 0644 "/etc/systemd/system/$name.service"
+        chmod 0644 "$unit_path"
     else
-        cat > "/etc/init.d/$name" <<EOF
+        unit_path="/etc/init.d/$name"
+        (set -o noclobber; cat > "$unit_path") <<EOF
 #!/sbin/openrc-run
 description="$description"
 command="$base_path/$executable"
@@ -162,18 +166,30 @@ depend() {
     need net
 }
 EOF
-        chmod 0755 "/etc/init.d/$name"
+        chmod 0755 "$unit_path"
     fi
 }
 
 write_service "$bridge_unit" "yagp node $node_id bridge" yagp-node -c node.yaml
-write_service "$gost_unit" "yagp node $node_id Gost" gost -C gost.yaml
 if [[ "$manager" == systemd ]]; then
+    gost_unit_path="/etc/systemd/system/$gost_unit.service"
+    gost_unit_existed=false
+    if [[ -e "$gost_unit_path" || -L "$gost_unit_path" ]]; then
+        gost_unit_existed=true
+    fi
     systemctl daemon-reload
-    systemctl enable "$bridge_unit" "$gost_unit"
-    systemctl restart "$bridge_unit" "$gost_unit"
+    if ! systemctl enable --now "$bridge_unit" ||
+        ! systemctl is-active --quiet "$bridge_unit" ||
+        ! systemctl is-active --quiet "$gost_unit"; then
+        systemctl disable --now "$bridge_unit" || true
+        if [[ "$gost_unit_existed" == false && -f "$gost_unit_path" ]]; then
+            systemctl disable --now "$gost_unit" || true
+        fi
+        die "服务启动失败。修复后运行: systemctl enable --now $bridge_unit"
+    fi
 else
-    for unit in "$bridge_unit" "$gost_unit"; do
+    write_service "$gost_unit" "yagp node $node_id Gost" gost -C gost.yaml
+    for unit in "$gost_unit" "$bridge_unit"; do
         rc-update add "$unit" default
         rc-service "$unit" restart
     done

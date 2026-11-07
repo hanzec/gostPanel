@@ -146,7 +146,9 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-node/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载 `yagp-node` 发布包。包含注册功能的版本发布前，可以用 `make build-node` 构建节点桥，并在目标节点用 `YAGP_NODE_BIN=/path/to/yagp-node` 指定该二进制。
 
-安装脚本为每个实例启用独立的节点桥和 Gost 服务。
+安装脚本为每个实例启用 `yagp-node-<ID>.service`。节点桥启动前检查对应的 `yagp-gost-<ID>.service`，在服务或程序缺少时尝试补装，并等待本机 Gost API 就绪。Gost 程序从官方 GitHub Releases 下载。
+
+如果注册后服务启动失败，使用 `journalctl -u yagp-node-<ID> -u yagp-gost-<ID>` 查看日志。配置已写入实例目录时，排除故障后执行 `systemctl enable --now yagp-node-<ID>`。如果注册已完成但本地配置未写入，请重新签发令牌。
 
 执行 `bash scripts/install_node.sh uninstall --node-id <ID>` 可卸载实例并保留配置。在同一台服务器重新注册同一节点前，先卸载原实例并移走保留的目录。
 
