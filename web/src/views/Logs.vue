@@ -1,205 +1,578 @@
 <template>
-  <div class="page-container">
-    <el-card shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <span>操作日志</span>
-          <el-button :icon="Refresh" @click="fetchData">刷新</el-button>
-        </div>
+  <div class="ops-page">
+    <PageHeader eyebrow="AUDIT TRAIL" title="操作日志" description="按管理员、操作和资源追溯面板变更，查看来源与详情。">
+      <template #actions>
+        <el-button :icon="Refresh" :loading="loading" @click="fetchData">刷新日志</el-button>
       </template>
+    </PageHeader>
 
-      <!-- 搜索栏 -->
-      <div class="search-bar">
-        <el-input
-          v-model="searchUsername"
-          placeholder="搜索用户名"
-          :prefix-icon="Search"
-          clearable
-          style="width: 150px"
-          @clear="handleSearch"
-          @keyup.enter="handleSearch"
-        />
-        <el-select v-model="searchAction" placeholder="操作类型" clearable style="width: 120px" @change="handleSearch">
-          <el-option label="创建" value="create" />
-          <el-option label="更新" value="update" />
-          <el-option label="删除" value="delete" />
-          <el-option label="启动" value="start" />
-          <el-option label="停止" value="stop" />
-        </el-select>
-        <el-select v-model="searchResourceType" placeholder="资源类型" clearable style="width: 120px" @change="handleSearch">
-          <el-option label="节点" value="node" />
-          <el-option label="转发" value="forward" />
-          <el-option label="隧道" value="tunnel" />
-        </el-select>
-        <el-button :icon="Search" @click="handleSearch">搜索</el-button>
+    <MetricStrip label="审计记录摘要" :items="summary" />
+
+    <section class="ops-panel audit-panel" aria-labelledby="audit-title" :aria-busy="loading">
+      <header class="audit-section-head">
+        <div class="audit-section-heading">
+          <span class="audit-mark"><el-icon aria-hidden="true"><Document /></el-icon></span>
+          <div>
+            <h2 id="audit-title">审计记录</h2>
+            <p class="ops-muted">按操作时间倒序</p>
+          </div>
+        </div>
+      </header>
+
+      <form class="ops-toolbar audit-filters" aria-label="日志筛选" @submit.prevent="applyFilters">
+        <div class="audit-filter">
+          <label for="audit-user">管理员</label>
+          <el-input id="audit-user" v-model="filters.username" :prefix-icon="Search" placeholder="输入用户名" clearable />
+        </div>
+        <div class="audit-filter">
+          <label for="audit-action">操作类型</label>
+          <el-select id="audit-action" v-model="filters.action" aria-label="操作类型" placeholder="所有操作" clearable>
+            <el-option v-for="(label, value) in actionLabels" :key="value" :label="label" :value="value" />
+          </el-select>
+        </div>
+        <div class="audit-filter">
+          <label for="audit-resource">资源类型</label>
+          <el-select id="audit-resource" v-model="filters.resource_type" aria-label="资源类型" placeholder="所有资源" clearable>
+            <el-option label="节点" value="node" />
+            <el-option label="转发规则" value="rule" />
+            <el-option label="隧道" value="tunnel" />
+          </el-select>
+        </div>
+        <div class="audit-filter-actions">
+          <el-button text @click="clearFilters">重置</el-button>
+          <el-button native-type="submit" :icon="Search">应用筛选</el-button>
+        </div>
+      </form>
+
+      <div v-if="listError" class="audit-error" role="alert">
+        <div>
+          <strong>日志加载失败</strong>
+          <p>{{ logList.length ? '下方保留了上次获取的记录。' : '请检查连接后重试。' }}</p>
+        </div>
+        <el-button :loading="loading" @click="fetchData">重试</el-button>
       </div>
 
-      <!-- 表格 -->
-      <el-table :data="logList" v-loading="loading" style="width: 100%" border>
-        <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column prop="username" label="用户" width="120" align="center">
-          <template #default="{ row }">
-            <el-tag type="info" size="small" effect="plain">{{ row.username }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="action" label="操作" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" :type="getActionType(row.action)">{{ getActionText(row.action) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="resource_type" label="资源类型" width="120" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.resource_type" :type="getResourceTagType(row.resource_type)" effect="light" size="small">
-              {{ getResourceText(row.resource_type) }}
-            </el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="时间" width="170" align="center">
-          <template #default="{ row }">
-            {{ new Date(row.created_at).toLocaleString() }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="ip_address" label="IP 地址" width="150" align="center">
-          <template #default="{ row }">
-            <el-tooltip v-if="row.user_agent" :content="row.user_agent" placement="top">
-              <span style="font-family: monospace; cursor: help">{{ row.ip_address || '-' }}</span>
-            </el-tooltip>
-            <span v-else style="font-family: monospace">{{ row.ip_address || '-' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="details" label="详情" min-width="200" header-align="center" show-overflow-tooltip />
-      </el-table>
+      <div v-if="!logList.length && loading" class="audit-placeholder" role="status">正在读取操作日志…</div>
+      <div v-else-if="!logList.length && !listError" class="audit-placeholder">
+        <el-icon aria-hidden="true"><Document /></el-icon>
+        <strong>{{ hasFilters ? '没有匹配的记录' : '还没有操作记录' }}</strong>
+        <p>{{ hasFilters ? '修改筛选条件，或清除筛选查看全部记录。' : '管理员对节点、规则和隧道的变更会记录在这里。' }}</p>
+        <el-button v-if="hasFilters" @click="clearFilters">清除筛选</el-button>
+      </div>
 
-      <!-- 分页 -->
-      <div class="pagination">
+      <div
+        v-if="logList.length"
+        class="ops-table-scroll audit-table-scroll"
+        tabindex="0"
+        role="region"
+        aria-label="操作日志列表"
+      >
+        <table class="audit-table" role="table">
+          <thead role="rowgroup">
+            <tr role="row">
+              <th scope="col" role="columnheader">操作时间</th>
+              <th scope="col" role="columnheader">管理员 / 来源</th>
+              <th scope="col" role="columnheader">操作</th>
+              <th scope="col" role="columnheader">资源</th>
+              <th scope="col" role="columnheader">详情</th>
+            </tr>
+          </thead>
+          <tbody role="rowgroup">
+            <tr v-for="row in logList" :key="row.id" role="row">
+              <th class="audit-when" scope="row" role="rowheader">
+                <time class="ops-mono" :datetime="row.created_at">{{ formatDate(row.created_at) }}</time>
+                <span class="audit-secondary ops-mono">#{{ row.id }}</span>
+              </th>
+              <td role="cell" data-label="管理员 / 来源">
+                <strong>{{ row.username || '—' }}</strong>
+                <span class="audit-secondary ops-mono">{{ row.ip_address || '—' }}</span>
+              </td>
+              <td role="cell" data-label="操作">
+                <span class="ops-status" :class="actionClass[row.action] || 'is-muted'">
+                  {{ actionLabels[row.action] || row.action || '—' }}
+                </span>
+              </td>
+              <td role="cell" data-label="资源">
+                {{ resourceLabel(row.resource_type) }}
+                <span v-if="row.resource_id" class="audit-secondary ops-mono">#{{ row.resource_id }}</span>
+              </td>
+              <td class="audit-detail-cell" role="cell" data-label="详情">
+                <span class="audit-detail-preview">{{ row.details || '—' }}</span>
+                <el-button text :aria-label="'查看操作记录 ' + row.id" @click="openRecord(row)">查看详情</el-button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <footer v-if="logList.length || total > 0" class="ops-pagination audit-pagination">
+        <span class="ops-muted">共 {{ total }} 条{{ hasFilters ? '匹配' : '记录' }}</span>
         <el-pagination
           v-model:current-page="page"
           v-model:page-size="pageSize"
           :total="total"
           :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          @size-change="fetchData"
-          @current-change="fetchData"
+          :pager-count="5"
+          layout="sizes, prev, pager, next"
+          aria-label="日志列表分页"
         />
-      </div>
-    </el-card>
+      </footer>
+    </section>
+
+    <el-dialog
+      v-model="recordVisible"
+      :title="'操作记录 #' + (selectedRecord?.id || '')"
+      width="min(600px, calc(100vw - 24px))"
+      top="6vh"
+    >
+      <template v-if="selectedRecord">
+        <dl class="audit-record">
+          <div>
+            <dt>操作时间</dt>
+            <dd class="ops-mono">{{ formatDate(selectedRecord.created_at) }}</dd>
+          </div>
+          <div>
+            <dt>管理员</dt>
+            <dd>{{ selectedRecord.username || '—' }}</dd>
+          </div>
+          <div>
+            <dt>操作类型</dt>
+            <dd>
+              <span class="ops-status" :class="actionClass[selectedRecord.action] || 'is-muted'">
+                {{ actionLabels[selectedRecord.action] || selectedRecord.action || '—' }}
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt>资源</dt>
+            <dd>
+              {{ resourceLabel(selectedRecord.resource_type) }}
+              <span v-if="selectedRecord.resource_id" class="ops-mono">#{{ selectedRecord.resource_id }}</span>
+            </dd>
+          </div>
+          <div>
+            <dt>来源 IP</dt>
+            <dd class="ops-mono">{{ selectedRecord.ip_address || '—' }}</dd>
+          </div>
+          <div class="audit-record-wide">
+            <dt>客户端 User-Agent</dt>
+            <dd class="ops-mono">{{ selectedRecord.user_agent || '—' }}</dd>
+          </div>
+          <div class="audit-record-wide">
+            <dt>操作详情</dt>
+            <dd><pre>{{ selectedRecord.details || '—' }}</pre></dd>
+          </div>
+        </dl>
+      </template>
+      <template #footer>
+        <el-button @click="recordVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { Refresh, Search } from '@element-plus/icons-vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { Collection, Delete, Document, Refresh, Search, User } from '@element-plus/icons-vue'
+import MetricStrip from '@/components/MetricStrip.vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { getLogList } from '@/api/log'
 
-// 列表数据
 const logList = ref([])
 const loading = ref(false)
+const listError = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 
-// 搜索
-const searchUsername = ref('')
-const searchAction = ref('')
-const searchResourceType = ref('')
+const emptyFilters = { username: '', action: '', resource_type: '' }
+const filters = reactive({ ...emptyFilters })
+const activeFilters = ref({ ...emptyFilters })
+const hasFilters = computed(() => Object.values(activeFilters.value).some(Boolean))
 
-// 操作类型
-const getActionType = (action) => {
-  const map = { create: 'primary', update: 'warning', delete: 'danger', start: 'success', stop: 'info' }
-  return map[action] || ''
+const actionLabels = { create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止' }
+const actionClass = { create: 'is-success', update: 'is-warning', delete: 'is-danger', start: 'is-success', stop: 'is-muted' }
+const resourceLabels = { node: '节点', rule: '转发规则', tunnel: '隧道' }
+const resourceLabel = type => resourceLabels[type] || type || '—'
+const formatDate = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
+const summary = computed(() => {
+  const unavailable = (loading.value || listError.value) && !logList.value.length
+  const actors = new Set(logList.value.map(log => log.username).filter(Boolean))
+  const resources = new Set(logList.value.filter(log => log.resource_type && log.resource_id)
+    .map(log => log.resource_type + '/' + log.resource_id))
+  return [
+    { label: '匹配记录', value: unavailable ? null : total.value, detail: '所有匹配页', icon: Document },
+    { label: '本页管理员', value: unavailable ? null : actors.size, icon: User },
+    { label: '本页涉及资源', value: unavailable ? null : resources.size, icon: Collection },
+    { label: '本页删除操作', value: unavailable ? null : logList.value.filter(log => log.action === 'delete').length, icon: Delete, tone: 'warning' }
+  ]
+})
+
+const selectedRecord = ref(null)
+const recordVisible = ref(false)
+
+const openRecord = row => {
+  selectedRecord.value = row
+  recordVisible.value = true
 }
 
-const getActionText = (action) => {
-  const map = { create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止' }
-  return map[action] || action
-}
-
-const getResourceText = (type) => {
-  const map = { node: '节点', forward: '转发', tunnel: '隧道' }
-  return map[type] || type || '-'
-}
-
-const getResourceTagType = (type) => {
-  const map = { node: '', forward: 'success', tunnel: 'warning' }
-  return map[type] || 'info'
-}
-
-// 获取数据
+let latestRequest = 0
 const fetchData = async () => {
+  const request = ++latestRequest
   loading.value = true
   try {
-    const res = await getLogList({
-      page: page.value,
-      pageSize: pageSize.value,
-      username: searchUsername.value,
-      action: searchAction.value,
-      resource_type: searchResourceType.value
-    })
-    logList.value = res.data.list || []
-    total.value = res.data.total || 0
-  } catch (error) {
-    console.error('获取日志列表失败:', error)
+    const { data } = await getLogList({ page: page.value, pageSize: pageSize.value, ...activeFilters.value })
+    if (request !== latestRequest) return
+    logList.value = data.list || []
+    total.value = data.total || 0
+    listError.value = false
+  } catch {
+    if (request === latestRequest) listError.value = true
   } finally {
-    loading.value = false
+    if (request === latestRequest) loading.value = false
   }
 }
 
-// 搜索
-const handleSearch = () => {
-  page.value = 1
-  fetchData()
+const applyFilters = () => {
+  activeFilters.value = { ...filters, username: filters.username.trim() }
+  logList.value = []
+  total.value = 0
+  if (page.value === 1) fetchData()
+  else page.value = 1
 }
 
-onMounted(() => {
-  fetchData()
-})
+const clearFilters = () => {
+  Object.assign(filters, emptyFilters)
+  applyFilters()
+}
+
+watch([page, pageSize], fetchData)
+onMounted(fetchData)
 </script>
 
 <style scoped>
-.page-container {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.audit-panel {
+  min-width: 0;
 }
 
-.card-header {
+.audit-section-head,
+.audit-section-heading,
+.audit-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.audit-section-head {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 20px 20px 16px;
+}
+
+.audit-mark {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  color: var(--ops-accent);
+  background: var(--ops-inset);
+}
+
+.audit-section-head h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.audit-section-head p {
+  margin: 4px 0 0;
+  font-size: .875rem;
+}
+
+.audit-filters {
+  display: grid;
+  grid-template-columns: minmax(155px, 1.4fr) repeat(2, minmax(120px, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 16px 20px;
+  border-top: 1px solid var(--ops-border);
+  border-bottom: 0;
+}
+
+.audit-filter {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.audit-filter label {
+  color: var(--ops-muted);
+  font-size: .8125rem;
+  font-weight: 550;
+}
+
+.audit-filter-actions {
+  gap: 8px;
+}
+
+.audit-filter-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.audit-table-scroll {
+  border-top: 1px solid var(--ops-border);
+}
+
+.audit-table {
+  width: 100%;
+  min-width: 670px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: .875rem;
+}
+
+.audit-table th,
+.audit-table td {
+  padding: 14px 12px;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+.audit-table th:first-child {
+  padding-left: 20px;
+}
+
+.audit-table th:last-child,
+.audit-table td:last-child {
+  padding-right: 20px;
+}
+
+.audit-table thead {
+  color: var(--ops-muted);
+  background: var(--ops-inset);
+}
+
+.audit-table thead th {
+  font-size: .75rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.audit-table tbody tr + tr {
+  border-top: 1px solid var(--ops-border);
+}
+
+.audit-table tbody tr:hover,
+.audit-table tbody tr:focus-within {
+  background: var(--ops-raised);
+}
+
+.audit-when {
+  min-width: 144px;
+  font-weight: 550;
+}
+
+.audit-secondary {
+  display: block;
+  margin-top: 4px;
+  color: var(--ops-muted);
+  font-size: .75rem;
+  font-weight: 450;
+}
+
+.audit-detail-cell {
+  min-width: 140px;
+  max-width: 350px;
+}
+
+.audit-detail-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.45;
+}
+
+.audit-detail-cell .el-button {
+  min-height: 28px;
+  padding: 2px 0;
+  color: var(--ops-accent);
+}
+
+.audit-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--ops-border);
+  font-size: .8125rem;
+}
+
+.audit-pagination :deep(.el-pagination) {
+  max-width: 100%;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.audit-placeholder {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 36px 16px;
+  border-top: 1px solid var(--ops-border);
+  color: var(--ops-muted);
+  text-align: center;
+}
+
+.audit-placeholder .el-icon {
+  color: var(--ops-accent);
+  font-size: 24px;
+}
+
+.audit-placeholder strong {
+  color: var(--ops-text);
+}
+
+.audit-placeholder p,
+.audit-error p {
+  margin: 0;
+}
+
+.audit-error {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.search-bar {
-  display: flex;
   gap: 12px;
-  margin-bottom: 16px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--ops-border);
+  color: var(--ops-warning);
+  font-size: .875rem;
 }
 
-.pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
+.audit-record {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
 }
 
-/* ========== 移动端适配 ========== */
-@media screen and (max-width: 768px) {
-  .search-bar {
-    flex-wrap: wrap;
+.audit-record-wide {
+  grid-column: 1 / -1;
+}
+
+.audit-record dt {
+  color: var(--ops-muted);
+  font-size: .8125rem;
+}
+
+.audit-record dd {
+  margin: 4px 0 0;
+  color: var(--ops-text);
+  overflow-wrap: anywhere;
+}
+
+.audit-record pre {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  background: var(--ops-inset);
+  font: inherit;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 1040px) {
+  .audit-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  
-  .search-bar .el-input,
-  .search-bar .el-select {
-    width: 100% !important;
+
+  .audit-filter:first-child {
+    grid-column: 1 / -1;
   }
-  
-  :deep(.el-table) {
-    font-size: 12px;
+
+  .audit-filter-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
-  
-  .card-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+}
+
+@media (max-width: 700px) {
+  .audit-section-head,
+  .audit-filters,
+  .audit-pagination,
+  .audit-error {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .audit-table {
+    display: block;
+    min-width: 0;
+  }
+
+  .audit-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .audit-table tbody {
+    display: block;
+  }
+
+  .audit-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+    padding: 14px;
+  }
+
+  .audit-table tbody th,
+  .audit-table tbody td {
+    min-width: 0;
+    max-width: none;
+    padding: 0;
+  }
+
+  .audit-table tbody th:first-child,
+  .audit-table tbody td:last-child {
+    padding: 0;
+  }
+
+  .audit-table td[data-label]::before {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--ops-muted);
+    font-size: .75rem;
+    content: attr(data-label);
+  }
+
+  .audit-when,
+  .audit-detail-cell {
+    grid-column: 1 / -1;
+  }
+
+  .audit-detail-cell .el-button,
+  .audit-filter-actions .el-button,
+  .audit-filters :deep(.el-input__wrapper),
+  .audit-filters :deep(.el-select__wrapper),
+  .audit-pagination :deep(.el-pagination button),
+  .audit-pagination :deep(.el-pager li) {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 430px) {
+  .audit-record {
+    grid-template-columns: 1fr;
   }
 }
 </style>
