@@ -30,6 +30,7 @@ type ServerConfig struct {
 type DatabaseConfig struct {
 	Type string `mapstructure:"type"`
 	Path string `mapstructure:"path"`
+	DSN  string `mapstructure:"dsn"`
 }
 
 // JWTConfig JWT 配置
@@ -53,6 +54,12 @@ var cfg *Config
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigType("yaml")
+	if err := v.BindEnv("database.type", "YCGP_DATABASE_TYPE"); err != nil {
+		return nil, err
+	}
+	if err := v.BindEnv("database.dsn", "YCGP_DATABASE_DSN"); err != nil {
+		return nil, err
+	}
 
 	// 确定配置文件路径
 	if configPath != "" {

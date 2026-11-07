@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"ycgp/internal/config"
@@ -15,6 +17,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	mysqldriver "github.com/go-sql-driver/mysql"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
@@ -135,13 +139,22 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		Logger: gormlogger.Default.LogMode(gormLogLevel),
 	}
 
-	// 连接 SQLite 数据库
-	db, err := gorm.Open(sqlite.Open(cfg.Database.Path), gormConfig)
-	if err != nil {
-		return nil, err
+	switch strings.ToLower(strings.TrimSpace(cfg.Database.Type)) {
+	case "sqlite":
+		return gorm.Open(sqlite.Open(cfg.Database.Path), gormConfig)
+	case "mysql":
+		if strings.TrimSpace(cfg.Database.DSN) == "" {
+			return nil, fmt.Errorf("MySQL 需要配置 database.dsn 或 YCGP_DATABASE_DSN")
+		}
+		dsn, err := mysqldriver.ParseDSN(cfg.Database.DSN)
+		if err != nil || dsn.DBName == "" {
+			return nil, fmt.Errorf("MySQL 连接串无效或未指定数据库名")
+		}
+		dsn.ParseTime = true
+		return gorm.Open(mysql.New(mysql.Config{DSNConfig: dsn}), gormConfig)
+	default:
+		return nil, fmt.Errorf("不支持的数据库类型 %q，请使用 sqlite 或 mysql", cfg.Database.Type)
 	}
-
-	return db, nil
 }
 
 // autoMigrate 自动迁移数据库表结构

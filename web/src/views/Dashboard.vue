@@ -100,7 +100,7 @@
           </template>
           <el-descriptions :column="2" border>
             <el-descriptions-item label="Gost 版本">v3.2.6</el-descriptions-item>
-            <el-descriptions-item label="数据库">SQLite</el-descriptions-item>
+            <el-descriptions-item label="数据库">{{ stats.database || '—' }}</el-descriptions-item>
             <el-descriptions-item label="登录用户">{{ authStore.username }}</el-descriptions-item>
             <el-descriptions-item label="当前时间">{{ currentTime }}</el-descriptions-item>
           </el-descriptions>
@@ -149,7 +149,8 @@ const stats = reactive({
   nodes: { total: 0, online: 0, offline: 0 },
   rules: { total: 0, running: 0, stopped: 0 },
   tunnels: { total: 0, running: 0, stopped: 0 },
-  version: ''
+  version: '',
+  database: ''
 })
 
 // 最近日志

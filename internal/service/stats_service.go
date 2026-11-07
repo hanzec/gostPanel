@@ -13,7 +13,7 @@ type StatsService struct {
 	nodeRepo   *repository.NodeRepository
 	ruleRepo   *repository.RuleRepository
 	tunnelRepo *repository.TunnelRepository
-	logRepo    *repository.OperationLogRepository
+	database   string
 }
 
 // NewStatsService 创建统计服务
@@ -22,16 +22,17 @@ func NewStatsService(db *gorm.DB) *StatsService {
 		nodeRepo:   repository.NewNodeRepository(db),
 		ruleRepo:   repository.NewRuleRepository(db),
 		tunnelRepo: repository.NewTunnelRepository(db),
-		logRepo:    repository.NewOperationLogRepository(db),
+		database:   db.Dialector.Name(),
 	}
 }
 
 // DashboardStats 仪表盘统计
 type DashboardStats struct {
-	Nodes   NodeStats   `json:"nodes"`
-	Rules   RuleStats   `json:"rules"`
-	Tunnels TunnelStats `json:"tunnels"`
-	Version string      `json:"version"`
+	Nodes    NodeStats   `json:"nodes"`
+	Rules    RuleStats   `json:"rules"`
+	Tunnels  TunnelStats `json:"tunnels"`
+	Version  string      `json:"version"`
+	Database string      `json:"database"`
 }
 
 // NodeStats 节点统计
@@ -117,6 +118,7 @@ func (s *StatsService) GetDashboardStats() (*DashboardStats, error) {
 	}
 
 	stats.Version = config.Version
+	stats.Database = s.database
 
 	return stats, nil
 }

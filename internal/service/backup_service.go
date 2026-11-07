@@ -34,8 +34,15 @@ func NewBackupService(db *gorm.DB) *BackupService {
 	}
 }
 
+func (s *BackupService) Supported() bool {
+	return s.db.Dialector.Name() == "sqlite"
+}
+
 // Start 启动自动备份任务 (按小时检查)
 func (s *BackupService) Start() {
+	if !s.Supported() {
+		return
+	}
 	go func() {
 		// 启动时先检查一次
 		s.processAutoBackup()
@@ -57,6 +64,9 @@ func (s *BackupService) Start() {
 
 // Stop 停止自动备份任务
 func (s *BackupService) Stop() {
+	if !s.Supported() {
+		return
+	}
 	close(s.stopChan)
 	logger.Info("自动备份服务已停止")
 }
@@ -108,6 +118,10 @@ func (s *BackupService) processAutoBackup() {
 
 // CreateBackup 创建备份
 func (s *BackupService) CreateBackup() error {
+	if !s.Supported() {
+		return errors.ErrBackupUnsupported
+	}
+
 	// 获取数据库路径
 	dbPath := config.Get().Database.Path
 	if dbPath == "" {

@@ -11,6 +11,8 @@ services:
     environment:
       - GIN_MODE=release
       - TZ=Asia/Shanghai
+      - YCGP_DATABASE_TYPE
+      - YCGP_DATABASE_DSN
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:39100/api/v1/health"]

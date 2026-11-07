@@ -154,6 +154,7 @@ var (
 	ErrBackupDirCreateFailed = New(10412, "创建备份目录失败", http.StatusInternalServerError)
 	// ErrBackupFailed 备份失败
 	ErrBackupFailed = New(10413, "备份失败", http.StatusInternalServerError)
+	ErrBackupUnsupported = New(10416, "面板仅支持 SQLite 备份。MySQL 请使用数据库服务备份。", http.StatusNotImplemented)
 
 	// ErrObserverCreateFailed 创建观察器失败
 	ErrObserverCreateFailed = New(10414, "创建流量监控失败", http.StatusInternalServerError)

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"ycgp/internal/dto"
+	"ycgp/internal/errors"
 	"ycgp/internal/service"
 	"ycgp/pkg/response"
 
@@ -30,6 +31,7 @@ func (h *SystemConfigHandler) GetConfig(c *gin.Context) {
 		return
 	}
 
+	config.Backup.Supported = h.backupService.Supported()
 	response.Success(c, config)
 }
 
@@ -79,6 +81,10 @@ func (h *SystemConfigHandler) TestEmail(c *gin.Context) {
 // Backup 立即备份
 func (h *SystemConfigHandler) Backup(c *gin.Context) {
 	if err := h.backupService.CreateBackup(); err != nil {
+		if err == errors.ErrBackupUnsupported {
+			response.HandleError(c, err)
+			return
+		}
 		response.Error(c, 500, 50002, "备份失败: "+err.Error())
 		return
 	}

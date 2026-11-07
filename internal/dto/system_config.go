@@ -41,6 +41,7 @@ type LogConfigResp struct {
 }
 
 type BackupConfigResp struct {
+	Supported      bool `json:"supported"`
 	AutoBackup     bool `json:"autoBackup"`
 	RetentionCount int  `json:"retentionCount"`
 }

@@ -59,7 +59,8 @@
 
         <!-- 备份 -->
         <el-tab-pane label="备份" name="backup">
-          <el-form ref="backupFormRef" :model="backupForm" label-width="120px" class="setting-form">
+          <el-alert v-if="!backupSupported" title="MySQL 备份由数据库服务负责" type="info" :closable="false" show-icon />
+          <el-form v-else ref="backupFormRef" :model="backupForm" label-width="120px" class="setting-form">
             <el-form-item label="自动备份" prop="autoBackup">
               <el-switch v-model="backupForm.autoBackup" />
             </el-form-item>
@@ -126,6 +127,7 @@ const configForm = reactive({
 
 
 
+const backupSupported = ref(true)
 const backupForm = reactive({
   autoBackup: false,
   retentionCount: 7
@@ -144,7 +146,11 @@ const fetchConfig = async () => {
             }
             if (email) Object.assign(emailForm, email)
             if (config) Object.assign(configForm, config)
-            if (backup) Object.assign(backupForm, backup)
+            if (backup) {
+                const { supported, autoBackup, retentionCount } = backup
+                backupSupported.value = supported
+                Object.assign(backupForm, { autoBackup, retentionCount })
+            }
         }
     } catch (error) {
         console.error('获取系统配置失败:', error)
