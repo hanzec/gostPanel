@@ -660,7 +660,7 @@ var File_node_proto protoreflect.FileDescriptor
 const file_node_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"node.proto\x12\fycgp.node.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x0eobserver.proto\"P\n" +
+	"node.proto\x12\fyagp.node.v1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x0eobserver.proto\"P\n" +
 	"\x0eCommandRequest\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
@@ -684,7 +684,7 @@ const file_node_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
 	"\bpriority\x18\x03 \x01(\x05R\bpriority\"E\n" +
 	"\rGostLogsReply\x124\n" +
-	"\aentries\x18\x01 \x03(\v2\x1a.ycgp.node.v1.GostLogEntryR\aentries\"#\n" +
+	"\aentries\x18\x01 \x03(\v2\x1a.yagp.node.v1.GostLogEntryR\aentries\"#\n" +
 	"\tNftConfig\x12\x16\n" +
 	"\x06config\x18\x01 \x01(\tR\x06config\"-\n" +
 	"\x12NftTemplateRequest\x12\x17\n" +
@@ -701,17 +701,17 @@ const file_node_proto_rawDesc = "" +
 	"\bpassword\x18\x03 \x01(\tR\bpassword\x12!\n" +
 	"\fcontrol_port\x18\x04 \x01(\rR\vcontrolPort2\x8a\x04\n" +
 	"\x04Node\x12C\n" +
-	"\aExecute\x12\x1c.ycgp.node.v1.CommandRequest\x1a\x1a.ycgp.node.v1.CommandReply\x12M\n" +
-	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.ycgp.node.v1.ObserverEndpoint\x12O\n" +
-	"\x14GetGostServiceStatus\x12\x16.google.protobuf.Empty\x1a\x1f.ycgp.node.v1.GostServiceStatus\x12M\n" +
-	"\x12RestartGostService\x12\x16.google.protobuf.Empty\x1a\x1f.ycgp.node.v1.GostServiceStatus\x12I\n" +
-	"\vGetGostLogs\x12\x1d.ycgp.node.v1.GostLogsRequest\x1a\x1b.ycgp.node.v1.GostLogsReply\x12?\n" +
-	"\fGetNftConfig\x12\x16.google.protobuf.Empty\x1a\x17.ycgp.node.v1.NftConfig\x12B\n" +
-	"\x0eApplyNftConfig\x12\x17.ycgp.node.v1.NftConfig\x1a\x17.ycgp.node.v1.NftConfig2\xe4\x01\n" +
+	"\aExecute\x12\x1c.yagp.node.v1.CommandRequest\x1a\x1a.yagp.node.v1.CommandReply\x12M\n" +
+	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.yagp.node.v1.ObserverEndpoint\x12O\n" +
+	"\x14GetGostServiceStatus\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.GostServiceStatus\x12M\n" +
+	"\x12RestartGostService\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.GostServiceStatus\x12I\n" +
+	"\vGetGostLogs\x12\x1d.yagp.node.v1.GostLogsRequest\x1a\x1b.yagp.node.v1.GostLogsReply\x12?\n" +
+	"\fGetNftConfig\x12\x16.google.protobuf.Empty\x1a\x17.yagp.node.v1.NftConfig\x12B\n" +
+	"\x0eApplyNftConfig\x12\x17.yagp.node.v1.NftConfig\x1a\x17.yagp.node.v1.NftConfig2\xe4\x01\n" +
 	"\x05Panel\x12:\n" +
-	"\x06Report\x12\x1b.ycgp.node.v1.ReportRequest\x1a\x13.proto.ObserveReply\x12R\n" +
-	"\fRegisterNode\x12!.ycgp.node.v1.RegisterNodeRequest\x1a\x1f.ycgp.node.v1.RegisterNodeReply\x12K\n" +
-	"\x0eGetNftTemplate\x12 .ycgp.node.v1.NftTemplateRequest\x1a\x17.ycgp.node.v1.NftConfigB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
+	"\x06Report\x12\x1b.yagp.node.v1.ReportRequest\x1a\x13.proto.ObserveReply\x12R\n" +
+	"\fRegisterNode\x12!.yagp.node.v1.RegisterNodeRequest\x1a\x1f.yagp.node.v1.RegisterNodeReply\x12K\n" +
+	"\x0eGetNftTemplate\x12 .yagp.node.v1.NftTemplateRequest\x1a\x17.yagp.node.v1.NftConfigB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var (
 	file_node_proto_rawDescOnce sync.Once
@@ -727,45 +727,45 @@ func file_node_proto_rawDescGZIP() []byte {
 
 var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_node_proto_goTypes = []any{
-	(*CommandRequest)(nil),       // 0: ycgp.node.v1.CommandRequest
-	(*CommandReply)(nil),         // 1: ycgp.node.v1.CommandReply
-	(*ObserverEndpoint)(nil),     // 2: ycgp.node.v1.ObserverEndpoint
-	(*GostServiceStatus)(nil),    // 3: ycgp.node.v1.GostServiceStatus
-	(*GostLogsRequest)(nil),      // 4: ycgp.node.v1.GostLogsRequest
-	(*GostLogEntry)(nil),         // 5: ycgp.node.v1.GostLogEntry
-	(*GostLogsReply)(nil),        // 6: ycgp.node.v1.GostLogsReply
-	(*NftConfig)(nil),            // 7: ycgp.node.v1.NftConfig
-	(*NftTemplateRequest)(nil),   // 8: ycgp.node.v1.NftTemplateRequest
-	(*ReportRequest)(nil),        // 9: ycgp.node.v1.ReportRequest
-	(*RegisterNodeRequest)(nil),  // 10: ycgp.node.v1.RegisterNodeRequest
-	(*RegisterNodeReply)(nil),    // 11: ycgp.node.v1.RegisterNodeReply
+	(*CommandRequest)(nil),       // 0: yagp.node.v1.CommandRequest
+	(*CommandReply)(nil),         // 1: yagp.node.v1.CommandReply
+	(*ObserverEndpoint)(nil),     // 2: yagp.node.v1.ObserverEndpoint
+	(*GostServiceStatus)(nil),    // 3: yagp.node.v1.GostServiceStatus
+	(*GostLogsRequest)(nil),      // 4: yagp.node.v1.GostLogsRequest
+	(*GostLogEntry)(nil),         // 5: yagp.node.v1.GostLogEntry
+	(*GostLogsReply)(nil),        // 6: yagp.node.v1.GostLogsReply
+	(*NftConfig)(nil),            // 7: yagp.node.v1.NftConfig
+	(*NftTemplateRequest)(nil),   // 8: yagp.node.v1.NftTemplateRequest
+	(*ReportRequest)(nil),        // 9: yagp.node.v1.ReportRequest
+	(*RegisterNodeRequest)(nil),  // 10: yagp.node.v1.RegisterNodeRequest
+	(*RegisterNodeReply)(nil),    // 11: yagp.node.v1.RegisterNodeReply
 	(*proto.ObserveRequest)(nil), // 12: proto.ObserveRequest
 	(*emptypb.Empty)(nil),        // 13: google.protobuf.Empty
 	(*proto.ObserveReply)(nil),   // 14: proto.ObserveReply
 }
 var file_node_proto_depIdxs = []int32{
-	5,  // 0: ycgp.node.v1.GostLogsReply.entries:type_name -> ycgp.node.v1.GostLogEntry
-	12, // 1: ycgp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
-	0,  // 2: ycgp.node.v1.Node.Execute:input_type -> ycgp.node.v1.CommandRequest
-	13, // 3: ycgp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
-	13, // 4: ycgp.node.v1.Node.GetGostServiceStatus:input_type -> google.protobuf.Empty
-	13, // 5: ycgp.node.v1.Node.RestartGostService:input_type -> google.protobuf.Empty
-	4,  // 6: ycgp.node.v1.Node.GetGostLogs:input_type -> ycgp.node.v1.GostLogsRequest
-	13, // 7: ycgp.node.v1.Node.GetNftConfig:input_type -> google.protobuf.Empty
-	7,  // 8: ycgp.node.v1.Node.ApplyNftConfig:input_type -> ycgp.node.v1.NftConfig
-	9,  // 9: ycgp.node.v1.Panel.Report:input_type -> ycgp.node.v1.ReportRequest
-	10, // 10: ycgp.node.v1.Panel.RegisterNode:input_type -> ycgp.node.v1.RegisterNodeRequest
-	8,  // 11: ycgp.node.v1.Panel.GetNftTemplate:input_type -> ycgp.node.v1.NftTemplateRequest
-	1,  // 12: ycgp.node.v1.Node.Execute:output_type -> ycgp.node.v1.CommandReply
-	2,  // 13: ycgp.node.v1.Node.GetObserverEndpoint:output_type -> ycgp.node.v1.ObserverEndpoint
-	3,  // 14: ycgp.node.v1.Node.GetGostServiceStatus:output_type -> ycgp.node.v1.GostServiceStatus
-	3,  // 15: ycgp.node.v1.Node.RestartGostService:output_type -> ycgp.node.v1.GostServiceStatus
-	6,  // 16: ycgp.node.v1.Node.GetGostLogs:output_type -> ycgp.node.v1.GostLogsReply
-	7,  // 17: ycgp.node.v1.Node.GetNftConfig:output_type -> ycgp.node.v1.NftConfig
-	7,  // 18: ycgp.node.v1.Node.ApplyNftConfig:output_type -> ycgp.node.v1.NftConfig
-	14, // 19: ycgp.node.v1.Panel.Report:output_type -> proto.ObserveReply
-	11, // 20: ycgp.node.v1.Panel.RegisterNode:output_type -> ycgp.node.v1.RegisterNodeReply
-	7,  // 21: ycgp.node.v1.Panel.GetNftTemplate:output_type -> ycgp.node.v1.NftConfig
+	5,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
+	12, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	0,  // 2: yagp.node.v1.Node.Execute:input_type -> yagp.node.v1.CommandRequest
+	13, // 3: yagp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
+	13, // 4: yagp.node.v1.Node.GetGostServiceStatus:input_type -> google.protobuf.Empty
+	13, // 5: yagp.node.v1.Node.RestartGostService:input_type -> google.protobuf.Empty
+	4,  // 6: yagp.node.v1.Node.GetGostLogs:input_type -> yagp.node.v1.GostLogsRequest
+	13, // 7: yagp.node.v1.Node.GetNftConfig:input_type -> google.protobuf.Empty
+	7,  // 8: yagp.node.v1.Node.ApplyNftConfig:input_type -> yagp.node.v1.NftConfig
+	9,  // 9: yagp.node.v1.Panel.Report:input_type -> yagp.node.v1.ReportRequest
+	10, // 10: yagp.node.v1.Panel.RegisterNode:input_type -> yagp.node.v1.RegisterNodeRequest
+	8,  // 11: yagp.node.v1.Panel.GetNftTemplate:input_type -> yagp.node.v1.NftTemplateRequest
+	1,  // 12: yagp.node.v1.Node.Execute:output_type -> yagp.node.v1.CommandReply
+	2,  // 13: yagp.node.v1.Node.GetObserverEndpoint:output_type -> yagp.node.v1.ObserverEndpoint
+	3,  // 14: yagp.node.v1.Node.GetGostServiceStatus:output_type -> yagp.node.v1.GostServiceStatus
+	3,  // 15: yagp.node.v1.Node.RestartGostService:output_type -> yagp.node.v1.GostServiceStatus
+	6,  // 16: yagp.node.v1.Node.GetGostLogs:output_type -> yagp.node.v1.GostLogsReply
+	7,  // 17: yagp.node.v1.Node.GetNftConfig:output_type -> yagp.node.v1.NftConfig
+	7,  // 18: yagp.node.v1.Node.ApplyNftConfig:output_type -> yagp.node.v1.NftConfig
+	14, // 19: yagp.node.v1.Panel.Report:output_type -> proto.ObserveReply
+	11, // 20: yagp.node.v1.Panel.RegisterNode:output_type -> yagp.node.v1.RegisterNodeReply
+	7,  // 21: yagp.node.v1.Panel.GetNftTemplate:output_type -> yagp.node.v1.NftConfig
 	12, // [12:22] is the sub-list for method output_type
 	2,  // [2:12] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name

@@ -61,10 +61,10 @@ var cfg *Config
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigType("yaml")
-	if err := v.BindEnv("database.type", "YAGP_DATABASE_TYPE", "YCGP_DATABASE_TYPE"); err != nil {
+	if err := v.BindEnv("database.type", "YAGP_DATABASE_TYPE"); err != nil {
 		return nil, err
 	}
-	if err := v.BindEnv("database.dsn", "YAGP_DATABASE_DSN", "YCGP_DATABASE_DSN"); err != nil {
+	if err := v.BindEnv("database.dsn", "YAGP_DATABASE_DSN"); err != nil {
 		return nil, err
 	}
 

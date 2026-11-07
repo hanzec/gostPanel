@@ -39,8 +39,6 @@ docker compose up -d --build
 
 Compose 将管理端口 `39100` 发布到宿主机的 `127.0.0.1`，将节点流量上报端口 `39101` 发布到宿主机。`config/` 以只读方式挂载到 `/app/config`。部署前配置下面的 Authentik、数据库和节点上报参数。
 
-已有 Compose 部署时，在原部署目录执行 `docker compose down --remove-orphans` 释放旧容器占用的端口，再用新版配置启动。
-
 **方式 B · Linux 二进制部署**
 
 安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从当前 GitHub 仓库 `hanzec/gostPanel` 下载最新发布包，也可通过 `YAGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `yagp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
@@ -154,7 +152,7 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 在 **节点管理 → 更多 → Gost 服务** 查看 `yagp-gost-<ID>.service` 的状态和最近 100 条日志，也可重启该实例。重启会中断该实例的活动转发连接。
 
-该功能使用节点上的 `libsystemd.so.0`。新发布包包含 systemd 和通用构建，安装脚本会按服务管理器选择。在 Linux glibc 主机可用 `make build-node-systemd` 构建 systemd 版本。升级已有实例时，停止 `yagp-node-<ID>`，替换 `/etc/yagp-node/<ID>/yagp-node`，再启动该服务即可沿用现有注册配置。
+该功能使用节点上的 `libsystemd.so.0`。发布包包含 systemd 和通用构建，安装脚本会按服务管理器选择。在 Linux glibc 主机可用 `make build-node-systemd` 构建 systemd 版本。
 
 ### 管理节点的 nftables 配置
 
@@ -166,7 +164,9 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 ## 📦 预编译下载
 
-新版发布包以 `yagp-` 开头。发布流程支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。[查看当前仓库的 Releases](https://github.com/hanzec/gostPanel/releases)
+发布包以 `yagp-` 开头。面板支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。节点安装包支持 Linux（amd64、arm64）。[查看当前仓库的 Releases](https://github.com/hanzec/gostPanel/releases)
+
+面板和节点桥需要一起更新到使用 `yagp.node.v1` 的版本。更新后在面板中停止并重新启动已运行的转发规则，以更新 Gost 观察器凭据。未通过令牌注册的节点须重新注册。
 
 ### 开发与编译
 

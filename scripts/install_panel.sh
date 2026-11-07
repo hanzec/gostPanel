@@ -21,11 +21,10 @@ fi
 # Configuration
 APP_NAME="yagp"
 INSTALL_DIR="/usr/local/bin"
-# Keep the existing unit and working directory for in-place upgrades.
 SERVICE_NAME="gost-panel"
 CONFIG_DIR="/etc/gost-panel"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-REPO=${YAGP_REPO:-${YCGP_REPO:-hanzec/gostPanel}}
+REPO=${YAGP_REPO:-hanzec/gostPanel}
 GH_PROXY=${GH_PROXY:-""}
 
 # Detect Architecture

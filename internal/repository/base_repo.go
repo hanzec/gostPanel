@@ -82,13 +82,6 @@ func ApplyPagination(db *gorm.DB, opt *QueryOption) *gorm.DB {
 	return db
 }
 
-// ApplyOptions 应用所有查询选项（为了兼容旧代码）
-func ApplyOptions(db *gorm.DB, opt *QueryOption) *gorm.DB {
-	db = ApplyConditions(db, opt)
-	db = ApplyPagination(db, opt)
-	return db
-}
-
 // UpdateField 更新单个字段
 func (r *BaseRepository) UpdateField(model any, id uint, column string, value any) error {
 	return r.DB.Model(model).Where("id = ?", id).Update(column, value).Error

@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
 	"yagp/pkg/gost"
 	"yagp/pkg/response"
@@ -78,11 +77,7 @@ func nodeOperationError(c *gin.Context, err error) {
 	case codes.InvalidArgument, codes.ResourceExhausted:
 		response.BadRequest(c, rpc.Message())
 	case codes.Unimplemented:
-		message := rpc.Message()
-		if strings.HasPrefix(message, "unknown method ") {
-			message = "节点版本不支持该运维操作，请升级节点桥"
-		}
-		response.Error(c, http.StatusNotImplemented, response.CodeInternalError, message)
+		response.Error(c, http.StatusNotImplemented, response.CodeInternalError, rpc.Message())
 	case codes.FailedPrecondition, codes.NotFound, codes.PermissionDenied:
 		response.Error(c, http.StatusConflict, response.CodeBadRequest, rpc.Message())
 	case codes.DeadlineExceeded:

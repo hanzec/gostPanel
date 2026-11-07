@@ -21,13 +21,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Node_Execute_FullMethodName              = "/ycgp.node.v1.Node/Execute"
-	Node_GetObserverEndpoint_FullMethodName  = "/ycgp.node.v1.Node/GetObserverEndpoint"
-	Node_GetGostServiceStatus_FullMethodName = "/ycgp.node.v1.Node/GetGostServiceStatus"
-	Node_RestartGostService_FullMethodName   = "/ycgp.node.v1.Node/RestartGostService"
-	Node_GetGostLogs_FullMethodName          = "/ycgp.node.v1.Node/GetGostLogs"
-	Node_GetNftConfig_FullMethodName         = "/ycgp.node.v1.Node/GetNftConfig"
-	Node_ApplyNftConfig_FullMethodName       = "/ycgp.node.v1.Node/ApplyNftConfig"
+	Node_Execute_FullMethodName              = "/yagp.node.v1.Node/Execute"
+	Node_GetObserverEndpoint_FullMethodName  = "/yagp.node.v1.Node/GetObserverEndpoint"
+	Node_GetGostServiceStatus_FullMethodName = "/yagp.node.v1.Node/GetGostServiceStatus"
+	Node_RestartGostService_FullMethodName   = "/yagp.node.v1.Node/RestartGostService"
+	Node_GetGostLogs_FullMethodName          = "/yagp.node.v1.Node/GetGostLogs"
+	Node_GetNftConfig_FullMethodName         = "/yagp.node.v1.Node/GetNftConfig"
+	Node_ApplyNftConfig_FullMethodName       = "/yagp.node.v1.Node/ApplyNftConfig"
 )
 
 // NodeClient is the client API for Node service.
@@ -314,7 +314,7 @@ func _Node_ApplyNftConfig_Handler(srv interface{}, ctx context.Context, dec func
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Node_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ycgp.node.v1.Node",
+	ServiceName: "yagp.node.v1.Node",
 	HandlerType: (*NodeServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -351,9 +351,9 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Panel_Report_FullMethodName         = "/ycgp.node.v1.Panel/Report"
-	Panel_RegisterNode_FullMethodName   = "/ycgp.node.v1.Panel/RegisterNode"
-	Panel_GetNftTemplate_FullMethodName = "/ycgp.node.v1.Panel/GetNftTemplate"
+	Panel_Report_FullMethodName         = "/yagp.node.v1.Panel/Report"
+	Panel_RegisterNode_FullMethodName   = "/yagp.node.v1.Panel/RegisterNode"
+	Panel_GetNftTemplate_FullMethodName = "/yagp.node.v1.Panel/GetNftTemplate"
 )
 
 // PanelClient is the client API for Panel service.
@@ -508,7 +508,7 @@ func _Panel_GetNftTemplate_Handler(srv interface{}, ctx context.Context, dec fun
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Panel_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "ycgp.node.v1.Panel",
+	ServiceName: "yagp.node.v1.Panel",
 	HandlerType: (*PanelServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

@@ -9,10 +9,6 @@
   <script>
     (function () {
       var savedTitle = localStorage.getItem('siteTitle');
-      if (savedTitle === 'ycgp') {
-        savedTitle = 'yagp';
-        localStorage.setItem('siteTitle', savedTitle);
-      }
       if (savedTitle) {
         document.title = savedTitle;
       }

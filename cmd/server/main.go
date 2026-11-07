@@ -215,26 +215,22 @@ func initSystemConfig(db *gorm.DB) error {
 		return err
 	}
 
-	if count == 0 {
-		// 设置默认值
-		sysConfig := &model.SystemConfig{
-			SiteTitle:            "yagp",
-			LogoURL:              "https://gost.run/images/gost.png",
-			Copyright:            upstreamURL,
-			LogRetentionDays:     7,
-			LogLevel:             "info",
-			AutoBackup:           false,
-			BackupRetentionCount: 7,
-		}
-		if err := db.Create(sysConfig).Error; err != nil {
-			return err
-		}
-		logger.Info("初始化默认系统配置完成")
+	if count != 0 {
 		return nil
 	}
 
-	// 更新曾用的默认标题，保留管理员设置的其他标题。
-	return db.Model(&model.SystemConfig{}).
-		Where("site_title = ? OR (site_title = ? AND copyright = ?)", "ycgp", "Gost Panel", upstreamURL).
-		Update("site_title", "yagp").Error
+	sysConfig := &model.SystemConfig{
+		SiteTitle:            "yagp",
+		LogoURL:              "https://gost.run/images/gost.png",
+		Copyright:            upstreamURL,
+		LogRetentionDays:     7,
+		LogLevel:             "info",
+		AutoBackup:           false,
+		BackupRetentionCount: 7,
+	}
+	if err := db.Create(sysConfig).Error; err != nil {
+		return err
+	}
+	logger.Info("初始化默认系统配置完成")
+	return nil
 }

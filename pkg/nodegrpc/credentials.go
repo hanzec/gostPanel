@@ -31,8 +31,7 @@ func MatchCredentials(ctx context.Context, username, password string) bool {
 }
 
 func ObserverToken(username, password string) string {
-	// The original domain keeps provisioned Gost observers valid after the rename.
-	digest := sha256.Sum256([]byte("ycgp-gost-observer:" + authorization(username, password)))
+	digest := sha256.Sum256([]byte("yagp-gost-observer:" + authorization(username, password)))
 	return hex.EncodeToString(digest[:])
 }
 

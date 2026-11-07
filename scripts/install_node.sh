@@ -81,9 +81,9 @@ case "$(uname -m)" in
     *) die "当前发布支持 Linux amd64 和 arm64" ;;
 esac
 
-repo="${YAGP_REPO:-${YCGP_REPO:-hanzec/gostPanel}}"
+repo="${YAGP_REPO:-hanzec/gostPanel}"
 release_path=latest/download
-node_version="${YAGP_NODE_VERSION:-${YCGP_NODE_VERSION:-}}"
+node_version="${YAGP_NODE_VERSION:-}"
 if [[ -n "$node_version" ]]; then
     release_path="download/$node_version"
 fi
@@ -109,17 +109,18 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p -- "$tmp_dir/bridge" "$stage"
 
-bridge_bin="${YAGP_NODE_BIN:-${YCGP_NODE_BIN:-}}"
+bridge_bin="${YAGP_NODE_BIN:-}"
 if [[ -z "$bridge_bin" ]]; then
     curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-node-linux-$arch.tar.gz" \
         -o "$tmp_dir/bridge.tar.gz"
     tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
-    bridge_bin="$tmp_dir/bridge/yagp-node-linux-$arch"
-    if [[ "$manager" == systemd && -f "$tmp_dir/bridge/yagp-node-systemd-linux-$arch" ]]; then
+    if [[ "$manager" == systemd ]]; then
         bridge_bin="$tmp_dir/bridge/yagp-node-systemd-linux-$arch"
+    else
+        bridge_bin="$tmp_dir/bridge/yagp-node-linux-$arch"
     fi
 fi
-[[ -f "$bridge_bin" ]] || die "安装包缺少 yagp-node 程序"
+[[ -f "$bridge_bin" ]] || die "找不到适用于 $manager 的 yagp-node 程序: $bridge_bin"
 
 install -m 0700 -- "$bridge_bin" "$stage/yagp-node"
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then

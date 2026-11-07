@@ -1,8 +1,7 @@
 syntax = "proto3";
 
-package ycgp.node.v1;
+package yagp.node.v1;
 
-// The Go import path can change independently of the existing RPC names.
 option go_package = "yagp/pkg/nodegrpc";
 
 import "google/protobuf/empty.proto";
