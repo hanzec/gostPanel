@@ -51,6 +51,7 @@ func TestAdminRouteBoundary(t *testing.T) {
 		{http.MethodGet, "/api/v1/system/public-config", "", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v1/health", "", http.StatusOK},
 		{http.MethodPost, "/api/v1/auth/login", "", http.StatusNotFound},
+		{http.MethodPost, "/api/v1/observer/report", "", http.StatusNotFound},
 	} {
 		req := httptest.NewRequest(tt.method, tt.path, nil)
 		req.RemoteAddr = "192.0.2.20:8100"

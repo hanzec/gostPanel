@@ -5,6 +5,7 @@ services:
     container_name: ycgp
     ports:
       - "127.0.0.1:39100:39100"
+      - "39101:39101"
     volumes:
       - ./config:/app/config:ro
       - ./data:/app/data

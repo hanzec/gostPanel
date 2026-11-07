@@ -55,7 +55,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 	tunnelService := service.NewTunnelService(r.db)
 	statsService := service.NewStatsService(r.db)
 	logService := service.NewLogService(r.db)
-	observerService := service.NewObserverService(r.db)
 
 	// 初始化系统配置
 	systemConfigRepo := repository.NewSystemConfigRepository(r.db)
@@ -68,10 +67,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 	tunnelHandler := handler.NewTunnelHandler(tunnelService)
 	statsHandler := handler.NewStatsHandler(statsService)
 	logHandler := handler.NewLogHandler(logService)
-	observerHandler := handler.NewObserverHandler(observerService)
 	systemConfigHandler := handler.NewSystemConfigHandler(systemConfigService, backupService)
-
-	apiV1.POST("/observer/report", observerHandler.Report)
 
 	// 管理员路由
 	authRoutes := apiV1.Group("")

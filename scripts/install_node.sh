@@ -1,233 +1,235 @@
 #!/usr/bin/env bash
 
-# ========================================================
-#  ycgp Gost 节点一键安装脚本
-#  系统要求: Ubuntu, Debian, CentOS, Alpine
-#  原作者: code-gopher
-# ========================================================
+# ycgp Gost 节点安装脚本
+# 原作者: code-gopher
+set -euo pipefail
+umask 077
 
-set -eo pipefail
+die() { printf '%s\n' "$*" >&2; exit 1; }
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-PLAIN='\033[0m'
-
-# 配置信息
-BASE_PATH="/etc/gost-node"
-BIN_PATH="/usr/local/bin/gost-node"
-CONF_FILE="${BASE_PATH}/config.yaml"
-GOST_VERSION="3.2.6"
-GH_PROXY=${GH_PROXY:-""}
-
-# 日志输出
-info() { echo -e "${GREEN}[信息]${PLAIN} $1"; }
-warn() { echo -e "${YELLOW}[警告]${PLAIN} $1"; }
-error() { echo -e "${RED}[错误]${PLAIN} $1"; exit 1; }
-
-# 检查 Root 权限
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        error "请使用 root 用户运行此脚本"
-    fi
-    info "权限检查通过"
+usage() {
+    cat <<'EOF'
+用法:
+  install_node.sh --node-id ID --username USER --password PASSWORD \
+    --report-address HOST:PORT --tls-cert CERT_FILE --tls-key KEY_FILE \
+    [--control-port 39000] [--admin-port 39001] [--observer-port 39002] \
+    [--report-ca CA_FILE]
+  install_node.sh uninstall --node-id ID
+EOF
 }
 
-# 检测系统架构
-get_arch() {
-    local arch=$(uname -m)
-    case "$arch" in
-        x86_64) echo "amd64" ;;
-        aarch64) echo "arm64" ;;
-        armv7l) echo "armv7" ;;
-        *) error "暂不支持该架构: $arch" ;;
+[[ "${1:-}" != "--help" ]] || { usage; exit 0; }
+[[ $EUID -eq 0 ]] || die "请使用 root 用户运行此脚本"
+
+action=install
+if [[ "${1:-}" == uninstall ]]; then
+    action=uninstall
+    shift
+fi
+
+node_id=
+control_port=39000
+admin_port=39001
+observer_port=39002
+username=
+password=
+report_address=
+report_ca=
+tls_cert=
+tls_key=
+while (($#)); do
+    [[ $# -ge 2 ]] || die "缺少参数值: $1"
+    case "$1" in
+        --node-id) node_id=$2 ;;
+        --control-port) control_port=$2 ;;
+        --admin-port) admin_port=$2 ;;
+        --observer-port) observer_port=$2 ;;
+        --username) username=$2 ;;
+        --password) password=$2 ;;
+        --report-address) report_address=$2 ;;
+        --report-ca) report_ca=$2 ;;
+        --tls-cert) tls_cert=$2 ;;
+        --tls-key) tls_key=$2 ;;
+        *) usage; die "未知参数: $1" ;;
     esac
-}
+    shift 2
+done
 
-# 检查端口占用
-check_port() {
-    local port=$1
-    if command -v ss >/dev/null 2>&1; then
-        if ss -tpln | grep -q ":$port "; then
-            error "端口 $port 已被占用，请更换端口后重试。"
-        fi
-    elif command -v netstat >/dev/null 2>&1; then
-        if netstat -tpln | grep -q ":$port "; then
-            error "端口 $port 已被占用，请更换端口后重试。"
-        fi
-    fi
-}
+[[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "请填写面板中的节点 ID"
+base_path="/etc/ycgp-node/$node_id"
+gost_unit="ycgp-gost-$node_id"
+bridge_unit="ycgp-node-$node_id"
 
-# 卸载功能
-uninstall() {
-    info "正在卸载 Gost 节点..."
-    if command -v systemctl >/dev/null 2>&1 && [[ -f /etc/systemd/system/gost-node.service ]]; then
-        systemctl stop gost-node || true
-        systemctl disable gost-node || true
-        rm -f /etc/systemd/system/gost-node.service
+if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+    manager=systemd
+elif command -v rc-service >/dev/null 2>&1 && [[ -x /sbin/openrc-run ]]; then
+    manager=openrc
+else
+    die "节点安装需要 systemd 或 OpenRC"
+fi
+
+if [[ "$action" == uninstall ]]; then
+    if [[ "$manager" == systemd ]]; then
+        systemctl disable --now "$bridge_unit" "$gost_unit" || true
+        rm -f -- "/etc/systemd/system/$bridge_unit.service" "/etc/systemd/system/$gost_unit.service"
         systemctl daemon-reload
-    elif [[ -f /etc/init.d/gost-node ]]; then
-        rc-service gost-node stop || true
-        rc-update del gost-node default || true
-        rm -f /etc/init.d/gost-node
-    fi
-    rm -rf "$BASE_PATH"
-    rm -f "$BIN_PATH"
-    info "Gost 节点已成功移除。"
-}
-
-# 安装二进制文件
-install_bin() {
-    local arch=$(get_arch)
-    local url="${GH_PROXY}https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_${arch}.tar.gz"
-    
-    info "正在下载 Gost v${GOST_VERSION} (${arch})..."
-    info "下载地址: $url"
-    
-    local tmp_dir=$(mktemp -d)
-    
-    # 下载并解压
-    if wget -q --show-progress -O- "$url" | tar -zx -C "$tmp_dir"; then
-        info "下载完成"
     else
-        error "下载或解压失败，请检查：\n  1. 网络连接是否正常\n  2. GitHub 是否可访问\n  3. 架构 ${arch} 是否支持"
+        for unit in "$bridge_unit" "$gost_unit"; do
+            rc-service "$unit" stop || true
+            rc-update del "$unit" default || true
+            rm -f -- "/etc/init.d/$unit"
+        done
     fi
-    
-    # 检查文件是否存在
-    if [[ ! -f "${tmp_dir}/gost" ]]; then
-        error "解压后未找到 gost 文件"
-    fi
-    
-    mv "${tmp_dir}/gost" "$BIN_PATH"
-    chmod +x "$BIN_PATH"
-    rm -rf "$tmp_dir"
-    info "二进制文件已安装到 $BIN_PATH"
+    rm -f -- "$base_path/ycgp-node" "$base_path/gost"
+    printf '节点 %s 服务已卸载，配置位于 %s\n' "$node_id" "$base_path"
+    exit 0
+fi
+
+for port in "$control_port" "$admin_port" "$observer_port"; do
+    [[ "$port" =~ ^[1-9][0-9]{0,4}$ ]] && ((port <= 65535)) || die "无效端口: $port"
+done
+[[ "$control_port" != "$admin_port" && "$control_port" != "$observer_port" && "$admin_port" != "$observer_port" ]] ||
+    die "控制、Gost 管理和观察器端口必须各不相同"
+if [[ ! -f "$base_path/node.yaml" ]] && command -v ss >/dev/null 2>&1; then
+    for port in "$control_port" "$admin_port" "$observer_port"; do
+        if [[ -n "$(ss -H -ltn "sport = :$port")" ]]; then
+            die "端口 $port 已被占用"
+        fi
+    done
+fi
+[[ -n "$username" && "$username" != *:* && -n "$password" ]] || die "请填写节点认证信息，用户名不能包含冒号"
+[[ "$report_address" == *:* ]] || die "请填写面板流量上报地址 HOST:PORT"
+[[ -f "$tls_cert" && -f "$tls_key" ]] || die "请先准备节点 TLS 证书和私钥"
+tls_cert=$(readlink -f -- "$tls_cert")
+tls_key=$(readlink -f -- "$tls_key")
+if [[ -n "$report_ca" ]]; then
+    [[ -f "$report_ca" ]] || die "上报 CA 文件不存在"
+    report_ca=$(readlink -f -- "$report_ca")
+fi
+
+yaml_quote() {
+    [[ "$1" != *$'\n'* && "$1" != *$'\r'* ]] || die "参数不能包含换行"
+    local value=${1//\'/\'\'}
+    printf "'%s'" "$value"
 }
 
-# 生成配置文件
-configure() {
-    local api_port="${1:-39000}"
-    local user="${2:-}"
-    local pass="${3:-}"
-    
-    info "正在生成配置文件..."
+case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) die "当前发布支持 Linux amd64 和 arm64" ;;
+esac
 
-    # 如果账号为空，生成随机账号
-    if [[ -z "$user" ]]; then
-        info "生成随机用户名..."
-        user=$(head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
-    fi
-    
-    # 如果密码为空，生成随机密码
-    if [[ -z "$pass" ]]; then
-        info "生成随机密码..."
-        pass=$(head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 12)
-    fi
-    
-    mkdir -p "$BASE_PATH"
-    cat > "$CONF_FILE" <<EOF
+gost_version=3.2.6
+repo="${YCGP_REPO:-hanzec/gostPanel}"
+release_path=latest/download
+if [[ -n "${YCGP_NODE_VERSION:-}" ]]; then
+    release_path="download/$YCGP_NODE_VERSION"
+fi
+
+tmp_dir=$(mktemp -d)
+trap 'rm -rf -- "$tmp_dir"' EXIT
+mkdir -p -- "$tmp_dir/gost" "$tmp_dir/bridge"
+
+# 先验证配置和下载内容，再写入系统目录。
+for value in "$username" "$password" "$report_address" "$report_ca" "$tls_cert" "$tls_key"; do
+    yaml_quote "$value" >/dev/null
+done
+cat > "$tmp_dir/node.yaml" <<EOF
+node_id: $node_id
+username: $(yaml_quote "$username")
+password: $(yaml_quote "$password")
+control_listen: ":$control_port"
+admin_address: "127.0.0.1:$admin_port"
+observer_listen: "127.0.0.1:$observer_port"
+report_address: $(yaml_quote "$report_address")
+report_ca_file: $(yaml_quote "$report_ca")
+tls_cert_file: $(yaml_quote "$tls_cert")
+tls_key_file: $(yaml_quote "$tls_key")
+EOF
+if [[ -f "$base_path/node.yaml" ]] && ! cmp -s "$tmp_dir/node.yaml" "$base_path/node.yaml"; then
+    die "此节点已有不同的设置。请核对 $base_path/node.yaml 和 $base_path/gost.yaml"
+fi
+cat > "$tmp_dir/gost.yaml" <<EOF
 api:
-  addr: ":$api_port"
+  addr: "127.0.0.1:$admin_port"
   pathPrefix: /api
   auth:
-    username: $user
-    password: $pass
+    username: $(yaml_quote "$username")
+    password: $(yaml_quote "$password")
 EOF
-    info "配置文件已保存到 $CONF_FILE"
-    
-    # 导出变量用于最后显示
-    GLOBAL_API_PORT=$api_port
-    GLOBAL_USER=$user
-    GLOBAL_PASS=$pass
-}
 
-# 设置系统服务
-setup_service() {
-    if command -v systemctl >/dev/null 2>&1; then
-        info "正在配置 systemd 服务..."
-        cat > /etc/systemd/system/gost-node.service <<EOF
+curl -fsSL "${GH_PROXY:-}https://github.com/go-gost/gost/releases/download/v$gost_version/gost_${gost_version}_linux_$arch.tar.gz" \
+    -o "$tmp_dir/gost.tar.gz"
+tar -xzf "$tmp_dir/gost.tar.gz" -C "$tmp_dir/gost"
+if [[ -n "${YCGP_NODE_BIN:-}" ]]; then
+    bridge_bin="$YCGP_NODE_BIN"
+else
+    curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/ycgp-node-linux-$arch.tar.gz" \
+        -o "$tmp_dir/bridge.tar.gz"
+    tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
+    bridge_bin="$tmp_dir/bridge/ycgp-node-linux-$arch"
+fi
+[[ -f "$tmp_dir/gost/gost" && -f "$bridge_bin" ]] || die "安装包缺少 Gost 或 ycgp-node 程序"
+
+install -d -m 0700 -- "$base_path"
+install -m 0700 -- "$tmp_dir/gost/gost" "$base_path/gost"
+install -m 0700 -- "$bridge_bin" "$base_path/ycgp-node"
+if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
+    install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$base_path/LICENSE"
+fi
+if [[ ! -f "$base_path/node.yaml" ]]; then
+    install -m 0600 -- "$tmp_dir/node.yaml" "$base_path/node.yaml"
+fi
+if [[ ! -f "$base_path/gost.yaml" ]]; then
+    install -m 0600 -- "$tmp_dir/gost.yaml" "$base_path/gost.yaml"
+fi
+
+write_service() {
+    local name=$1 description=$2 executable=$3 config_flag=$4 config_file=$5
+    if [[ "$manager" == systemd ]]; then
+        cat > "/etc/systemd/system/$name.service" <<EOF
 [Unit]
-Description=ycgp Gost Node Service
+Description=$description
 After=network.target
 
 [Service]
-Type=simple
-ExecStart=$BIN_PATH -C $CONF_FILE
-Restart=always
-User=root
+WorkingDirectory=$base_path
+ExecStart=$base_path/$executable $config_flag $base_path/$config_file
+Restart=on-failure
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
 EOF
-        systemctl daemon-reload
-        systemctl enable gost-node
-        systemctl restart gost-node
-    elif [[ -f /sbin/openrc-run ]]; then
-        info "正在配置 OpenRC 服务..."
-        cat > /etc/init.d/gost-node <<EOF
+        chmod 0644 "/etc/systemd/system/$name.service"
+    else
+        cat > "/etc/init.d/$name" <<EOF
 #!/sbin/openrc-run
-description="ycgp Gost Node Service"
-command="$BIN_PATH"
-command_args="-C $CONF_FILE"
+description="$description"
+command="$base_path/$executable"
+command_args="$config_flag $base_path/$config_file"
+directory="$base_path"
 command_background=true
-pidfile="/run/gost-node.pid"
+pidfile="/run/$name.pid"
 depend() {
     need net
 }
 EOF
-        chmod +x /etc/init.d/gost-node
-        rc-update add gost-node default
-        rc-service gost-node start
-    else
-        warn "未识别的服务管理器。请手动启动: $BIN_PATH -C $CONF_FILE"
+        chmod 0755 "/etc/init.d/$name"
     fi
 }
 
-# 显示安装成功信息
-show_info() {
-    local ip=$(curl -s -4 https://api.ipify.org 2>/dev/null || curl -s -4 https://ifconfig.me 2>/dev/null || echo "您的公网IP")
-    echo -e "\n${GREEN}================================================${PLAIN}"
-    echo -e "${GREEN}       Gost 节点安装成功！${PLAIN}"
-    echo -e "------------------------------------------------"
-    echo -e "  API 地址   : ${BLUE}http://${ip}:${GLOBAL_API_PORT}/api${PLAIN}"
-    echo -e "  用户名     : ${BLUE}${GLOBAL_USER}${PLAIN}"
-    echo -e "  密码       : ${BLUE}${GLOBAL_PASS}${PLAIN}"
-    echo -e "------------------------------------------------"
-    echo -e "${YELLOW}  请使用以上信息在面板中添加节点。${PLAIN}"
-    echo -e "${GREEN}================================================${PLAIN}\n"
-}
+write_service "$bridge_unit" "ycgp node $node_id bridge" ycgp-node -c node.yaml
+write_service "$gost_unit" "ycgp node $node_id Gost" gost -C gost.yaml
+if [[ "$manager" == systemd ]]; then
+    systemctl daemon-reload
+    systemctl enable "$bridge_unit" "$gost_unit"
+    systemctl restart "$bridge_unit" "$gost_unit"
+else
+    for unit in "$bridge_unit" "$gost_unit"; do
+        rc-update add "$unit" default
+        rc-service "$unit" restart
+    done
+fi
 
-# 主程序
-main() {
-    echo -e "${GREEN}========================================${PLAIN}"
-    echo -e "${GREEN}  Gost 节点安装脚本 v${GOST_VERSION}${PLAIN}"
-    echo -e "${GREEN}========================================${PLAIN}\n"
-    
-    check_root
-    
-    # 检查第一个参数是否为 uninstall
-    if [[ "${1:-}" == "uninstall" ]]; then
-        uninstall
-        exit 0
-    fi
-    
-    # 解析安装参数
-    local api_port="${1:-39000}"
-    local user="${2:-}"
-    local pass="${3:-}"
-    
-    info "开始安装 Gost 节点..."
-    info "配置参数: API端口=$api_port, 用户=$user"
-    
-    # 检查端口占用
-    check_port "$api_port"
-    
-    install_bin
-    configure "$api_port" "$user" "$pass"
-    setup_service
-    show_info
-}
-
-main "$@"
+printf '节点 %s 已启动。gRPC 控制端口 %s，上报地址 %s\n' "$node_id" "$control_port" "$report_address"

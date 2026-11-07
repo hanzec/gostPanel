@@ -4,7 +4,6 @@ package dto
 
 // SystemConfigResp 系统配置响应
 type SystemConfigResp struct {
-	Panel  PanelConfigResp  `json:"panel"`
 	Email  EmailConfigResp  `json:"email"`
 	Config PanelSettingResp `json:"config"`
 	Log    LogConfigResp    `json:"log"`
@@ -12,13 +11,10 @@ type SystemConfigResp struct {
 }
 
 type PublicSystemConfigResp struct {
-	SiteTitle string `json:"siteTitle"`
-	LogoURL   string `json:"logoUrl"`
-	Copyright string `json:"copyright"`
-}
-
-type PanelConfigResp struct {
-	PanelURL string `json:"panelUrl"`
+	SiteTitle     string `json:"siteTitle"`
+	LogoURL       string `json:"logoUrl"`
+	Copyright     string `json:"copyright"`
+	ReportAddress string `json:"reportAddress"`
 }
 
 type EmailConfigResp struct {
@@ -48,15 +44,10 @@ type BackupConfigResp struct {
 
 // UpdateSystemConfigReq 更新系统配置请求
 type UpdateSystemConfigReq struct {
-	Panel  PanelConfigReq  `json:"panel"`
 	Email  EmailConfigReq  `json:"email"`
 	Config PanelSettingReq `json:"config"`
 	Log    LogConfigReq    `json:"log"`
 	Backup BackupConfigReq `json:"backup"`
-}
-
-type PanelConfigReq struct {
-	PanelURL string `json:"panelUrl"`
 }
 
 type EmailConfigReq struct {

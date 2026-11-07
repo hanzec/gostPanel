@@ -11,10 +11,7 @@
         <!-- 面板配置 -->
         <el-tab-pane label="面板配置" name="config">
           <el-form ref="configFormRef" :model="configForm" label-width="120px" class="setting-form">
-            <el-form-item label="面板地址" prop="panelUrl">
-               <el-input v-model="configForm.panelUrl" placeholder="你当前的面板地址" />
-            </el-form-item>
-             <el-form-item label="站点标题" prop="siteTitle">
+            <el-form-item label="站点标题" prop="siteTitle">
               <el-input v-model="configForm.siteTitle" placeholder="ycgp" />
             </el-form-item>
 
@@ -119,7 +116,6 @@ const emailForm = reactive({
 })
 
 const configForm = reactive({
-  panelUrl: '',
   siteTitle: 'ycgp',
   logoUrl: '',
   copyright: ''
@@ -140,10 +136,7 @@ const fetchConfig = async () => {
         const res = await getSystemConfig()
         if (res.data) {
             // 根据后端返回的数据结构填充表单
-            const { panel, email, config, backup } = res.data
-            if (panel) {
-                configForm.panelUrl = panel.panelUrl
-            }
+            const { email, config, backup } = res.data
             if (email) Object.assign(emailForm, email)
             if (config) Object.assign(configForm, config)
             if (backup) {
@@ -166,7 +159,6 @@ const handleSave = async (type) => {
         let data = {}
         // 根据当前tab类型构建提交数据
         const payload = {
-            panel: { panelUrl: configForm.panelUrl },
             email: emailForm,
             config: {
                 siteTitle: configForm.siteTitle,

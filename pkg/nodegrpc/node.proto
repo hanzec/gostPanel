@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package ycgp.node.v1;
+
+option go_package = "ycgp/pkg/nodegrpc";
+
+import "google/protobuf/empty.proto";
+import "observer.proto";
+
+message CommandRequest {
+  string method = 1;
+  string path = 2;
+  bytes body = 3;
+}
+
+message CommandReply {
+  int32 status_code = 1;
+  bytes body = 2;
+}
+
+message ObserverEndpoint {
+  string address = 1;
+}
+
+service Node {
+  rpc Execute(CommandRequest) returns (CommandReply);
+  rpc GetObserverEndpoint(google.protobuf.Empty) returns (ObserverEndpoint);
+}
+
+message ReportRequest {
+  uint64 node_id = 1;
+  proto.ObserveRequest observation = 2;
+}
+
+service Panel {
+  rpc Report(ReportRequest) returns (proto.ObserveReply);
+}

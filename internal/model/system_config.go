@@ -13,9 +13,6 @@ type SystemConfig struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
-	// 面板地址
-	PanelURL string `gorm:"size:255" json:"panel_url"`
-
 	// 邮箱配置
 	SMTPHost     string `gorm:"size:255" json:"smtp_host"`
 	SMTPPort     int    `json:"smtp_port"`

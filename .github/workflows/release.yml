@@ -43,6 +43,8 @@ jobs:
           tar -czvf ycgp-darwin-arm64.tar.gz ycgp-darwin-arm64 config/config.yaml LICENSE
           # 打包 Windows
           zip ycgp-windows-amd64.zip ycgp-windows-amd64.exe config/config.yaml LICENSE
+          tar -czvf ycgp-node-linux-amd64.tar.gz ycgp-node-linux-amd64 LICENSE
+          tar -czvf ycgp-node-linux-arm64.tar.gz ycgp-node-linux-arm64 LICENSE
 
       - name: Create Release
         uses: softprops/action-gh-release@v3

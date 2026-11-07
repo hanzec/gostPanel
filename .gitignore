@@ -41,6 +41,8 @@ internal/router/dist/
 main
 gost-panel
 ycgp
+/ycgp-node
+/config/**/*.key
 
 # Frontend (Web)
 web/node_modules/

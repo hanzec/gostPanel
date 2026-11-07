@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 
+	"ycgp/internal/config"
 	"ycgp/internal/dto"
 	"ycgp/internal/errors"
 	"ycgp/internal/model"
@@ -24,7 +25,6 @@ type RuleService struct {
 	ruleRepo      *repository.RuleRepository
 	nodeRepo      *repository.NodeRepository
 	tunnelRepo    *repository.TunnelRepository
-	sysRepo       *repository.SystemConfigRepository
 	logService    *LogService
 	tunnelService *TunnelService
 }
@@ -35,7 +35,6 @@ func NewRuleService(db *gorm.DB) *RuleService {
 		ruleRepo:      repository.NewRuleRepository(db),
 		nodeRepo:      repository.NewNodeRepository(db),
 		tunnelRepo:    repository.NewTunnelRepository(db),
-		sysRepo:       repository.NewSystemConfigRepository(db),
 		logService:    NewLogService(db),
 		tunnelService: NewTunnelService(db),
 	}
@@ -403,27 +402,37 @@ func (s *RuleService) getEntryNodeID(rule *model.GostRule) uint {
 	return 0
 }
 
-// setupRuleObserver 配置规则的观察器
 func (s *RuleService) setupRuleObserver(client *gost.Client, rule *model.GostRule, svc *gost.ServiceConfig) error {
-	// 确保全局观察器存在
-	observerName, err := EnsureGlobalObserver(client, s.sysRepo)
+	if config.Get().Report.Listen == "" {
+		return errors.ErrReportNotConfigured
+	}
+	address, err := client.ObserverAddress()
 	if err != nil {
+		return errors.ErrObserverCreateFailed
+	}
+	const observerName = "observer-global"
+	if err := client.SetObserver(&gost.ObserverConfig{
+		Name: observerName,
+		Plugin: &gost.PluginConfig{
+			Type:  "grpc",
+			Addr:  address,
+			Token: client.ObserverToken(),
+		},
+	}); err != nil {
+		logger.Warnf("配置节点观察器失败: %v", err)
+		return errors.ErrObserverCreateFailed
+	}
+	if err := s.ruleRepo.UpdateObserverID(rule.ID, observerName); err != nil {
 		return err
 	}
-
-	// 更新规则关联的 ObserverID
-	_ = s.ruleRepo.UpdateObserverID(rule.ID, observerName)
-
-	// 配置服务的观察器参数
-	if observerName != "" {
-		svc.Observer = observerName
-		if svc.Metadata == nil {
-			svc.Metadata = make(map[string]any)
-		}
-		svc.Metadata["enableStats"] = true
-		svc.Metadata["observer.period"] = "5s"
-		svc.Metadata["observer.resetTraffic"] = true
+	svc.Observer = observerName
+	if svc.Metadata == nil {
+		svc.Metadata = make(map[string]any)
 	}
+	svc.Metadata["enableStats"] = true
+	svc.Metadata["observer.period"] = "5s"
+	// Gost also reads these counters when serving GET /config.
+	svc.Metadata["observer.resetTraffic"] = false
 	return nil
 }
 

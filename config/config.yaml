@@ -11,6 +11,15 @@ authentik:
   trusted_proxies: ["127.0.0.1", "::1"]
   admin_group: "ycgp-admins"
 
+report:
+  listen: ""
+  address: ""
+  cert_file: ""
+  key_file: ""
+
+node_tls:
+  ca_file: ""
+
 log:
   level: "info"  # debug, info, warn, error
   format: "json"  # json, console

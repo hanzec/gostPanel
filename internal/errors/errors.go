@@ -127,8 +127,7 @@ var (
 // ==================== 系统/配置相关错误 (104xx) ====================
 
 var (
-	// ErrPanelURLNotFound 未配置面板地址
-	ErrPanelURLNotFound = New(10401, "未配置面板地址，无法启动流量监控，请先在[系统配置]中设置面板URL", http.StatusBadRequest)
+	ErrReportNotConfigured = New(10401, "请在配置文件中启用 gRPC 流量上报后再启动规则", http.StatusBadRequest)
 	// ErrSMTPConfigIncomplete SMTP配置不完整
 	ErrSMTPConfigIncomplete = New(10402, "SMTP配置不完整", http.StatusBadRequest)
 	// ErrSMTPConnectFailed 连接SMTP服务器失败

@@ -31,7 +31,7 @@
         <el-table-column prop="id" label="ID" width="70" align="center" />
         <el-table-column prop="name" label="节点名称" min-width="120" align="center" show-overflow-tooltip />
         <el-table-column prop="address" label="IP/域名" min-width="150" align="center" show-overflow-tooltip />
-        <el-table-column prop="port" label="端口" width="100" align="center" />
+        <el-table-column prop="port" label="gRPC 端口" width="110" align="center" />
 
         <el-table-column prop="total_bytes" label="总流量" width="120" align="center">
           <template #default="{ row }">
@@ -105,7 +105,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="24" :sm="12">
-            <el-form-item label="API 端口" prop="port">
+            <el-form-item label="gRPC 端口" prop="port">
               <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
             </el-form-item>
           </el-col>
@@ -119,7 +119,7 @@
           </el-col>
           <el-col :span="24" :sm="12">
             <el-form-item label="认证密码" prop="password">
-              <el-input v-model="form.password" placeholder="密码" :prefix-icon="Lock" />
+              <el-input v-model="form.password" type="password" show-password placeholder="密码" :prefix-icon="Lock" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -198,26 +198,46 @@
     <el-dialog v-model="installDialogVisible" :title="'安装节点: ' + currentInstallNode?.name" width="650px" :close-on-click-modal="false">
       <el-alert type="info" :closable="false" style="margin-bottom: 20px;">
         <template #title>
-          在目标服务器上执行以下命令，将自动安装 Gost 并配置为当前节点设置的参数。
+          在目标服务器上准备节点 TLS 证书和私钥，再运行命令安装 Gost 和 ycgp 节点桥接服务。
         </template>
       </el-alert>
 
       <!-- 节点配置信息 -->
       <div class="node-info-section" v-if="currentInstallNode">
         <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="API 端口">{{ extractPort(currentInstallNode.api_url) }}</el-descriptions-item>
-          <el-descriptions-item label="用户名">{{ currentInstallNode.username || 'admin' }}</el-descriptions-item>
-          <el-descriptions-item label="密码">{{ currentInstallNode.password || '(自动生成)' }}</el-descriptions-item>
+          <el-descriptions-item label="节点 ID">{{ currentInstallNode.id }}</el-descriptions-item>
+          <el-descriptions-item label="gRPC 端口">{{ currentInstallNode.port }}</el-descriptions-item>
         </el-descriptions>
       </div>
+
+      <el-form :model="installSettings" label-width="135px">
+        <el-form-item label="面板上报地址">
+          <el-input v-model="installSettings.reportAddress" placeholder="panel.example.com:39101" />
+        </el-form-item>
+        <el-form-item label="节点证书路径">
+          <el-input v-model="installSettings.tlsCert" />
+        </el-form-item>
+        <el-form-item label="节点私钥路径">
+          <el-input v-model="installSettings.tlsKey" />
+        </el-form-item>
+        <el-form-item label="面板 CA 路径">
+          <el-input v-model="installSettings.reportCA" placeholder="使用私有 CA 时填写" />
+        </el-form-item>
+        <el-form-item label="本机管理端口">
+          <el-input-number v-model="installSettings.adminPort" :min="1" :max="65535" />
+        </el-form-item>
+        <el-form-item label="本机观察器端口">
+          <el-input-number v-model="installSettings.observerPort" :min="1" :max="65535" />
+        </el-form-item>
+      </el-form>
 
       <div class="install-command-section">
         <div class="command-header">
           <span class="command-title">一键安装命令</span>
-          <el-button type="primary" size="small" :icon="CopyDocument" @click="copyInstallCommand">复制命令</el-button>
+          <el-button type="primary" size="small" :icon="CopyDocument" :disabled="!installCommand" @click="copyInstallCommand">复制命令</el-button>
         </div>
         <div class="command-box">
-          <code>{{ installCommand }}</code>
+          <code>{{ installCommand || '请填写地址和证书路径，并为三个端口选择不同的值。' }}</code>
         </div>
       </div>
 
@@ -225,8 +245,8 @@
         <p><strong>说明：</strong></p>
         <ol>
           <li>复制上方命令，在目标服务器上以 <strong>root</strong> 用户执行</li>
-          <li>脚本将自动下载 Gost、生成配置文件并启动服务</li>
-          <li>安装完成后节点将自动上线，无需手动操作</li>
+          <li>节点证书必须覆盖面板中登记的节点 IP 或域名</li>
+          <li>同一服务器上为各实例分配不同的 gRPC、管理和观察器端口</li>
         </ol>
       </div>
 
@@ -242,9 +262,10 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Search, Refresh, CopyDocument, Management, Link, User, Lock } from '@element-plus/icons-vue'
 import { getNodeList, createNode, updateNode, deleteNode, getNodeConfig } from '@/api/node'
+import { getPublicSystemConfig } from '@/api/system'
 
 // 安装脚本 URL（GitHub Raw）
-const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/code-gopher/gostPanel/master/scripts/install_node.sh'
+const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/gostPanel/master/scripts/install_node.sh'
 
 // 列表数据
 const nodeList = ref([])
@@ -272,6 +293,14 @@ const nodeConfig = ref(null)
 // 安装脚本对话框
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
+const installSettings = reactive({
+  reportAddress: '',
+  tlsCert: '/etc/ycgp-node/tls/node.pem',
+  tlsKey: '/etc/ycgp-node/tls/node.key',
+  reportCA: '',
+  adminPort: 39001,
+  observerPort: 39002
+})
 
 // 格式化流量
 const formatBytes = (bytes) => {
@@ -282,38 +311,43 @@ const formatBytes = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
-// 从 API URL 中提取端口号
-const extractPort = (apiUrl) => {
-  if (!apiUrl) return '39000'
-  try {
-    const url = new URL(apiUrl)
-    return url.port || '39000'
-  } catch {
-    // 尝试用正则匹配端口
-    const match = apiUrl.match(/:(\d+)/)
-    return match ? match[1] : '39000'
-  }
-}
+const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "'"
 
 // 生成安装命令（根据当前节点配置）
 const installCommand = computed(() => {
-  if (!currentInstallNode.value) return ''
-  
   const node = currentInstallNode.value
-  const port = node.port
-  const username = node.username
-  const password = node.password
-  
-  // 构建带参数的安装命令
-  // 参数顺序: 端口 用户名 密码
-  let cmd = `bash <(curl -sL ${INSTALL_SCRIPT_URL}) ${port} ${username} ${password}`
-  return cmd
+  const { reportAddress, tlsCert, tlsKey, reportCA, adminPort, observerPort } = installSettings
+  if (!node || !node.username || !node.password || !reportAddress.trim() || !tlsCert.trim() || !tlsKey.trim()) return ''
+  if (!adminPort || !observerPort || new Set([node.port, adminPort, observerPort]).size !== 3) return ''
+
+  const args = [
+    ['--node-id', node.id],
+    ['--control-port', node.port],
+    ['--admin-port', adminPort],
+    ['--observer-port', observerPort],
+    ['--username', node.username],
+    ['--password', node.password],
+    ['--report-address', reportAddress.trim()],
+    ['--tls-cert', tlsCert.trim()],
+    ['--tls-key', tlsKey.trim()]
+  ]
+  if (reportCA.trim()) args.push(['--report-ca', reportCA.trim()])
+  return 'bash <(curl -fsSL ' + shellQuote(INSTALL_SCRIPT_URL) + ') ' +
+    args.map(([flag, value]) => flag + ' ' + shellQuote(value)).join(' ')
 })
 
 // 显示安装命令对话框
-const showInstallCommand = (row) => {
+const showInstallCommand = async (row) => {
   currentInstallNode.value = row
   installDialogVisible.value = true
+  if (!installSettings.reportAddress) {
+    try {
+      const res = await getPublicSystemConfig()
+      if (!installSettings.reportAddress) installSettings.reportAddress = res.data.reportAddress || ''
+    } catch (error) {
+      console.error('获取默认流量上报地址失败:', error)
+    }
+  }
 }
 
 // 复制安装命令
@@ -334,6 +368,9 @@ const form = reactive({
   password: '',
   remark: ''
 })
+
+const generatePassword = () =>
+  Array.from(crypto.getRandomValues(new Uint8Array(18)), (value) => value.toString(16).padStart(2, '0')).join('')
 
 const rules = {
   name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
@@ -388,7 +425,7 @@ const openDialog = (row = null) => {
       address: '127.0.0.1',
       port: 39000,
       username: 'admin',
-      password: '123456',
+      password: generatePassword(),
       remark: ''
     })
   }
@@ -448,9 +485,10 @@ const handleCopy = (row) => {
   
   Object.assign(form, {
     name: row.name,
-    api_url: row.api_url || '',
+    address: row.address,
+    port: row.port,
     username: row.username || '',
-    password: row.password || '',
+    password: generatePassword(),
     remark: row.remark || ''
   })
   

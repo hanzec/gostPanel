@@ -163,15 +163,17 @@ func (r *RuleRepository) StopByNodeID(nodeID uint) error {
 		Update("status", model.RuleStatusStopped).Error
 }
 
-// UpdateStats 累加流量统计
-// 使用 gorm.Expr 进行累加操作，确保服务重启后流量统计不会归零
-func (r *RuleRepository) UpdateStats(id uint, inputBytes, outputBytes, totalRequests int64) error {
+// UpdateTrafficSample atomically stores the observer checkpoint and increments rule totals.
+func (r *RuleRepository) UpdateTrafficSample(id uint, delta, observed model.ObserverCounters) error {
 	return r.DB.Model(&model.GostRule{}).Where("id = ?", id).
 		Updates(map[string]interface{}{
-			"input_bytes":    gorm.Expr("input_bytes + ?", inputBytes),
-			"output_bytes":   gorm.Expr("output_bytes + ?", outputBytes),
-			"total_bytes":    gorm.Expr("total_bytes + ?", inputBytes+outputBytes),
-			"total_requests": gorm.Expr("total_requests + ?", totalRequests),
+			"input_bytes":           gorm.Expr("input_bytes + ?", delta.InputBytes),
+			"output_bytes":          gorm.Expr("output_bytes + ?", delta.OutputBytes),
+			"total_bytes":           gorm.Expr("total_bytes + ?", delta.InputBytes+delta.OutputBytes),
+			"total_requests":        gorm.Expr("total_requests + ?", delta.Connections),
+			"observer_input_bytes":  observed.InputBytes,
+			"observer_output_bytes": observed.OutputBytes,
+			"observer_connections":  observed.Connections,
 		}).Error
 }
 

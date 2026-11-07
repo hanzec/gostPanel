@@ -2,6 +2,7 @@ package gost
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,19 +11,21 @@ import (
 	"ycgp/internal/errors"
 
 	"ycgp/pkg/logger"
+	"ycgp/pkg/nodegrpc"
+
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// Client Gost API 客户端
+// Client 通过 gRPC 管理 Gost 节点。
 type Client struct {
-	baseURL    string
-	username   string
-	password   string
-	httpClient *http.Client
+	config Config
 }
 
 // Config 客户端配置
 type Config struct {
-	APIURL   string
+	Address  string
+	CAFile   string
 	Username string
 	Password string
 	Timeout  time.Duration
@@ -30,19 +33,11 @@ type Config struct {
 
 // NewClient 创建 Gost 客户端
 func NewClient(cfg *Config) *Client {
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = 10 * time.Second
+	config := *cfg
+	if config.Timeout == 0 {
+		config.Timeout = 10 * time.Second
 	}
-
-	return &Client{
-		baseURL:  cfg.APIURL,
-		username: cfg.Username,
-		password: cfg.Password,
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
-	}
+	return &Client{config: config}
 }
 
 // ServiceConfig 服务配置
@@ -175,9 +170,9 @@ type ObserverConfig struct {
 
 // PluginConfig 插件配置
 type PluginConfig struct {
-	Type    string `json:"type,omitempty"`    // 插件类型: grpc, http
-	Addr    string `json:"addr,omitempty"`    // 插件地址
-	Timeout string `json:"timeout,omitempty"` // 超时时间
+	Type  string `json:"type,omitempty"`  // 插件类型
+	Addr  string `json:"addr,omitempty"`  // 插件地址
+	Token string `json:"token,omitempty"` // gRPC 插件令牌
 }
 
 // HealthCheck 健康检查
@@ -242,31 +237,36 @@ func (c *Client) SaveConfig() error {
 	return nil
 }
 
-// exists 检查指定路径的资源是否存在
-func (c *Client) exists(path string) bool {
+// resource 获取资源数据，空数据表示资源不存在。
+func (c *Client) resource(path string) (json.RawMessage, error) {
 	resp, err := c.doRequest("GET", path, nil)
 	if err != nil {
-		return false
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return false
+		return nil, fmt.Errorf("查询 Gost 资源失败，状态码: %d", resp.StatusCode)
 	}
 
 	var gResp GostResponse
 	if err = json.NewDecoder(resp.Body).Decode(&gResp); err != nil {
-		return false
+		return nil, err
 	}
-
-	// 根据用户提供的 curl 结果，不存在时 data 为 null (RawMessage 为 "null")
-	return string(gResp.Data) != "null" && len(gResp.Data) > 0
+	if string(gResp.Data) == "null" {
+		return nil, nil
+	}
+	return gResp.Data, nil
 }
 
 // CreateService 创建服务 (幂等)
 func (c *Client) CreateService(svc *ServiceConfig) error {
 	path := fmt.Sprintf("/config/services/%s", svc.Name)
-	if c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
 		logger.Debugf("服务 %s 已存在，跳过创建", svc.Name)
 		return nil
 	}
@@ -288,7 +288,11 @@ func (c *Client) CreateService(svc *ServiceConfig) error {
 // DeleteService 删除服务 (幂等)
 func (c *Client) DeleteService(name string) error {
 	path := fmt.Sprintf("/config/services/%s", name)
-	if !c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
 		logger.Debugf("服务 %s 不存在，跳过删除", name)
 		return nil
 	}
@@ -310,7 +314,11 @@ func (c *Client) DeleteService(name string) error {
 // CreateChain 创建链 (幂等)
 func (c *Client) CreateChain(chain *ChainConfig) error {
 	path := fmt.Sprintf("/config/chains/%s", chain.Name)
-	if c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
 		logger.Debugf("链 %s 已存在，跳过创建", chain.Name)
 		return nil
 	}
@@ -332,7 +340,11 @@ func (c *Client) CreateChain(chain *ChainConfig) error {
 // DeleteChain 删除链 (幂等)
 func (c *Client) DeleteChain(name string) error {
 	path := fmt.Sprintf("/config/chains/%s", name)
-	if !c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
 		logger.Debugf("链 %s 不存在，跳过删除", name)
 		return nil
 	}
@@ -351,30 +363,59 @@ func (c *Client) DeleteChain(name string) error {
 	return nil
 }
 
-// doRequest 执行 HTTP 请求
+// ObserverAddress 获取节点本机供 Gost 使用的 Observer 地址。
+func (c *Client) ObserverAddress() (string, error) {
+	conn, err := c.connect()
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
+	defer cancel()
+	reply, err := nodegrpc.NewNodeClient(conn).GetObserverEndpoint(ctx, &emptypb.Empty{})
+	if err != nil {
+		return "", err
+	}
+	return reply.GetAddress(), nil
+}
+
+func (c *Client) ObserverToken() string {
+	return nodegrpc.ObserverToken(c.config.Username, c.config.Password)
+}
+
+func (c *Client) connect() (*grpc.ClientConn, error) {
+	transport, err := nodegrpc.ClientTLS(c.config.CAFile)
+	if err != nil {
+		return nil, err
+	}
+	return grpc.NewClient(c.config.Address, grpc.WithTransportCredentials(transport),
+		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(c.config.Username, c.config.Password)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(5<<20)))
+}
+
+// doRequest 将 Gost 管理命令交给节点的 gRPC 桥接进程。
 func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
-	var reqBody io.Reader
+	request := &nodegrpc.CommandRequest{Method: method, Path: path}
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		reqBody = bytes.NewReader(data)
+		request.Body = data
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, reqBody)
+	conn, err := c.connect()
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	// 添加基础认证
-	if c.username != "" && c.password != "" {
-		req.SetBasicAuth(c.username, c.password)
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
+	defer cancel()
+	reply, err := nodegrpc.NewNodeClient(conn).Execute(ctx, request)
+	if err != nil {
+		return nil, err
 	}
-
-	return c.httpClient.Do(req)
+	return &http.Response{StatusCode: int(reply.GetStatusCode()), Body: io.NopCloser(bytes.NewReader(reply.GetBody()))}, nil
 }
 
 // BuildTCPForwardService 构建 TCP 转发服务配置
@@ -455,7 +496,11 @@ func BuildUDPForwardService(name string, listenPort int, targets []string, strat
 // CreateLimiter 创建限流器 (幂等)
 func (c *Client) CreateLimiter(limiter *LimiterConfig) error {
 	path := fmt.Sprintf("/config/limiters/%s", limiter.Name)
-	if c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
 		logger.Debugf("限流器 %s 已存在，跳过创建", limiter.Name)
 		return nil
 	}
@@ -477,7 +522,11 @@ func (c *Client) CreateLimiter(limiter *LimiterConfig) error {
 // DeleteLimiter 删除限流器 (幂等)
 func (c *Client) DeleteLimiter(name string) error {
 	path := fmt.Sprintf("/config/limiters/%s", name)
-	if !c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
 		logger.Debugf("限流器 %s 不存在，跳过删除", name)
 		return nil
 	}
@@ -496,15 +545,28 @@ func (c *Client) DeleteLimiter(name string) error {
 	return nil
 }
 
-// CreateObserver 创建观察器 (幂等)
-func (c *Client) CreateObserver(observer *ObserverConfig) error {
+// SetObserver 确保节点配置了同一个统计观察器。
+func (c *Client) SetObserver(observer *ObserverConfig) error {
 	path := fmt.Sprintf("/config/observers/%s", observer.Name)
-	if c.exists(path) {
-		logger.Debugf("观察器 %s 已存在，跳过创建", observer.Name)
-		return nil
+	current, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	method := http.MethodPost
+	if len(current) == 0 {
+		path = "/config/observers"
+	} else {
+		var existing ObserverConfig
+		if err = json.Unmarshal(current, &existing); err != nil {
+			return err
+		}
+		if existing.Plugin != nil && observer.Plugin != nil && *existing.Plugin == *observer.Plugin {
+			return nil
+		}
+		method = http.MethodPut
 	}
 
-	resp, err := c.doRequest("POST", "/config/observers", observer)
+	resp, err := c.doRequest(method, path, observer)
 	if err != nil {
 		return err
 	}
@@ -520,7 +582,11 @@ func (c *Client) CreateObserver(observer *ObserverConfig) error {
 // DeleteObserver 删除观察器 (幂等)
 func (c *Client) DeleteObserver(name string) error {
 	path := fmt.Sprintf("/config/observers/%s", name)
-	if !c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
 		logger.Debugf("观察器 %s 不存在，跳过删除", name)
 		return nil
 	}
@@ -542,7 +608,11 @@ func (c *Client) DeleteObserver(name string) error {
 // CreateCLimiter 创建并发连接数限制器 (幂等)
 func (c *Client) CreateCLimiter(climiter *CLimiterConfig) error {
 	path := fmt.Sprintf("/config/climiters/%s", climiter.Name)
-	if c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
 		logger.Debugf("并发连接限制器 %s 已存在，跳过创建", climiter.Name)
 		return nil
 	}
@@ -564,7 +634,11 @@ func (c *Client) CreateCLimiter(climiter *CLimiterConfig) error {
 // DeleteCLimiter 删除并发连接数限制器 (幂等)
 func (c *Client) DeleteCLimiter(name string) error {
 	path := fmt.Sprintf("/config/climiters/%s", name)
-	if !c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
 		logger.Debugf("并发连接限制器 %s 不存在，跳过删除", name)
 		return nil
 	}
@@ -586,7 +660,11 @@ func (c *Client) DeleteCLimiter(name string) error {
 // CreateRLimiter 创建请求速率限制器 (幂等)
 func (c *Client) CreateRLimiter(rlimiter *RLimiterConfig) error {
 	path := fmt.Sprintf("/config/rlimiters/%s", rlimiter.Name)
-	if c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
 		logger.Debugf("请求速率限制器 %s 已存在，跳过创建", rlimiter.Name)
 		return nil
 	}
@@ -608,7 +686,11 @@ func (c *Client) CreateRLimiter(rlimiter *RLimiterConfig) error {
 // DeleteRLimiter 删除请求速率限制器 (幂等)
 func (c *Client) DeleteRLimiter(name string) error {
 	path := fmt.Sprintf("/config/rlimiters/%s", name)
-	if !c.exists(path) {
+	existing, err := c.resource(path)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
 		logger.Debugf("请求速率限制器 %s 不存在，跳过删除", name)
 		return nil
 	}

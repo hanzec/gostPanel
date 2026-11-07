@@ -1,7 +1,7 @@
 package service
 
 import (
-	"strings"
+	"ycgp/internal/config"
 	"ycgp/internal/dto"
 	"ycgp/internal/repository"
 )
@@ -24,9 +24,6 @@ func (s *SystemConfigService) GetConfig() (*dto.SystemConfigResp, error) {
 	}
 
 	return &dto.SystemConfigResp{
-		Panel: dto.PanelConfigResp{
-			PanelURL: config.PanelURL,
-		},
 		Email: dto.EmailConfigResp{
 			Host:      config.SMTPHost,
 			Port:      config.SMTPPort,
@@ -52,15 +49,16 @@ func (s *SystemConfigService) GetConfig() (*dto.SystemConfigResp, error) {
 
 // GetPublicConfig 获取公开配置
 func (s *SystemConfigService) GetPublicConfig() (*dto.PublicSystemConfigResp, error) {
-	config, err := s.repo.Get()
+	site, err := s.repo.Get()
 	if err != nil {
 		return nil, err
 	}
 
 	return &dto.PublicSystemConfigResp{
-		SiteTitle: config.SiteTitle,
-		LogoURL:   config.LogoURL,
-		Copyright: config.Copyright,
+		SiteTitle:     site.SiteTitle,
+		LogoURL:       site.LogoURL,
+		Copyright:     site.Copyright,
+		ReportAddress: config.Get().Report.Address,
 	}, nil
 }
 
@@ -70,9 +68,6 @@ func (s *SystemConfigService) UpdateConfig(req *dto.UpdateSystemConfigReq) error
 	if err != nil {
 		return err
 	}
-
-	// 映射 Panel (去除末尾斜杠，避免拼接路径时出现双斜杠)
-	config.PanelURL = strings.TrimSuffix(req.Panel.PanelURL, "/")
 
 	// 映射 Email
 	config.SMTPHost = req.Email.Host

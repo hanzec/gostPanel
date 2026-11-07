@@ -31,6 +31,13 @@ const (
 	RuleTypeTunnel  RuleType = "tunnel"  // 隧道转发（通过隧道链路）
 )
 
+// ObserverCounters records the last cumulative counters reported by a Gost service.
+type ObserverCounters struct {
+	InputBytes  int64 `gorm:"not null;default:0"`
+	OutputBytes int64 `gorm:"not null;default:0"`
+	Connections int64 `gorm:"not null;default:0"`
+}
+
 // GostRule 转发规则模型
 // 入口选择：NodeID 或 TunnelID 二选一
 // - 端口转发 (forward)：选择 NodeID，直接在该节点上创建转发服务
@@ -54,10 +61,11 @@ type GostRule struct {
 	ObserverID string `gorm:"size:100" json:"observer_id"` // 观察器 ID
 
 	// 流量统计 (由观察器更新)
-	InputBytes    int64 `gorm:"default:0" json:"input_bytes"`    // 入站总流量 (bytes)
-	OutputBytes   int64 `gorm:"default:0" json:"output_bytes"`   // 出站总流量 (bytes)
-	TotalBytes    int64 `gorm:"default:0" json:"total_bytes"`    // 总流量 (Input + Output)
-	TotalRequests int64 `gorm:"default:0" json:"total_requests"` // 总请求数
+	InputBytes       int64            `gorm:"default:0" json:"input_bytes"`    // 入站总流量 (bytes)
+	OutputBytes      int64            `gorm:"default:0" json:"output_bytes"`   // 出站总流量 (bytes)
+	TotalBytes       int64            `gorm:"default:0" json:"total_bytes"`    // 总流量 (Input + Output)
+	TotalRequests    int64            `gorm:"default:0" json:"total_requests"` // 总请求数
+	ObserverCounters ObserverCounters `gorm:"embedded;embeddedPrefix:observer_" json:"-"`
 
 	Remark    string         `gorm:"type:text" json:"remark"` // 备注
 	CreatedAt time.Time      `json:"created_at"`

@@ -1,2 +1,4 @@
+config/*
+!config/config.yaml
 internal/router/dist/
 web/node_modules/

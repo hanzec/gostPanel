@@ -24,7 +24,6 @@ RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
 COPY pkg/ pkg/
-COPY config/ config/
 
 # 从前端构建阶段复制 dist 到后端 embedding 路径
 # 注意：前端构建输出到了 ../internal/router/dist，即 /app/internal/router/dist
@@ -42,13 +41,13 @@ ENV TZ=Asia/Shanghai
 
 # 复制程序和配置
 COPY --from=backend-builder /app/ycgp .
-COPY --from=backend-builder /app/config ./config
+COPY config/config.yaml ./config/config.yaml
 COPY LICENSE ./LICENSE
 
 # 创建目录
 RUN mkdir -p /app/data /app/logs
 
-EXPOSE 39100
+EXPOSE 39100 39101
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:39100/api/v1/health
