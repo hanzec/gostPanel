@@ -1,202 +1,257 @@
 <template>
-  <div class="page-container">
-    <div class="page-header">
-      <h3>隧道管理</h3>
-    </div>
-    <el-card shadow="hover">
-      <!-- 搜索栏 -->
-      <div class="search-bar">
-        <div class="filters">
-          <el-input
-            v-model="searchKeyword"
-            placeholder="搜索隧道名称"
-            :prefix-icon="Search"
-            clearable
-            style="width: 250px"
-            @clear="handleSearch"
-            @keyup.enter="handleSearch"
-          />
-          <el-select v-model="searchNodeId" placeholder="选择节点" clearable style="width: 180px" @change="handleSearch">
+  <div class="ops-page">
+    <PageHeader eyebrow="RELAY TUNNELS" title="隧道管理" description="在入口与出口节点之间建立 Relay 链路，管理隧道协议和运行状态。">
+      <template #actions>
+        <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
+        <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
+      </template>
+    </PageHeader>
+
+    <MetricStrip label="隧道统计" :items="tunnelMetrics" />
+
+    <section class="ops-panel tunnel-panel" aria-labelledby="tunnel-inventory-title">
+      <div class="inventory-heading">
+        <div>
+          <h2 id="tunnel-inventory-title">链路清单</h2>
+          <p class="ops-muted">检查流量路径与出口 Relay 监听配置。</p>
+        </div>
+        <span class="inventory-badge ops-mono">RELAY</span>
+      </div>
+
+      <form class="ops-toolbar inventory-filters" aria-label="筛选隧道" @submit.prevent="handleSearch">
+        <div class="inventory-field">
+          <label for="tunnel-keyword">隧道名称</label>
+          <el-input id="tunnel-keyword" v-model="searchKeyword" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
+        </div>
+        <div class="inventory-field">
+          <label for="tunnel-node">关联节点</label>
+          <el-select id="tunnel-node" v-model="searchNodeId" placeholder="全部节点" :loading="nodeOptionsLoading" clearable @change="handleSearch">
             <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
           </el-select>
-          <el-select v-model="searchStatus" placeholder="状态" clearable style="width: 120px" @change="handleSearch">
+        </div>
+        <div class="inventory-field">
+          <label for="inventory-status">运行状态</label>
+          <el-select id="inventory-status" v-model="searchStatus" placeholder="全部状态" clearable @change="handleSearch">
             <el-option label="运行中" value="running" />
             <el-option label="已停止" value="stopped" />
+            <el-option label="异常" value="error" />
           </el-select>
-          <el-button :icon="Search" @click="handleSearch">搜索</el-button>
-          <el-button :icon="Refresh" @click="fetchData">刷新</el-button>
         </div>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
+        <el-button native-type="submit" :icon="Search">筛选</el-button>
+      </form>
+
+      <div v-if="loadError" class="inventory-error" role="alert">
+        <span>无法加载链路清单，请重试。</span>
+        <el-button :loading="loading" @click="fetchData()">重新加载</el-button>
+      </div>
+      <div v-if="nodeOptionsError" class="inventory-error" role="alert">
+        <span>无法加载节点选项。</span>
+        <el-button :loading="nodeOptionsLoading" @click="fetchNodes">重新加载节点</el-button>
       </div>
 
-      <!-- 表格 -->
-      <el-table :data="tunnelList" v-loading="loading" style="width: 100%" border>
-        <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column prop="name" label="隧道名称" min-width="150" align="center" show-overflow-tooltip />
-        <el-table-column label="入口节点" width="140" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" type="primary">{{ row.entry_node?.name || '-' }}</el-tag>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="出口节点" width="140" align="center">
-          <template #default="{ row }">
-            <el-tag size="small" type="success">{{ row.exit_node?.name || '-' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="protocol" label="协议" width="80" align="center">
-          <template #default="{ row }">
-            <el-tag size="small">{{ row.protocol?.toUpperCase() }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="relay_port" label="Relay端口" width="100" align="center" />
-        <el-table-column prop="status" label="状态" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">{{ getStatusText(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="150" show-overflow-tooltip />
-        <el-table-column label="操作" width="240" align="center" fixed="right">
-          <template #default="{ row }">
-            <el-button 
-              v-if="row.status !== 'running'" 
-              type="success" link size="small" 
-              @click="handleStart(row)"
-            >启动</el-button>
-            <el-button 
-              v-else 
-              type="warning" link size="small" 
-              @click="handleStop(row)"
-            >停止</el-button>
-            <el-button type="primary" link size="small" @click="openDialog(row)">编辑</el-button>
-            <el-button type="info" link size="small" @click="handleCopy(row)">复制</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div class="pagination">
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="total"
-          :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          @size-change="fetchData"
-          @current-change="fetchData"
-        />
+      <div v-if="loading && !tunnelList.length && !loadError" class="inventory-state" role="status">
+        <el-skeleton :rows="4" animated />
+        <span class="ops-muted">正在加载隧道</span>
       </div>
-    </el-card>
+      <div v-else-if="!tunnelList.length && !loadError" class="inventory-state">
+        <el-icon class="inventory-state-icon" aria-hidden="true"><Connection /></el-icon>
+        <p>{{ filtered ? '没有匹配的隧道' : '尚未建立隧道' }}</p>
+        <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '选择两个节点并配置 Relay 端口，即可建立转发路径。' }}</span>
+        <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
+        <el-button v-else type="primary" @click="openDialog()">添加隧道</el-button>
+      </div>
+      <div v-else-if="tunnelList.length" class="ops-table-scroll inventory-scroll" :aria-busy="loading">
+        <table class="inventory-table" role="table" aria-labelledby="tunnel-inventory-title">
+          <thead role="rowgroup">
+            <tr role="row">
+              <th scope="col" role="columnheader">隧道</th>
+              <th scope="col" role="columnheader">转发路径</th>
+              <th scope="col" role="columnheader">Relay</th>
+              <th scope="col" role="columnheader">状态</th>
+              <th scope="col" role="columnheader">操作</th>
+            </tr>
+          </thead>
+          <tbody role="rowgroup">
+            <tr v-for="tunnel in tunnelList" :key="tunnel.id" role="row">
+              <td class="inventory-resource" role="cell">
+                <span class="inventory-row-name">
+                  <el-icon class="inventory-row-icon" aria-hidden="true"><Connection /></el-icon>
+                  <strong>{{ tunnel.name }}</strong>
+                </span>
+                <span class="inventory-secondary ops-muted"><span class="ops-mono">#{{ tunnel.id }}</span><span v-if="tunnel.remark"> · {{ tunnel.remark }}</span></span>
+              </td>
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">转发路径</span>
+                <div class="tunnel-route">
+                  <span><span class="tunnel-route-label">入口</span>{{ tunnel.entry_node?.name || '节点 #' + tunnel.entry_node_id }}</span>
+                  <el-icon class="tunnel-route-arrow" aria-hidden="true"><Right /></el-icon>
+                  <span><span class="tunnel-route-label">出口</span>{{ tunnel.exit_node?.name || '节点 #' + tunnel.exit_node_id }}</span>
+                </div>
+              </td>
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">Relay</span>
+                <strong class="ops-mono">{{ tunnel.protocol?.toUpperCase() || '—' }}</strong>
+                <span class="inventory-secondary ops-mono ops-muted">:{{ tunnel.relay_port }}</span>
+              </td>
+              <td class="inventory-status" role="cell">
+                <span class="ops-status" :class="'is-' + (tunnelStates[tunnel.status]?.tone || 'muted')">
+                  {{ tunnelStates[tunnel.status]?.label || '未知' }}
+                </span>
+              </td>
+              <td class="inventory-actions-cell" role="cell">
+                <div class="inventory-actions">
+                  <el-button
+                    :type="tunnel.status === 'running' ? 'warning' : 'primary'"
+                    plain
+                    :loading="activeTunnelId === tunnel.id"
+                    :disabled="activeTunnelId !== null && activeTunnelId !== tunnel.id"
+                    @click="toggleTunnel(tunnel)"
+                  >{{ tunnel.status === 'running' ? '停止' : '启动' }}</el-button>
+                  <el-dropdown trigger="click" @command="handleTunnelAction($event, tunnel)">
+                    <el-button :aria-label="'隧道 ' + tunnel.name + ' 的更多操作'">
+                      更多<el-icon aria-hidden="true"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="edit">编辑隧道</el-dropdown-item>
+                        <el-dropdown-item command="copy">复制隧道</el-dropdown-item>
+                        <el-dropdown-item command="delete" divided class="inventory-danger">删除隧道</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <!-- 添加/编辑对话框 -->
+      <div v-if="total" class="ops-pagination inventory-pagination">
+        <span class="ops-muted">共 {{ total }} 条隧道</span>
+        <div class="inventory-page-controls">
+          <el-select v-model="pageSize" class="inventory-page-size" aria-label="每页隧道数" @change="handleSearch">
+            <el-option v-for="size in [10, 20, 50, 100]" :key="size" :label="size + ' 条/页'" :value="size" />
+          </el-select>
+          <el-pagination
+            v-model:current-page="page"
+            :page-size="pageSize"
+            :total="total"
+            :pager-count="3"
+            layout="prev, pager, next"
+            @current-change="fetchData()"
+          />
+        </div>
+      </div>
+    </section>
+
     <el-dialog
       v-model="dialogVisible"
       :title="isEdit ? '编辑隧道' : '添加隧道'"
-      width="550px"
+      width="min(600px, calc(100vw - 24px))"
       :close-on-click-modal="false"
     >
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px">
-        <el-form-item label="隧道名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入隧道名称" :prefix-icon="EditPen" />
-        </el-form-item>
-        <el-divider content-position="left">链路配置</el-divider>
-        <el-form-item label="入口节点" prop="entry_node_id">
-          <el-select v-model="form.entry_node_id" placeholder="选择入口节点" style="width: 100%" :disabled="isEdit">
-            <el-option 
-              v-for="node in nodeList" 
-              :key="node.id"
-              :label="node.name" 
-              :value="node.id" 
-              :disabled="node.id === form.exit_node_id"
-            />
-          </el-select>
-          <div class="form-hint">客户端连接的节点</div>
-        </el-form-item>
-        <el-form-item label="出口节点" prop="exit_node_id">
-          <el-select v-model="form.exit_node_id" placeholder="选择出口节点" style="width: 100%" :disabled="isEdit">
-            <el-option 
-              v-for="node in nodeList" 
-              :key="node.id" 
-              :label="node.name" 
-              :value="node.id" 
-              :disabled="node.id === form.entry_node_id"
-            />
-          </el-select>
-          <div class="form-hint">流量出口节点，启动时会在该节点创建 Relay 服务</div>
-        </el-form-item>
-        <el-divider content-position="left">协议配置</el-divider>
-        <el-row :gutter="20">
-          <el-col :span="24" :sm="12">
-            <el-form-item label="协议" prop="protocol">
-              <el-select v-model="form.protocol" style="width: 100%">
-                <el-option label="TCP" value="tcp" />
-                <el-option label="UDP" value="udp" />
-                <el-option label="TLS" value="tls" />
-                <el-option label="MTLS" value="mtls" />
-                <el-option label="WS" value="ws" />
-                <el-option label="MWS" value="mws" />
-                <el-option label="QUIC" value="quic" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24" :sm="12">
-            <el-form-item label="Relay端口" prop="relay_port">
-              <el-input-number v-model="form.relay_port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
-              <div class="form-hint">出口节点 Relay 服务端口</div>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-form-item label="备注" prop="remark">
-          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="备注信息" />
-        </el-form-item>
+      <p v-if="isEdit" class="tunnel-dialog-hint ops-muted">入口和出口在创建时确定，可以在这里调整名称、协议和 Relay 端口。</p>
+      <div v-else-if="nodeOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
+        <span>无法加载节点选项。</span>
+        <el-button :loading="nodeOptionsLoading" @click="fetchNodes">重新加载节点</el-button>
+      </div>
+      <p v-else-if="!nodeOptionsLoading && nodeList.length < 2" class="tunnel-dialog-hint ops-muted">
+        建立隧道至少需要两个节点。<RouterLink to="/nodes" class="tunnel-link" @click="dialogVisible = false">前往节点管理</RouterLink>
+      </p>
+      <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" @submit.prevent="handleSubmit">
+        <div class="inventory-form-grid">
+          <el-form-item label="隧道名称" prop="name" class="inventory-form-wide">
+            <el-input v-model="form.name" placeholder="例如 生产环境中继" />
+          </el-form-item>
+          <el-form-item label="入口节点" prop="entry_node_id">
+            <el-select v-model="form.entry_node_id" placeholder="选择入口节点" :loading="nodeOptionsLoading" :disabled="isEdit">
+              <el-option
+                v-for="node in nodeList"
+                :key="node.id"
+                :label="node.name"
+                :value="node.id"
+                :disabled="node.id === form.exit_node_id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="出口节点" prop="exit_node_id">
+            <el-select v-model="form.exit_node_id" placeholder="选择出口节点" :loading="nodeOptionsLoading" :disabled="isEdit">
+              <el-option
+                v-for="node in nodeList"
+                :key="node.id"
+                :label="node.name"
+                :value="node.id"
+                :disabled="node.id === form.entry_node_id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="协议" prop="protocol">
+            <el-select v-model="form.protocol">
+              <el-option v-for="protocol in protocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="Relay 端口" prop="relay_port">
+            <el-input-number v-model="form.relay_port" :min="1" :max="65535" controls-position="right" />
+            <span class="tunnel-form-hint ops-muted">Relay 服务在出口节点监听。</span>
+          </el-form-item>
+          <el-form-item label="备注" prop="remark" class="inventory-form-wide">
+            <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录链路用途" />
+          </el-form-item>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">确定</el-button>
+        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加隧道' }}</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Search, EditPen, Connection } from '@element-plus/icons-vue'
+import { ArrowDown, Connection, Plus, Refresh, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
+import MetricStrip from '@/components/MetricStrip.vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { getTunnelList, createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
 import { getNodeList } from '@/api/node'
 
-// 节点列表
-const nodeList = ref([])
+const tunnelStates = {
+  running: { label: '运行中', icon: VideoPlay, tone: 'success' },
+  stopped: { label: '已停止', icon: VideoPause },
+  error: { label: '异常', icon: Warning, tone: 'danger' }
+}
+const protocols = ['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic']
 
-// 列表数据
+const nodeList = ref([])
+const nodeOptionsLoading = ref(false)
+const nodeOptionsError = ref(false)
 const tunnelList = ref([])
-const loading = ref(false)
+const loading = ref(true)
+const loadError = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
-const total = ref(0)
-
-// 搜索
+const total = ref(null)
 const searchKeyword = ref('')
 const searchNodeId = ref('')
 const searchStatus = ref('')
+const filtered = computed(() => Boolean(searchKeyword.value.trim() || searchNodeId.value || searchStatus.value))
+const tunnelMetrics = computed(() => [
+  { label: '筛选结果', value: total.value, detail: '全部匹配隧道', icon: Connection },
+  ...Object.entries(tunnelStates).map(([status, state]) => ({
+    ...state,
+    value: total.value === null ? null : tunnelList.value.filter(tunnel => tunnel.status === status).length,
+    detail: '当前页'
+  }))
+])
 
-// 对话框
+const activeTunnelId = ref(null)
 const dialogVisible = ref(false)
-const isEdit = ref(false)
 const editId = ref(null)
+const isEdit = computed(() => editId.value !== null)
 const submitLoading = ref(false)
 const formRef = ref(null)
-
-const form = reactive({
-  name: '',
-  entry_node_id: '',
-  exit_node_id: '',
-  protocol: 'tcp',
-  relay_port: 8443,
-  remark: ''
-})
-
+const form = reactive({ name: '', entry_node_id: '', exit_node_id: '', protocol: 'tcp', relay_port: 8443, remark: '' })
 const formRules = {
   name: [{ required: true, message: '请输入隧道名称', trigger: 'blur' }],
   entry_node_id: [{ required: true, message: '请选择入口节点', trigger: 'change' }],
@@ -205,29 +260,21 @@ const formRules = {
   relay_port: [{ required: true, message: '请输入 Relay 端口', trigger: 'blur' }]
 }
 
-// 状态处理
-const getStatusType = (status) => {
-  const map = { running: 'success', stopped: 'info', error: 'danger' }
-  return map[status] || 'info'
-}
-
-const getStatusText = (status) => {
-  const map = { running: '运行中', stopped: '已停止', error: '错误' }
-  return map[status] || status
-}
-
-// 获取节点列表
 const fetchNodes = async () => {
+  nodeOptionsLoading.value = true
   try {
     const res = await getNodeList({ pageSize: 100 })
     nodeList.value = res.data.list || []
-  } catch (error) {
-    console.error('获取节点列表失败:', error)
+    nodeOptionsError.value = false
+  } catch {
+    nodeOptionsError.value = true
+  } finally {
+    nodeOptionsLoading.value = false
   }
 }
 
-// 获取数据
 const fetchData = async (isSilent = false) => {
+  if (isSilent && (loading.value || loadError.value)) return
   if (!isSilent) loading.value = true
   try {
     const res = await getTunnelList({
@@ -239,277 +286,140 @@ const fetchData = async (isSilent = false) => {
     })
     tunnelList.value = res.data.list || []
     total.value = res.data.total || 0
-  } catch (error) {
-    console.error('获取隧道列表失败:', error)
+    loadError.value = false
+  } catch {
+    loadError.value = true
   } finally {
     if (!isSilent) loading.value = false
   }
 }
 
-// 搜索
 const handleSearch = () => {
   page.value = 1
   fetchData()
 }
 
-// 打开对话框
+const clearFilters = () => {
+  searchKeyword.value = ''
+  searchNodeId.value = ''
+  searchStatus.value = ''
+  handleSearch()
+}
+
 const openDialog = (row = null) => {
-  isEdit.value = !!row
-  editId.value = row?.id || null
-  
-  if (row) {
-    Object.assign(form, {
-      name: row.name,
-      entry_node_id: row.entry_node_id,
-      exit_node_id: row.exit_node_id,
-      protocol: row.protocol || 'tcp',
-      relay_port: row.relay_port || 8443,
-      remark: row.remark || ''
-    })
-  } else {
-    Object.assign(form, {
-      name: '',
-      entry_node_id: '',
-      exit_node_id: '',
-      protocol: 'tcp',
-      relay_port: 8443,
-      remark: ''
-    })
-  }
-  
-  dialogVisible.value = true
-}
-
-// 提交表单
-const handleSubmit = async () => {
-  if (!formRef.value) return
-  
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    
-    submitLoading.value = true
-    try {
-      const submitData = {
-        name: form.name,
-        entry_node_id: form.entry_node_id,
-        exit_node_id: form.exit_node_id,
-        protocol: form.protocol,
-        relay_port: form.relay_port,
-        remark: form.remark
-      }
-      
-      if (isEdit.value) {
-        await updateTunnel(editId.value, submitData)
-        ElMessage.success('更新成功')
-      } else {
-        await createTunnel(submitData)
-        ElMessage.success('创建成功')
-      }
-      dialogVisible.value = false
-      fetchData()
-    } catch (error) {
-      console.error('操作失败:', error)
-    } finally {
-      submitLoading.value = false
-    }
-  })
-}
-
-// 删除隧道
-const handleDelete = async (row) => {
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除隧道 "${row.name}" 吗？如果有规则正在使用此隧道，将无法删除。`, 
-      '提示', 
-      {
-        confirmButtonText: '确定',
-        cancelButtonText: '取消',
-        type: 'warning'
-      }
-    )
-    await deleteTunnel(row.id)
-    ElMessage.success('删除成功')
-    fetchData()
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('删除失败:', error)
-    }
-  }
-}
-
-// 启动隧道
-const handleStart = async (row) => {
-  try {
-    await startTunnel(row.id)
-    ElMessage.success('启动成功')
-    fetchData()
-  } catch (error) {
-    console.error('启动失败:', error)
-  }
-}
-
-// 停止隧道
-const handleStop = async (row) => {
-  try {
-    await stopTunnel(row.id)
-    ElMessage.success('停止成功')
-    fetchData()
-  } catch (error) {
-    console.error('停止失败:', error)
-  }
-}
-
-// 复制隧道
-const handleCopy = (row) => {
-  isEdit.value = false
-  editId.value = null
-  
-  Object.assign(form, {
-    name: row.name + '-copy',
+  editId.value = row?.id ?? null
+  Object.assign(form, row ? {
+    name: row.name,
     entry_node_id: row.entry_node_id,
     exit_node_id: row.exit_node_id,
     protocol: row.protocol || 'tcp',
-    relay_port: row.relay_port + 1, // 端口自动+1
+    relay_port: row.relay_port || 8443,
     remark: row.remark || ''
+  } : {
+    name: '',
+    entry_node_id: '',
+    exit_node_id: '',
+    protocol: 'tcp',
+    relay_port: 8443,
+    remark: ''
   })
-  
+  formRef.value?.clearValidate()
   dialogVisible.value = true
 }
 
-// 定时刷新
-let refreshTimer = null
+const handleSubmit = async () => {
+  if (!formRef.value || submitLoading.value) return
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
 
+  submitLoading.value = true
+  try {
+    if (isEdit.value) {
+      await updateTunnel(editId.value, form)
+      ElMessage.success('隧道已更新')
+    } else {
+      await createTunnel(form)
+      ElMessage.success('隧道已添加')
+    }
+    dialogVisible.value = false
+    fetchData()
+  } catch (error) {
+    console.error('保存隧道失败:', error)
+  } finally {
+    submitLoading.value = false
+  }
+}
+
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm('确定要删除隧道「' + row.name + '」吗？规则占用中的隧道无法删除。', '删除隧道', {
+      confirmButtonText: '删除隧道',
+      confirmButtonClass: 'el-button--danger',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await deleteTunnel(row.id)
+    ElMessage.success('隧道已删除')
+    fetchData()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') console.error('删除隧道失败:', error)
+  }
+}
+
+const toggleTunnel = async (row) => {
+  activeTunnelId.value = row.id
+  try {
+    if (row.status === 'running') {
+      await stopTunnel(row.id)
+      ElMessage.success('隧道已停止')
+    } else {
+      await startTunnel(row.id)
+      ElMessage.success('隧道已启动')
+    }
+    await fetchData()
+  } catch (error) {
+    console.error('更新隧道状态失败:', error)
+  } finally {
+    activeTunnelId.value = null
+  }
+}
+
+const handleTunnelAction = (action, row) => {
+  if (action === 'edit') openDialog(row)
+  if (action === 'delete') handleDelete(row)
+  if (action === 'copy') {
+    openDialog(row)
+    editId.value = null
+    form.name = row.name.slice(0, 95) + '-copy'
+    form.relay_port = row.relay_port < 65535 ? row.relay_port + 1 : 8443
+  }
+}
+
+let refreshTimer
 onMounted(() => {
   fetchNodes()
   fetchData()
-  
-  // 每 5 秒刷新一次 (静默刷新)
-  refreshTimer = setInterval(() => {
-    fetchData(true)
-  }, 5000)
+  refreshTimer = setInterval(() => fetchData(true), 5000)
 })
-
-onBeforeUnmount(() => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-  }
-})
+onBeforeUnmount(() => clearInterval(refreshTimer))
 </script>
 
+<style scoped src="../inventory.css"></style>
+
 <style scoped>
-.page-container {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
+.tunnel-panel .inventory-field { flex-basis: 145px; }
+.tunnel-panel .inventory-field:first-child { flex-basis: 200px; }
+.tunnel-route { display: flex; align-items: center; gap: 8px; }
+.tunnel-route-label { display: block; color: var(--ops-muted); font-size: 11px; margin-bottom: 2px; }
+.tunnel-route-arrow { color: var(--ops-accent); flex: none; }
+.tunnel-dialog-error { margin: 0 0 12px; }
+.tunnel-dialog-hint { margin: 0 0 12px; }
+.tunnel-link { color: var(--ops-accent); }
+.tunnel-form-hint { font-size: 12px; line-height: 1.5; margin-top: 4px; }
 
-.page-header h3 {
-  margin: 0 0 16px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.search-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.filters {
-  display: flex;
-  gap: 12px;
-}
-
-.pagination {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
-.form-hint {
-  color: #909399;
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-:deep(.el-table .el-table__cell) {
-  padding: 12px 0;
-}
-
-/* ========== 移动端适配 ========== */
-@media screen and (max-width: 768px) {
-  .page-header h3 {
-    font-size: 16px;
-    margin-bottom: 12px;
-  }
-  
-  .search-bar {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-  
-  .filters {
-    flex-wrap: wrap;
-  }
-  
-  .filters .el-input,
-  .filters .el-select {
-    width: 100% !important;
-  }
-  
-  :deep(.el-dialog) {
-    width: 95% !important;
-    margin: 10px auto !important;
-  }
-  
-  :deep(.el-dialog__body) {
-    padding: 15px;
-  }
-  
-  :deep(.el-form-item) {
-    margin-bottom: 12px;
-    display: block !important;
-  }
-  
-  :deep(.el-form-item__label) {
-    float: none;
-    display: block;
-    text-align: left;
-    padding-bottom: 4px;
-    width: auto !important;
-    margin-bottom: 4px;
-  }
-  
-  :deep(.el-form-item__content) {
-    margin-left: 0 !important;
-    display: block !important;
-    width: 100% !important;
-  }
-  
-  :deep(.el-card__body) {
-    padding: 12px;
-    overflow-x: auto;
-  }
-  
-  :deep(.el-table) {
-    font-size: 12px;
-    min-width: 500px;
-  }
-  
-  /* 操作列按钮调整 */
-  :deep(.el-table .cell) {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 4px;
-    padding: 0 4px;
-  }
-  :deep(.el-button--small) {
-    margin-left: 0 !important;
-    padding: 2px 4px;
-  }
+@media (max-width: 700px) {
+  .tunnel-panel .inventory-field { flex-basis: 118px; }
+  .tunnel-panel .inventory-field:first-child { flex-basis: 100%; }
+  .tunnel-route { gap: 6px; }
 }
 </style>
