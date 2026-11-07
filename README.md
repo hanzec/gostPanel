@@ -91,7 +91,7 @@ database:
 
 ### 启用节点注册和流量上报
 
-为面板的节点 gRPC 监听器配置 TLS 证书。`report.address` 是节点注册和上报时访问的 `主机:端口`，证书必须覆盖该地址中的主机名或 IP。将这个端口开放给节点。管理页面仍通过 Authentik 代理访问。
+为面板的节点 gRPC 监听器配置 TLS 证书。`report.address` 是节点注册、上报和获取 nft 模板时访问的 `主机:端口`，证书必须覆盖该地址中的主机名或 IP。将这个端口开放给节点。管理页面通过 Authentik 代理访问。
 
 ```yaml
 report:
@@ -99,11 +99,9 @@ report:
   address: "panel.internal.example:39101"
   cert_file: "/app/config/panel.crt"
   key_file: "/app/config/panel.key"
-node_tls:
-  ca_file: "/app/config/node-ca.crt"
 ```
 
-通过 token 注册时，面板保存节点提交的证书，用于后续连接该节点桥。原有节点继续使用 `node_tls.ca_file` 或系统信任的 CA 验证证书。
+节点必须先通过一次性 token 注册。面板保存注册时提交的节点证书，并用它验证发往该节点桥的 TLS 连接。
 
 ---
 
@@ -144,7 +142,7 @@ node_tls:
 
 Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS gRPC 接口下发配置。节点上报时使用注册获得的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
-如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-node/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载 `yagp-node` 发布包。包含注册功能的版本发布前，可以用 `make build-node` 构建节点桥，并在目标节点用 `YAGP_NODE_BIN=/path/to/yagp-node` 指定该二进制。
+如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-node/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载 `yagp-node` 发布包。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_NODE_BIN=/path/to/yagp-node` 指定对应的二进制。
 
 安装脚本为每个实例启用 `yagp-node-<ID>.service`。节点桥启动前检查对应的 `yagp-gost-<ID>.service`，在服务或程序缺少时尝试补装，并等待本机 Gost API 就绪。Gost 程序从官方 GitHub Releases 下载。
 

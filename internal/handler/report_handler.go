@@ -76,7 +76,8 @@ func (h *ReportHandler) Report(ctx context.Context, request *nodegrpc.ReportRequ
 func (h *ReportHandler) authenticateNode(ctx context.Context, id uint64) (*model.GostNode, error) {
 	var node model.GostNode
 	err := h.db.WithContext(ctx).First(&node, id).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && !nodegrpc.MatchCredentials(ctx, node.Username, node.Password)) {
+	if errors.Is(err, gorm.ErrRecordNotFound) ||
+		(err == nil && (node.TLSCertificatePEM == "" || !nodegrpc.MatchCredentials(ctx, node.Username, node.Password))) {
 		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
 	}
 	if err != nil {

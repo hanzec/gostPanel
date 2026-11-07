@@ -46,10 +46,7 @@ func ValidateNodeCertificate(certPEM string) error {
 	return err
 }
 
-func NodeClientTLS(caFile, certPEM string) (credentials.TransportCredentials, error) {
-	if certPEM == "" {
-		return ClientTLS(caFile)
-	}
+func NodeClientTLS(certPEM string) (credentials.TransportCredentials, error) {
 	cert, err := parseNodeCertificate(certPEM)
 	if err != nil {
 		return nil, err

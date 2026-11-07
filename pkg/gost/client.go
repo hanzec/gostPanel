@@ -14,6 +14,8 @@ import (
 	"yagp/pkg/nodegrpc"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -25,7 +27,6 @@ type Client struct {
 // Config 客户端配置
 type Config struct {
 	Address        string
-	CAFile         string
 	CertificatePEM string
 	Username       string
 	Password       string
@@ -385,7 +386,10 @@ func (c *Client) ObserverToken() string {
 }
 
 func (c *Client) connect() (*grpc.ClientConn, error) {
-	transport, err := nodegrpc.NodeClientTLS(c.config.CAFile, c.config.CertificatePEM)
+	if c.config.CertificatePEM == "" || c.config.Username == "" || c.config.Password == "" {
+		return nil, status.Error(codes.FailedPrecondition, "节点尚未通过令牌注册")
+	}
+	transport, err := nodegrpc.NodeClientTLS(c.config.CertificatePEM)
 	if err != nil {
 		return nil, err
 	}

@@ -18,7 +18,6 @@ type Config struct {
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Authentik AuthentikConfig `mapstructure:"authentik"`
 	Report    ReportConfig    `mapstructure:"report"`
-	NodeTLS   NodeTLSConfig   `mapstructure:"node_tls"`
 	Log       LogConfig       `mapstructure:"log"`
 }
 
@@ -45,10 +44,6 @@ type ReportConfig struct {
 	Address  string `mapstructure:"address"`
 	CertFile string `mapstructure:"cert_file"`
 	KeyFile  string `mapstructure:"key_file"`
-}
-
-type NodeTLSConfig struct {
-	CAFile string `mapstructure:"ca_file"`
 }
 
 // LogConfig 日志配置

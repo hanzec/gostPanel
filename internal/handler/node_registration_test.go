@@ -165,6 +165,15 @@ func TestNodeRegistration(t *testing.T) {
 		!strings.Contains(template.GetConfig(), nodegrpc.NftTableName(reply.GetNodeId())) {
 		t.Fatalf("node did not receive its nftables JSON template: %v", err)
 	}
+	if err := db.Model(&enrolled).Update("tls_certificate_pem", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Report(ctx, report, newAuth); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("report with credentials but no registration certificate = %v", err)
+	}
+	if _, err := client.GetNftTemplate(ctx, requestTemplate, newAuth); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("nft template request with credentials but no registration certificate = %v", err)
+	}
 }
 
 func testNodeCertificate(t *testing.T) string {

@@ -36,8 +36,8 @@ func TestReportRecordsTrafficForTheEntryNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodes := []model.GostNode{
-		{Name: "entry", Address: "localhost", Port: 39000, Username: "entry", Password: "entry-password"},
-		{Name: "exit", Address: "localhost", Port: 39001, Username: "exit", Password: "exit-password"},
+		{Name: "entry", Address: "localhost", Port: 39000, Username: "entry", Password: "entry-password", TLSCertificatePEM: testNodeCertificate(t)},
+		{Name: "exit", Address: "localhost", Port: 39001, Username: "exit", Password: "exit-password", TLSCertificatePEM: testNodeCertificate(t)},
 	}
 	if err := db.Create(&nodes).Error; err != nil {
 		t.Fatal(err)

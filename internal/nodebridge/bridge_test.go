@@ -2,9 +2,12 @@ package nodebridge
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -56,8 +59,10 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 		}
 	}))
 	t.Cleanup(admin.Close)
-	certFile, keyFile := testTLSFiles(t)
-	serverTLS, err := credentials.NewServerTLSFromFile(certFile, keyFile)
+	panelCertFile, panelKeyFile, _ := testTLSFiles(t, x509.Certificate{IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)}})
+	nodeCertFile, nodeKeyFile, nodeCert := testTLSFiles(t, x509.Certificate{DNSNames: []string{nodegrpc.NodeCertificateName}})
+	_, _, differentNodeCert := testTLSFiles(t, x509.Certificate{DNSNames: []string{nodegrpc.NodeCertificateName}})
+	serverTLS, err := credentials.NewServerTLSFromFile(panelCertFile, panelKeyFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +84,7 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 			NodeID: 42, Username: username, Password: password,
 			ControlListen: controlAddress, ObserverListen: observerAddress,
 			AdminAddress: strings.TrimPrefix(admin.URL, "http://"), ReportAddress: panelListener.Addr().String(),
-			ReportCAFile: certFile, TLSCertFile: certFile, TLSKeyFile: keyFile,
+			ReportCAFile: panelCertFile, TLSCertFile: nodeCertFile, TLSKeyFile: nodeKeyFile,
 		})
 	}()
 	t.Cleanup(func() {
@@ -88,7 +93,7 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	clientTLS, err := nodegrpc.ClientTLS(certFile)
+	clientTLS, err := nodegrpc.NodeClientTLS(nodeCert)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +115,16 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	if _, err = controlClient.ApplyNftConfig(timeout, &nodegrpc.NftConfig{Config: `{"nftables":[]}`}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated nftables request: %v", err)
 	}
-	client := gost.NewClient(&gost.Config{Address: controlAddress, CAFile: certFile, Username: username, Password: password})
+	configWithoutCertificate := &gost.Config{Address: controlAddress, Username: username, Password: password}
+	if err = gost.NewClient(configWithoutCertificate).HealthCheck(); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("node without a registration certificate: %v", err)
+	}
+	wrongCertificate := *configWithoutCertificate
+	wrongCertificate.CertificatePEM = differentNodeCert
+	if err = gost.NewClient(&wrongCertificate).HealthCheck(); status.Code(err) != codes.Unavailable {
+		t.Fatalf("node with a different certificate: %v", err)
+	}
+	client := gost.NewClient(&gost.Config{Address: controlAddress, CertificatePEM: nodeCert, Username: username, Password: password})
 	if err = client.HealthCheck(); err != nil {
 		t.Fatal(err)
 	}
@@ -179,21 +193,33 @@ func listenLocal(t *testing.T) net.Listener {
 	return listener
 }
 
-func testTLSFiles(t *testing.T) (string, string) {
+func testTLSFiles(t *testing.T, certificate x509.Certificate) (string, string, string) {
 	t.Helper()
-	server := httptest.NewTLSServer(http.NotFoundHandler())
-	defer server.Close()
-	key, err := x509.MarshalPKCS8PrivateKey(server.TLS.Certificates[0].PrivateKey)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate.SerialNumber = big.NewInt(1)
+	certificate.NotBefore = time.Now().Add(-time.Minute)
+	certificate.NotAfter = time.Now().Add(time.Hour)
+	certificate.BasicConstraintsValid = true
+	certificate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	der, err := x509.CreateCertificate(rand.Reader, &certificate, &certificate, publicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
 	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
-	if err = os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err = os.WriteFile(certFile, certificatePEM, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return certFile, keyFile
+	return certFile, keyFile, string(certificatePEM)
 }

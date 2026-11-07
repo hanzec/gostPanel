@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"yagp/internal/config"
 	"yagp/internal/model"
 	"yagp/pkg/gost"
 )
@@ -15,7 +14,6 @@ import (
 func GetGostClient(node *model.GostNode) *gost.Client {
 	return gost.NewClient(&gost.Config{
 		Address:        net.JoinHostPort(strings.Trim(node.Address, "[]"), strconv.Itoa(node.Port)),
-		CAFile:         config.Get().NodeTLS.CAFile,
 		CertificatePEM: node.TLSCertificatePEM,
 		Username:       node.Username,
 		Password:       node.Password,

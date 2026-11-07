@@ -17,9 +17,6 @@ report:
   cert_file: ""
   key_file: ""
 
-node_tls:
-  ca_file: ""
-
 log:
   level: "info"  # debug, info, warn, error
   format: "json"  # json, console
