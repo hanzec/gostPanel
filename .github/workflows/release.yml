@@ -38,6 +38,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -50,6 +51,9 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+
+      - name: Generate release changelog
+        run: go run ./cmd/release-notes -repository "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" > "$RUNNER_TEMP/release-notes.md"
 
       - name: Build release binaries
         env:
@@ -91,7 +95,7 @@ jobs:
             yagp-*.zip
           fail_on_unmatched_files: true
           overwrite_files: false
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/release-notes.md
           draft: false
           prerelease: false
           make_latest: ${{ steps.latest.outputs.value }}

@@ -232,6 +232,8 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TL
 
 版本格式为 `x.y.z-sha`，例如 `0.1.67-a1b2c3d`。`x.y` 在仓库根目录的 `VERSION` 中维护，`z` 是沿第一父提交统计的主线提交数，`sha` 是提交 SHA 的前 7 位。用 `bash scripts/version.sh` 可查看当前检出提交的版本，需要完整 Git 历史。
 
+GitHub Release 正文由 `cmd/release-notes` 生成。程序沿当前分支的第一父提交查找最近的项目发布标签，按提交类型整理此后进入该分支的提交，未分类的提交也会列出。首次发布会列出完整历史。用 `git fetch --tags` 获取标签后，可在完整检出的仓库中运行 `go run ./cmd/release-notes` 预览正文。
+
 面板仪表盘、`/api/v1/health`、`yagp --version` 和 `yagp-daemon --version` 使用相同的构建版本。
 
 ### 开发与编译
