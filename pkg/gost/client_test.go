@@ -195,6 +195,12 @@ func TestGostConfigAndForwardingBuilders(t *testing.T) {
 func TestGostTypedControlCalls(t *testing.T) {
 	ctx := context.Background()
 	client, calls := controlFixture(t)
+	listener := &nodegrpc.ListenerCheckRequest{Protocol: "tcp", Ip: "::1", Port: 16142}
+	available := &nodegrpc.ListenerCheckReply{Available: true}
+	calls <- controlCall{method: nodegrpc.V1_CheckListener_FullMethodName, request: listener, response: available}
+	if got, err := client.CheckListener(ctx, listener.Protocol, listener.Ip, listener.Port); err != nil || !proto.Equal(got, available) {
+		t.Fatalf("check listener = %v, %v", got, err)
+	}
 	state := &nodegrpc.GostServiceStatus{Unit: "yagp-gost.service", ActiveState: "active"}
 	calls <- controlCall{method: nodegrpc.V1_GetGostServiceStatus_FullMethodName, request: &emptypb.Empty{}, response: state}
 	if got, err := client.GostServiceStatus(ctx); err != nil || !proto.Equal(got, state) {

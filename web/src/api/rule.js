@@ -32,6 +32,14 @@ export function createRule(data) {
     })
 }
 
+export function checkRuleListener(id) {
+    return request({
+        url: `/rules/${id}/listener-check`,
+        method: 'post',
+        silentError: true
+    })
+}
+
 /**
  * 更新规则
  */

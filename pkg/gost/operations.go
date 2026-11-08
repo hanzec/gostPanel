@@ -11,6 +11,12 @@ import (
 
 const nodeMutationTimeout = 20 * time.Second
 
+func (c *Client) CheckListener(ctx context.Context, protocol, ip string, port uint32) (*nodegrpc.ListenerCheckReply, error) {
+	return callNode(ctx, c, c.config.Timeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.ListenerCheckReply, error) {
+		return client.CheckListener(ctx, &nodegrpc.ListenerCheckRequest{Protocol: protocol, Ip: ip, Port: port})
+	})
+}
+
 func (c *Client) GostServiceStatus(ctx context.Context) (*nodegrpc.GostServiceStatus, error) {
 	return callNode(ctx, c, c.config.Timeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.GostServiceStatus, error) {
 		return client.GetGostServiceStatus(ctx, &emptypb.Empty{})

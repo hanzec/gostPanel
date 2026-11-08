@@ -108,6 +108,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.DELETE("/rules/:id", ruleHandler.Delete)
 		authRoutes.POST("/rules/:id/start", ruleHandler.Start)
 		authRoutes.POST("/rules/:id/stop", ruleHandler.Stop)
+		authRoutes.POST("/rules/:id/listener-check", ruleHandler.CheckListener)
 
 		// 隧道管理
 		authRoutes.GET("/tunnels", tunnelHandler.List)

@@ -20,6 +20,7 @@ service v1 {
 
   // Commands carried by Connect from the panel to the node.
   rpc Execute(.yagp.node.v1.CommandRequest) returns (.yagp.node.v1.CommandReply);
+  rpc CheckListener(.yagp.node.v1.ListenerCheckRequest) returns (.yagp.node.v1.ListenerCheckReply);
   rpc GetObserverEndpoint(.google.protobuf.Empty) returns (.yagp.node.v1.ObserverEndpoint);
   rpc GetGostServiceStatus(.google.protobuf.Empty) returns (.yagp.node.v1.GostServiceStatus);
   rpc RestartGostService(.google.protobuf.Empty) returns (.yagp.node.v1.GostServiceStatus);

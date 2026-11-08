@@ -147,7 +147,7 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	}
 	defer server.Stop()
 	info, ok := server.GetServiceInfo()["yagp.v1"]
-	if !ok || len(info.Methods) != 15 {
+	if !ok || len(info.Methods) != 16 {
 		t.Fatalf("registered report API = %+v", info)
 	}
 	trust, err := nodegrpc.ClientTLS(cfg.CertFile)
@@ -167,6 +167,9 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	}
 	if _, err := client.Execute(ctx, &nodegrpc.CommandRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Fatalf("node control RPC on panel listener = %v", err)
+	}
+	if _, err := client.CheckListener(ctx, &nodegrpc.ListenerCheckRequest{Protocol: "tcp", Port: 9718}); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("listener probe should run only on the node control stream: %v", err)
 	}
 	cfg.Listen = "invalid listen address"
 	if _, err := startReports(cfg, db); err == nil {

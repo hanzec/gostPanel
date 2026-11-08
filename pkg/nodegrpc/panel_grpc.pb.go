@@ -27,6 +27,7 @@ const (
 	V1_GetNftTemplate_FullMethodName       = "/yagp.v1/GetNftTemplate"
 	V1_UpdateNodeIPs_FullMethodName        = "/yagp.v1/UpdateNodeIPs"
 	V1_Execute_FullMethodName              = "/yagp.v1/Execute"
+	V1_CheckListener_FullMethodName        = "/yagp.v1/CheckListener"
 	V1_GetObserverEndpoint_FullMethodName  = "/yagp.v1/GetObserverEndpoint"
 	V1_GetGostServiceStatus_FullMethodName = "/yagp.v1/GetGostServiceStatus"
 	V1_RestartGostService_FullMethodName   = "/yagp.v1/RestartGostService"
@@ -51,6 +52,7 @@ type V1Client interface {
 	UpdateNodeIPs(ctx context.Context, in *NodeIPsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Commands carried by Connect from the panel to the node.
 	Execute(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandReply, error)
+	CheckListener(ctx context.Context, in *ListenerCheckRequest, opts ...grpc.CallOption) (*ListenerCheckReply, error)
 	GetObserverEndpoint(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ObserverEndpoint, error)
 	GetGostServiceStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
 	RestartGostService(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
@@ -127,6 +129,16 @@ func (c *v1Client) Execute(ctx context.Context, in *CommandRequest, opts ...grpc
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CommandReply)
 	err := c.cc.Invoke(ctx, V1_Execute_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) CheckListener(ctx context.Context, in *ListenerCheckRequest, opts ...grpc.CallOption) (*ListenerCheckReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListenerCheckReply)
+	err := c.cc.Invoke(ctx, V1_CheckListener_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +248,7 @@ type V1Server interface {
 	UpdateNodeIPs(context.Context, *NodeIPsRequest) (*emptypb.Empty, error)
 	// Commands carried by Connect from the panel to the node.
 	Execute(context.Context, *CommandRequest) (*CommandReply, error)
+	CheckListener(context.Context, *ListenerCheckRequest) (*ListenerCheckReply, error)
 	GetObserverEndpoint(context.Context, *emptypb.Empty) (*ObserverEndpoint, error)
 	GetGostServiceStatus(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
 	RestartGostService(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
@@ -272,6 +285,9 @@ func (UnimplementedV1Server) UpdateNodeIPs(context.Context, *NodeIPsRequest) (*e
 }
 func (UnimplementedV1Server) Execute(context.Context, *CommandRequest) (*CommandReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Execute not implemented")
+}
+func (UnimplementedV1Server) CheckListener(context.Context, *ListenerCheckRequest) (*ListenerCheckReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckListener not implemented")
 }
 func (UnimplementedV1Server) GetObserverEndpoint(context.Context, *emptypb.Empty) (*ObserverEndpoint, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetObserverEndpoint not implemented")
@@ -414,6 +430,24 @@ func _V1_Execute_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(V1Server).Execute(ctx, req.(*CommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_CheckListener_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListenerCheckRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).CheckListener(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_CheckListener_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).CheckListener(ctx, req.(*ListenerCheckRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -606,6 +640,10 @@ var V1_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Execute",
 			Handler:    _V1_Execute_Handler,
+		},
+		{
+			MethodName: "CheckListener",
+			Handler:    _V1_CheckListener_Handler,
 		},
 		{
 			MethodName: "GetObserverEndpoint",
