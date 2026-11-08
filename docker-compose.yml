@@ -34,8 +34,19 @@ services:
       traefik.http.middlewares.yagp-authentik.forwardauth.address: ${AUTHENTIK_OUTPOST_URL:?Set AUTHENTIK_OUTPOST_URL}/outpost.goauthentik.io/auth/traefik
       traefik.http.middlewares.yagp-authentik.forwardauth.trustforwardheader: "true"
       traefik.http.middlewares.yagp-authentik.forwardauth.authresponseheaders: X-Authentik-Username,X-Authentik-Groups
-      # Route node enrollment, the persistent stream, and standalone nft template requests.
-      traefik.http.routers.yagp-grpc.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && PathRegexp(`^/api/v1/grpc/(RegisterNode|Connect|GetNftTemplate)$`)"
+      # Keep registration limits separate from the persistent stream.
+      traefik.http.routers.yagp-grpc-register.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/v1/grpc/RegisterNode`)"
+      traefik.http.routers.yagp-grpc-register.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-grpc-register.tls: "true"
+      traefik.http.routers.yagp-grpc-register.priority: "50"
+      traefik.http.routers.yagp-grpc-register.service: yagp-grpc
+      traefik.http.routers.yagp-grpc-register.middlewares: yagp-grpc-register-limit,yagp-grpc-path
+      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.average: "6"
+      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.period: 1m
+      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.burst: "5"
+      # Traefik replaces X-Real-IP from untrusted peers before this middleware runs.
+      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
+      traefik.http.routers.yagp-grpc.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && PathRegexp(`^/api/v1/grpc/(Connect|GetNftTemplate)$`)"
       traefik.http.routers.yagp-grpc.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
       traefik.http.routers.yagp-grpc.tls: "true"
       traefik.http.routers.yagp-grpc.priority: "50"
