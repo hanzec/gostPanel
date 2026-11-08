@@ -47,7 +47,7 @@ func localReleaseClient(t *testing.T, handler http.HandlerFunc) *Client {
 
 func TestLatestReleaseValidatesGitHubResponse(t *testing.T) {
 	const gostPath = "/repos/go-gost/gost/releases/latest"
-	const daemonPath = "/repos/hanzec/gostPanel/releases/latest"
+	const daemonPath = "/repos/hanzec/yagp/releases/latest"
 	for _, test := range []struct {
 		name, component, wantPath, body, wantVersion, wantError string
 		status                                                  int
@@ -127,8 +127,8 @@ func TestReleaseDownloadSelectsAndVerifiesLinuxAssets(t *testing.T) {
 		name, component, tag, repo, assetName, binary, variant, wantError string
 	}{
 		{name: "gost", component: "gost", tag: "v3.3.3", repo: "go-gost/gost", assetName: "gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz", binary: "gost"},
-		{name: "plain daemon", component: "daemon", tag: "0.1.100-abcdef1", repo: "hanzec/gostPanel", assetName: "yagp-daemon-linux-" + runtime.GOARCH + ".tar.gz", binary: "yagp-daemon-linux-" + runtime.GOARCH},
-		{name: "systemd daemon", component: "daemon", tag: "0.1.100-abcdef1", repo: "hanzec/gostPanel", assetName: "yagp-daemon-linux-" + runtime.GOARCH + ".tar.gz", binary: "yagp-daemon-systemd-linux-" + runtime.GOARCH, variant: "systemd"},
+		{name: "plain daemon", component: "daemon", tag: "0.1.100-abcdef1", repo: "hanzec/yagp", assetName: "yagp-daemon-linux-" + runtime.GOARCH + ".tar.gz", binary: "yagp-daemon-linux-" + runtime.GOARCH},
+		{name: "systemd daemon", component: "daemon", tag: "0.1.100-abcdef1", repo: "hanzec/yagp", assetName: "yagp-daemon-linux-" + runtime.GOARCH + ".tar.gz", binary: "yagp-daemon-systemd-linux-" + runtime.GOARCH, variant: "systemd"},
 		{name: "mismatched tag", component: "gost", tag: "v3.3.3", repo: "go-gost/gost", wantError: "does not match the requested version"},
 		{name: "missing archive", component: "gost", tag: "v3.3.3", repo: "go-gost/gost", wantError: "does not contain the required Linux archive"},
 		{name: "release unavailable", component: "gost", tag: "v3.3.3", repo: "go-gost/gost", wantError: "HTTP 502"},

@@ -298,7 +298,7 @@ import { getPublicSystemConfig } from '@/api/system'
 const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
 const NodeNftDialog = defineAsyncComponent(() => import('@/components/NodeNftDialog.vue'))
-const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh'
+const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh'
 const nodeStates = {
   online: { label: '在线', icon: CircleCheck, tone: 'success' },
   offline: { label: '离线', icon: CircleClose },

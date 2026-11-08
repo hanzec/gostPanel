@@ -55,7 +55,7 @@
       </main>
 
       <footer class="console-footer">
-        <span>yagp · 原作者 code-gopher</span>
+        <span>Yet Another Gost Panel · 原作者 code-gopher</span>
         <a href="https://github.com/code-gopher/gostPanel" target="_blank" rel="noopener noreferrer">上游 Gost Panel</a>
         <span v-if="system.copyright && system.copyright !== upstream">{{ system.copyright }}</span>
       </footer>

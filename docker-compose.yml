@@ -1,7 +1,7 @@
 services:
   yagp:
     build: .
-    image: yagp:local
+    image: ${YAGP_IMAGE:-yagp:local}
     container_name: yagp
     networks:
       - proxy

@@ -45,7 +45,7 @@ func repository(component string) string {
 	case "gost":
 		return "go-gost/gost"
 	case "daemon":
-		return "hanzec/gostPanel"
+		return "hanzec/yagp"
 	default:
 		return ""
 	}

@@ -183,6 +183,7 @@ describe('node registration and quota settings', () => {
       name: newNode.name, port: 39000, remark: '', traffic_limit_bytes: GIB / 2, traffic_reset_period: 'weekly'
     })
     expect(api.issueNodeRegistrationToken).toHaveBeenCalledWith(newNode.id)
+    expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain('https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh')
     expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain("--panel-address 'panel.example.com:443/api/v1/grpc'")
     expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain("--token 'secret'")
     expect(messages.success).toHaveBeenCalledWith('节点已添加')

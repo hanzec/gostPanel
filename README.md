@@ -1,4 +1,4 @@
-# yagp
+# yagp — Yet Another Gost Panel
 
 <div align="center">
 
@@ -23,7 +23,7 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 也可用下面的模板，把地址和令牌替换为面板提供的值。令牌有效期为 15 分钟，注册成功后立即失效。重新签发会撤销上一枚未使用的令牌。[节点安装脚本](./scripts/install_node.sh)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh \
+curl -fsSL https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh \
   | bash -s -- --panel-address 'panel.example.com:443/api/v1/grpc' --token 'TOKEN_FROM_PANEL'
 ```
 
@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/insta
 在使用 systemd 且系统 D-Bus 可用的节点上，以 root 身份执行以下命令，将 `42` 换成面板中的节点 ID。升级只替换 `yagp-daemon`，原配置、凭据和证书可继续使用，无需重新注册。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh \
+curl -fsSL https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh \
   | bash -s -- upgrade --node-id 42
 ```
 
@@ -70,13 +70,15 @@ docker compose up -d --build
 
 构建环境如需使用 Go 模块代理，可通过 `docker compose build --build-arg GOPROXY=<代理地址>` 指定，再执行 `docker compose up -d`。
 
+也可使用已发布的 [GHCR 镜像](https://github.com/hanzec/yagp/pkgs/container/yagp)，支持 Linux amd64 和 arm64。在 `.env` 中加入 `YAGP_IMAGE=ghcr.io/hanzec/yagp:latest`（或指定版本标签），再执行 `docker compose up -d --no-build --pull always`。
+
 Compose 将当前目录的 `config/`、`data/` 和 `logs/` 分别绑定到容器中的 `/app/config`、`/app/data` 和 `/app/logs`。`config/` 只读，数据库和日志可写。从其他目录使用 `-f` 指定 Compose 文件时，确保 `PWD` 环境变量指向所需目录，并在其中准备 `config/config.yaml`（PowerShell 可用 `$env:PWD = (Get-Location).Path`）。如果未设置 `PWD`，则使用 Compose 项目目录。
 
 面板网页、API 和节点 gRPC 共用 Traefik 的 HTTPS 域名和 `443` 端口。Compose 不向宿主机发布面板的 `39100` 或 `39101` 端口。
 
 **方式 B · Linux 二进制部署**
 
-安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从当前 GitHub 仓库 `hanzec/gostPanel` 下载最新发布包，也可通过 `YAGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `yagp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
+安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从 GitHub 仓库 `hanzec/yagp` 下载最新发布包，也可通过 `YAGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `yagp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
 
 在本项目根目录以 root 身份运行脚本。默认端口为 `39100`。
 
@@ -248,7 +250,7 @@ Gost 的管理 Web API 绑定在节点本机。面板通过节点的 TLS gRPC �
 
 ## 📦 预编译下载
 
-发布包以 `yagp-` 开头。面板支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。节点安装包支持 Linux（amd64、arm64）。[查看当前仓库的 Releases](https://github.com/hanzec/gostPanel/releases)
+发布包以 `yagp-` 开头。面板支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。节点安装包支持 Linux（amd64、arm64）。[查看 yagp Releases](https://github.com/hanzec/yagp/releases)
 
 面板和节点需要一起更新到使用 `yagp.v1` 的版本。通过令牌注册过的节点可继续使用原来的节点 ID、凭据和证书。
 

@@ -35,6 +35,8 @@ RUN CGO_ENABLED=0 GOOS=linux \
 
 # 运行阶段
 FROM alpine:latest
+LABEL org.opencontainers.image.title="yagp" \
+      org.opencontainers.image.description="Yet Another Gost Panel"
 WORKDIR /app
 RUN apk --no-cache add ca-certificates tzdata
 ENV TZ=Asia/Shanghai
