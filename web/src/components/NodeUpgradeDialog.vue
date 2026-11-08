@@ -1,14 +1,13 @@
 <template>
-  <el-dialog
+  <PanelDialog
     v-model="visible"
     :title="'版本与升级 · ' + node.name"
-    width="min(700px, calc(100vw - 24px))"
+    description="分别管理 Gost 和 yagp-daemon 的升级。升级会重启对应服务，相关连接可能短暂中断。"
     :close-on-click-modal="false"
     :close-on-press-escape="!submitting"
     :show-close="!submitting"
     @closed="$emit('closed')"
   >
-    <p class="ops-muted upgrade-intro">分别管理 Gost 和 yagp-daemon 的升级。升级会重启对应服务，相关连接可能短暂中断。</p>
 
     <p v-if="refreshError" :class="isUpgrading ? 'ops-muted' : 'upgrade-error'" :role="isUpgrading ? 'status' : 'alert'">
       {{ refreshError }}
@@ -71,12 +70,14 @@
       <el-button :disabled="!!submitting" @click="visible = false">关闭</el-button>
       <el-button :loading="refreshing" :disabled="!!submitting || !!savingPolicy" @click="refreshManually">刷新版本状态</el-button>
     </template>
-  </el-dialog>
+  </PanelDialog>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import PanelDialog from '@/components/PanelDialog.vue'
+import { confirmPanelAction } from '@/utils/panel-dialog'
 import { getNodeUpgradeStatus, updateNodeUpgradePolicy, upgradeNodeComponent } from '@/api/node'
 
 const props = defineProps({ node: { type: Object, required: true } })
@@ -199,7 +200,7 @@ const savePolicy = async (item, enabled) => {
 const startUpgrade = async (item) => {
   if (busy.value || isUpgrading.value || refreshError.value || !status.value.available || !item.hasUpdate) return
   const interruption = item.key === 'gost' ? '正在处理的转发连接' : '面板与节点之间的管理连接'
-  const confirmed = await ElMessageBox.confirm(
+  const confirmed = await confirmPanelAction(
     `将节点「${props.node.name}」的 ${item.name} 升级至最新稳定版。升级会重启服务，${interruption}可能短暂中断。`,
     `升级 ${item.name}`,
     { confirmButtonText: '确认升级', cancelButtonText: '取消', type: 'warning' }
@@ -228,7 +229,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.upgrade-intro { margin: 0 0 14px; }
 .upgrade-availability, .upgrade-job { padding: 10px 12px; border: 1px solid var(--ops-border); border-radius: 8px; background: var(--ops-inset); }
 .upgrade-availability { margin: 0 0 12px; color: var(--ops-warning); overflow-wrap: anywhere; }
 .upgrade-components { display: grid; gap: 12px; }

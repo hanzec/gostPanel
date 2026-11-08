@@ -61,7 +61,16 @@
       </footer>
     </div>
 
-    <el-drawer v-model="mobileMenu" direction="ltr" size="min(304px, 88vw)" title="管理导航" append-to-body destroy-on-close class="console-drawer">
+    <el-drawer
+      v-model="mobileMenu"
+      direction="ltr"
+      size="min(304px, 88vw)"
+      title="管理导航"
+      append-to-body
+      destroy-on-close
+      class="console-drawer panel-drawer"
+      modal-class="panel-dialog-overlay"
+    >
       <ConsoleNav :site-title="system.siteTitle" :logo-url="system.logoUrl" @navigate="mobileMenu = false" />
     </el-drawer>
   </div>

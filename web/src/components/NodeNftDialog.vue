@@ -1,8 +1,8 @@
 <template>
-  <el-dialog
+  <PanelDialog
     v-model="visible"
     :title="'nft 配置 · ' + node.name"
-    width="min(820px, calc(100vw - 24px))"
+    size="wide"
     :close-on-click-modal="false"
     :close-on-press-escape="!applying"
     :show-close="!applying"
@@ -45,12 +45,14 @@
       <el-button :disabled="applying" @click="visible = false">关闭</el-button>
       <el-button type="primary" :loading="applying" :disabled="loading || !!loadError || !draft.trim()" @click="confirmApply">应用到节点</el-button>
     </template>
-  </el-dialog>
+  </PanelDialog>
 </template>
 
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import PanelDialog from '@/components/PanelDialog.vue'
+import { confirmPanelAction } from '@/utils/panel-dialog'
 import { applyNodeNftConfig, getNodeNftConfig } from '@/api/node'
 
 const props = defineProps({ node: { type: Object, required: true } })
@@ -93,7 +95,7 @@ const loadConfig = async () => {
 
 const loadTemplate = async () => {
   if (draft.value !== savedConfig.value) {
-    const confirmed = await ElMessageBox.confirm('载入模板会替换当前编辑区的内容。', '载入面板默认模板', {
+    const confirmed = await confirmPanelAction('载入模板会替换当前编辑区的内容。', '载入面板默认模板', {
       confirmButtonText: '载入模板', cancelButtonText: '取消', type: 'warning'
     }).catch(() => false)
     if (!confirmed) return
@@ -117,7 +119,7 @@ const confirmApply = async () => {
     return
   }
 
-  const confirmed = await ElMessageBox.confirm(
+  const confirmed = await confirmPanelAction(
     `应用后将替换节点「${props.node.name}」的专用 nft 表，转发和连通性可能受影响。`,
     '应用 nft 配置',
     { confirmButtonText: '应用到节点', cancelButtonText: '取消', type: 'warning' }

@@ -153,10 +153,9 @@
       </div>
     </section>
 
-    <el-dialog
+    <PanelDialog
       v-model="dialogVisible"
       :title="isEdit ? '编辑节点' : '添加节点'"
-      width="min(600px, calc(100vw - 24px))"
       :close-on-click-modal="false"
       :close-on-press-escape="!submitLoading"
       :show-close="!submitLoading"
@@ -189,9 +188,9 @@
         <el-button :disabled="submitLoading" @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加节点' }}</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
 
-    <el-dialog v-model="configDialogVisible" :title="'节点配置 · ' + (configNode?.name || '')" width="min(760px, calc(100vw - 24px))">
+    <PanelDialog v-model="configDialogVisible" :title="'节点配置 · ' + (configNode?.name || '')" size="wide">
       <div v-if="configLoading" class="inventory-state" role="status">
         <el-skeleton :rows="4" animated />
         <span class="ops-muted">正在读取节点配置</span>
@@ -215,16 +214,15 @@
       <template #footer>
         <el-button @click="configDialogVisible = false">关闭</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
 
     <NodeGostDialog v-if="gostNode" v-model="gostDialogVisible" :node="gostNode" @closed="gostNode = null" />
     <NodeUpgradeDialog v-if="upgradeNode" v-model="upgradeDialogVisible" :node="upgradeNode" @closed="upgradeNode = null" />
     <NodeNftDialog v-if="nftNode" v-model="nftDialogVisible" :node="nftNode" @closed="nftNode = null" />
 
-    <el-dialog
+    <PanelDialog
       v-model="installDialogVisible"
       :title="'安装节点 · ' + (installNode?.name || '')"
-      width="min(680px, calc(100vw - 24px))"
       :close-on-click-modal="false"
       @close="resetInstall"
     >
@@ -278,18 +276,20 @@
       <template #footer>
         <el-button @click="installDialogVisible = false">关闭</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, defineAsyncComponent, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { ArrowDown, CircleCheck, CircleClose, CopyDocument, Monitor, Plus, Refresh, Search, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import PageHeader from '@/components/PageHeader.vue'
+import PanelDialog from '@/components/PanelDialog.vue'
 import { getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
+import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
@@ -571,7 +571,7 @@ const openCreatedNodeInstall = () => {
 
 const handleDelete = async (row) => {
   try {
-    await ElMessageBox.confirm('确定要删除节点「' + row.name + '」吗？', '删除节点', {
+    await confirmPanelAction('确定要删除节点「' + row.name + '」吗？', '删除节点', {
       confirmButtonText: '删除节点',
       confirmButtonClass: 'el-button--danger',
       cancelButtonText: '取消',

@@ -1,8 +1,8 @@
 <template>
-  <el-dialog
+  <PanelDialog
     v-model="visible"
     :title="'Gost 服务 · ' + node.name"
-    width="min(760px, calc(100vw - 24px))"
+    size="wide"
     :close-on-click-modal="false"
     :close-on-press-escape="!restarting"
     :show-close="!restarting"
@@ -47,12 +47,14 @@
         @click="restart"
       >重启 Gost</el-button>
     </template>
-  </el-dialog>
+  </PanelDialog>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import PanelDialog from '@/components/PanelDialog.vue'
+import { confirmPanelAction } from '@/utils/panel-dialog'
 import { getGostLogs, getGostService, restartGostService } from '@/api/node'
 
 const props = defineProps({ node: { type: Object, required: true } })
@@ -103,7 +105,7 @@ const refresh = async () => {
 }
 
 const restart = async () => {
-  const confirmed = await ElMessageBox.confirm('重启 Gost 会短暂中断该节点正在处理的连接。', '重启 Gost', {
+  const confirmed = await confirmPanelAction('重启 Gost 会短暂中断该节点正在处理的连接。', '重启 Gost', {
     confirmButtonText: '重启 Gost', cancelButtonText: '取消', type: 'warning'
   }).catch(() => false)
   if (!confirmed) return
