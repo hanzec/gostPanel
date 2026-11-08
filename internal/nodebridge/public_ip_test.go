@@ -27,7 +27,7 @@ func TestReportPublicIPChanges(t *testing.T) {
 	listener := listenLocal(t)
 	panel := grpc.NewServer(grpc.Creds(serverTLS))
 	reports := &ipReportRecorder{requests: make(chan *nodegrpc.NodeIPsRequest, 8)}
-	nodegrpc.RegisterPanelServer(panel, reports)
+	nodegrpc.RegisterV1Server(panel, reports)
 	go func() { _ = panel.Serve(listener) }()
 	t.Cleanup(panel.Stop)
 	conn, err := connectPanel(Config{
@@ -52,7 +52,7 @@ func TestReportPublicIPChanges(t *testing.T) {
 	go func() {
 		defer close(done)
 		next := 0
-		reportPublicIPChanges(ctx, 42, nodegrpc.NewPanelClient(conn), func(context.Context) (string, string) {
+		reportPublicIPChanges(ctx, 42, nodegrpc.NewV1Client(conn), func(context.Context) (string, string) {
 			address := addresses[next]
 			next++
 			return address[0], address[1]
@@ -83,7 +83,7 @@ func TestReportPublicIPChanges(t *testing.T) {
 }
 
 type ipReportRecorder struct {
-	nodegrpc.UnimplementedPanelServer
+	nodegrpc.UnimplementedV1Server
 	requests chan *nodegrpc.NodeIPsRequest
 	calls    atomic.Int32
 }

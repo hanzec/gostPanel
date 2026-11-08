@@ -202,7 +202,7 @@ func TestNftConfigurationRPC(t *testing.T) {
 }
 
 type nftTemplatePanel struct {
-	nodegrpc.UnimplementedPanelServer
+	nodegrpc.UnimplementedV1Server
 }
 
 func (nftTemplatePanel) GetNftTemplate(ctx context.Context, request *nodegrpc.NftTemplateRequest) (*nodegrpc.NftConfig, error) {
@@ -223,7 +223,7 @@ func TestGetNftTemplateAuthenticatesToPanel(t *testing.T) {
 	}
 	server := grpc.NewServer(grpc.Creds(serverTLS))
 	t.Cleanup(server.Stop)
-	nodegrpc.RegisterPanelServer(server, nftTemplatePanel{})
+	nodegrpc.RegisterV1Server(server, nftTemplatePanel{})
 	listener := listenLocal(t)
 	go func() { _ = server.Serve(listener) }()
 	cfg := Config{NodeID: 42, Username: controlTestUser, Password: controlTestPassword,

@@ -23,7 +23,7 @@ import (
 )
 
 type ReportHandler struct {
-	nodegrpc.UnimplementedPanelServer
+	nodegrpc.UnimplementedV1Server
 	db          *gorm.DB
 	traffic     *service.ObserverService
 	nodes       *service.NodeService

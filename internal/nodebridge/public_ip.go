@@ -13,7 +13,7 @@ import (
 	"yagp/pkg/nodegrpc"
 )
 
-func reportPublicIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.PanelClient,
+func reportPublicIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client,
 	detect func(context.Context) (string, string), ticks <-chan time.Time,
 ) {
 	var lastIPv4, lastIPv6 string

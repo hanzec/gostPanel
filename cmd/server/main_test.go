@@ -146,7 +146,7 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer server.Stop()
-	info, ok := server.GetServiceInfo()[nodegrpc.Panel_ServiceDesc.ServiceName]
+	info, ok := server.GetServiceInfo()[nodegrpc.V1_ServiceDesc.ServiceName]
 	if !ok || len(info.Methods) != 4 {
 		t.Fatalf("registered report API = %+v", info)
 	}
@@ -161,7 +161,7 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if _, err := nodegrpc.NewPanelClient(conn).GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: 1}); status.Code(err) != codes.Unauthenticated {
+	if _, err := nodegrpc.NewV1Client(conn).GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: 1}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated report RPC = %v", err)
 	}
 	cfg.Listen = "invalid listen address"
@@ -215,7 +215,7 @@ func TestStartReportsAllowsOnlyTheConfiguredProxy(t *testing.T) {
 			defer conn.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			_, err = nodegrpc.NewPanelClient(conn).RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{})
+			_, err = nodegrpc.NewV1Client(conn).RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{})
 			if status.Code(err) != tt.want {
 				t.Fatalf("registration from 127.0.0.1 = %v, want %v", err, tt.want)
 			}

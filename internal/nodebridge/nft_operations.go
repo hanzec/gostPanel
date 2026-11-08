@@ -40,7 +40,7 @@ func GetNftTemplate(ctx context.Context, cfg Config) (string, error) {
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	template, err := nodegrpc.NewPanelClient(conn).GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: cfg.NodeID})
+	template, err := nodegrpc.NewV1Client(conn).GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: cfg.NodeID})
 	if err != nil {
 		return "", err
 	}

@@ -169,7 +169,7 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 		return nil, err
 	}
 	server := grpc.NewServer(option)
-	nodegrpc.RegisterPanelServer(server, handler.NewReportHandler(db, cfg.ProxyIP != ""))
+	nodegrpc.RegisterV1Server(server, handler.NewReportHandler(db, cfg.ProxyIP != ""))
 	go func() {
 		logger.Infof("gRPC 流量上报服务监听 %s", listener.Addr())
 		if err := server.Serve(listener); err != nil {

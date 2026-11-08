@@ -28,32 +28,31 @@ func TestParsePanelAddress(t *testing.T) {
 	}
 }
 
-type panelRouteFixture struct{ UnimplementedPanelServer }
+type panelRouteFixture struct{ UnimplementedV1Server }
 
 func (panelRouteFixture) RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeReply, error) {
 	return &RegisterNodeReply{NodeId: 42}, nil
 }
 
 func TestPanelClientSendsExpectedRPCPath(t *testing.T) {
-	for _, tt := range []struct{ name, prefix string }{
-		{"direct TLS", ""},
-		{"proxy HTTPS", "/api/v1/grpc"},
+	for _, tt := range []struct{ name, prefix, requestPath string }{
+		{"direct TLS", "", "/yagp.v1/RegisterNode"},
+		{"proxy HTTPS", "/api/v1/grpc", "/api/v1/grpc/RegisterNode"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			rpcServer := grpc.NewServer()
 			defer rpcServer.Stop()
-			RegisterPanelServer(rpcServer, panelRouteFixture{})
-			var backend http.Handler = rpcServer
-			if tt.prefix != "" {
-				backend = http.StripPrefix(tt.prefix, backend)
-			}
+			RegisterV1Server(rpcServer, panelRouteFixture{})
 			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.ProtoMajor != 2 || r.URL.Path != tt.prefix+Panel_RegisterNode_FullMethodName {
-					t.Errorf("received %s request for %q", r.Proto, r.URL.Path)
+				if r.ProtoMajor != 2 || r.URL.Path != tt.requestPath {
+					t.Errorf("received %s request for %q, want HTTP/2 %s", r.Proto, r.URL.Path, tt.requestPath)
 					http.NotFound(w, r)
 					return
 				}
-				backend.ServeHTTP(w, r)
+				if tt.prefix != "" {
+					r.URL.Path = "/yagp.v1/RegisterNode"
+				}
+				rpcServer.ServeHTTP(w, r)
 			}))
 			server.EnableHTTP2 = true
 			server.StartTLS()
@@ -72,7 +71,7 @@ func TestPanelClientSendsExpectedRPCPath(t *testing.T) {
 			defer conn.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			response, err := NewPanelClient(conn).RegisterNode(ctx, &RegisterNodeRequest{})
+			response, err := NewV1Client(conn).RegisterNode(ctx, &RegisterNodeRequest{})
 			if err != nil || response.GetNodeId() != 42 {
 				t.Fatalf("registration via %s = %v, %v", tt.name, response, err)
 			}

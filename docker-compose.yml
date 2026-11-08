@@ -34,14 +34,15 @@ services:
       traefik.http.middlewares.yagp-authentik.forwardauth.address: ${AUTHENTIK_OUTPOST_URL:?Set AUTHENTIK_OUTPOST_URL}/outpost.goauthentik.io/auth/traefik
       traefik.http.middlewares.yagp-authentik.forwardauth.trustforwardheader: "true"
       traefik.http.middlewares.yagp-authentik.forwardauth.authresponseheaders: X-Authentik-Username,X-Authentik-Groups
-      # Strip the public API prefix so gRPC receives its native service/method path.
-      traefik.http.routers.yagp-grpc.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && PathPrefix(`/api/v1/grpc/yagp.node.v1.Panel/`)"
+      # Expose the four node RPCs without their internal service name.
+      traefik.http.routers.yagp-grpc.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && PathRegexp(`^/api/v1/grpc/(RegisterNode|Report|GetNftTemplate|UpdateNodeIPs)$`)"
       traefik.http.routers.yagp-grpc.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
       traefik.http.routers.yagp-grpc.tls: "true"
       traefik.http.routers.yagp-grpc.priority: "50"
       traefik.http.routers.yagp-grpc.service: yagp-grpc
-      traefik.http.routers.yagp-grpc.middlewares: yagp-grpc-prefix
-      traefik.http.middlewares.yagp-grpc-prefix.stripprefix.prefixes: /api/v1/grpc
+      traefik.http.routers.yagp-grpc.middlewares: yagp-grpc-path
+      traefik.http.middlewares.yagp-grpc-path.replacepathregex.regex: "^/api/v1/grpc/([^/]+)$"
+      traefik.http.middlewares.yagp-grpc-path.replacepathregex.replacement: "/yagp.v1/$${1}"
       traefik.http.services.yagp-grpc.loadbalancer.server.port: "39101"
       traefik.http.services.yagp-grpc.loadbalancer.server.scheme: h2c
       # Route login and callback requests directly to the outpost to avoid an auth loop.
