@@ -34,7 +34,7 @@ type Config struct {
 	Password         string `yaml:"password"`
 	AdminAddress     string `yaml:"admin_address"`
 	ObserverListen   string `yaml:"observer_listen"`
-	ReportAddress    string `yaml:"report_address"`
+	Host             string `yaml:"host"`
 	ReportCAFile     string `yaml:"report_ca_file"`
 	ReportCertSHA256 string `yaml:"report_cert_sha256,omitempty"`
 	NftConfigFile    string `yaml:"-"`
@@ -42,13 +42,17 @@ type Config struct {
 }
 
 func Run(ctx context.Context, cfg Config) error {
+	return run(ctx, cfg)
+}
+
+func run(ctx context.Context, cfg Config, dialOptions ...grpc.DialOption) error {
 	if cfg.NodeID == 0 || cfg.Username == "" || cfg.Password == "" || strings.Contains(cfg.Username, ":") {
 		return errors.New("node ID and credentials are required (username cannot contain a colon)")
 	}
 	if !IsLoopbackAddress(cfg.AdminAddress) || !IsLoopbackAddress(cfg.ObserverListen) {
 		return errors.New("Gost admin and observer addresses must be loopback IP addresses with ports")
 	}
-	panelConn, err := connectPanel(cfg)
+	panelConn, err := connectPanel(cfg, dialOptions...)
 	if err != nil {
 		return fmt.Errorf("create panel report client: %w", err)
 	}
@@ -113,21 +117,21 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 }
 
-func connectPanel(cfg Config) (*grpc.ClientConn, error) {
-	address, err := nodegrpc.ParsePanelAddress(cfg.ReportAddress)
+func connectPanel(cfg Config, dialOptions ...grpc.DialOption) (*grpc.ClientConn, error) {
+	host, err := nodegrpc.ParsePanelHost(cfg.Host)
 	if err != nil {
 		return nil, err
 	}
-	transport, err := address.ClientTLS(cfg.ReportCAFile, cfg.ReportCertSHA256)
+	transport, err := host.ClientTLS(cfg.ReportCAFile, cfg.ReportCertSHA256)
 	if err != nil {
 		return nil, fmt.Errorf("configure panel report TLS: %w", err)
 	}
-	return address.NewClientConn(grpc.WithTransportCredentials(transport),
+	return host.NewClientConn(append(dialOptions, grpc.WithTransportCredentials(transport),
 		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(nodegrpc.MaxStreamFrameBytes),
 			grpc.MaxCallSendMsgSize(nodegrpc.MaxStreamFrameBytes),
-		))
+		))...)
 }
 
 func IsLoopbackAddress(address string) bool {

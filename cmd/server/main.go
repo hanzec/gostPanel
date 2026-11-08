@@ -85,7 +85,7 @@ func main() {
 		logger.Fatalf("初始化系统配置失败: %v", err)
 	}
 
-	reportServer, reportFingerprint, err := startReports(cfg.Report, db)
+	reportServer, reportFingerprint, err := startReports(cfg.Report, cfg.Host, db)
 	if err != nil {
 		logger.Fatalf("启动流量上报服务失败: %v", err)
 	}
@@ -143,18 +143,15 @@ func main() {
 	backupService.Stop()
 }
 
-func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, string, error) {
+func startReports(cfg config.ReportConfig, host string, db *gorm.DB) (*grpc.Server, string, error) {
 	if cfg.Listen == "" {
 		return nil, "", nil
 	}
-	address, err := nodegrpc.ParsePanelAddress(cfg.Address)
+	panel, err := nodegrpc.ParsePanelHost(host)
 	if err != nil {
-		return nil, "", fmt.Errorf("report.address: %w", err)
+		return nil, "", fmt.Errorf("host: %w", err)
 	}
-	if cfg.ProxyIP != "" && !address.Proxied() {
-		return nil, "", fmt.Errorf("配置 report.proxy_ip 后，report.address 必须以 %s 结尾", nodegrpc.PanelProxyPath)
-	}
-	options, fingerprint, err := reportTransport(cfg, address)
+	options, fingerprint, err := reportTransport(cfg, panel)
 	if err != nil {
 		return nil, "", err
 	}
@@ -166,14 +163,7 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, string, e
 		grpc.MaxRecvMsgSize(nodegrpc.MaxStreamFrameBytes),
 		grpc.MaxSendMsgSize(nodegrpc.MaxStreamFrameBytes),
 	)...)
-	ipSource := handler.ReportIPFromPeer
-	switch {
-	case cfg.ProxyIP != "":
-		ipSource = handler.ReportIPFromTrustedProxy
-	case address.Proxied():
-		ipSource = handler.ReportIPFromNodeOnly
-	}
-	nodegrpc.RegisterV1Server(server, handler.NewReportHandler(db, ipSource))
+	nodegrpc.RegisterPanelServer(server, handler.NewReportHandler(db, !cfg.DirectTLS))
 	go func() {
 		logger.Infof("gRPC 流量上报服务监听 %s", listener.Addr())
 		if err := server.Serve(listener); err != nil {
@@ -183,12 +173,11 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, string, e
 	return server, fingerprint, nil
 }
 
-func reportTransport(cfg config.ReportConfig, address nodegrpc.PanelAddress) ([]grpc.ServerOption, string, error) {
-	if address.Proxied() {
-		options, err := reportProxyOptions(cfg.ProxyIP)
-		return options, "", err
+func reportTransport(cfg config.ReportConfig, panel nodegrpc.PanelHost) ([]grpc.ServerOption, string, error) {
+	if !cfg.DirectTLS {
+		return nil, "", nil
 	}
-	certificate, err := loadReportCertificate(cfg, address)
+	certificate, err := loadReportCertificate(cfg, panel)
 	if err != nil {
 		return nil, "", err
 	}

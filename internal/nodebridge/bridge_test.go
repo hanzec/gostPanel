@@ -68,12 +68,12 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 		sessions: make(chan *nodegrpc.Session, 2),
 	}
 	panel := grpc.NewServer()
-	nodegrpc.RegisterV1Server(panel, recorder)
+	nodegrpc.RegisterPanelServer(panel, recorder)
 	t.Cleanup(panel.Stop)
 	var attempts atomic.Int32
 	limitedAt := make(chan time.Time, 1)
 	proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor != 2 || r.URL.Path != nodegrpc.PanelProxyPath+"/Connect" {
+		if r.ProtoMajor != 2 || r.URL.Path != "/api/grpc/Connect" {
 			t.Errorf("unexpected panel request: %s %s", r.Proto, r.URL.Path)
 			http.NotFound(w, r)
 			return
@@ -88,7 +88,6 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 				t.Errorf("reconnect after HTTP 429 waited %v, want at least 2 seconds", delay)
 			}
 		}
-		r.URL.Path = nodegrpc.V1_Connect_FullMethodName
 		panel.ServeHTTP(w, r)
 	}))
 	proxy.EnableHTTP2 = true
@@ -105,11 +104,11 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Config{
+		done <- run(ctx, Config{
 			NodeID: 42, Username: username, Password: password, ObserverListen: observerAddress,
-			AdminAddress: strings.TrimPrefix(admin.URL, "http://"), ReportAddress: proxy.Listener.Addr().String() + nodegrpc.PanelProxyPath,
+			AdminAddress: strings.TrimPrefix(admin.URL, "http://"), Host: "127.0.0.1",
 			ReportCAFile: panelCertFile,
-		})
+		}, dialPanelAt(proxy.Listener))
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -181,7 +180,7 @@ func TestNodeBridgeReconnectsWithPinnedPanelCertificate(t *testing.T) {
 	const username, password = "node", "test-password"
 	recorder := &reportRecorder{username: username, password: password, sessions: make(chan *nodegrpc.Session, 2)}
 	panel := grpc.NewServer()
-	nodegrpc.RegisterV1Server(panel, recorder)
+	nodegrpc.RegisterPanelServer(panel, recorder)
 	t.Cleanup(panel.Stop)
 	https := httptest.NewUnstartedServer(panel)
 	https.EnableHTTP2 = true
@@ -191,11 +190,11 @@ func TestNodeBridgeReconnectsWithPinnedPanelCertificate(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Config{
+		done <- run(ctx, Config{
 			NodeID: 42, Username: username, Password: password,
 			AdminAddress: "127.0.0.1:1", ObserverListen: "127.0.0.1:0",
-			ReportAddress: https.Listener.Addr().String(), ReportCertSHA256: hex.EncodeToString(digest[:]),
-		})
+			Host: "127.0.0.1", ReportCertSHA256: hex.EncodeToString(digest[:]),
+		}, dialPanelAt(https.Listener))
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -258,6 +257,12 @@ func listenLocal(t *testing.T) net.Listener {
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	return listener
+}
+
+func dialPanelAt(listener net.Listener) grpc.DialOption {
+	return grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
+	})
 }
 
 func testTLSFiles(t *testing.T, certificate x509.Certificate) (string, string, string) {

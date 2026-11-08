@@ -24,21 +24,21 @@ const nodeStateDir = "/etc/yagp-daemon"
 
 func enroll(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("enroll", flag.ExitOnError)
-	address := flags.String("panel-address", "", "panel registration address HOST:PORT or HOST:PORT"+nodegrpc.PanelProxyPath)
+	host := flags.String("host", "", "panel DNS name or IP address")
 	output := flags.String("output", "", "staging directory for node files")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "enroll reads the registration token from stdin")
 		flags.PrintDefaults()
 	}
 	_ = flags.Parse(args)
-	if *output == "" || flags.NArg() != 0 {
-		return errors.New("enroll requires --panel-address and --output")
+	if *host == "" || *output == "" || flags.NArg() != 0 {
+		return errors.New("enroll requires --host and --output")
 	}
 	token, err := io.ReadAll(io.LimitReader(os.Stdin, 128))
 	if err != nil {
 		return fmt.Errorf("read registration token: %w", err)
 	}
-	nodeID, err := registerNode(ctx, *address, strings.TrimSpace(string(token)), nodeStateDir, *output, nodebridge.DetectPublicIPs)
+	nodeID, err := registerNode(ctx, *host, strings.TrimSpace(string(token)), nodeStateDir, *output, nodebridge.DetectPublicIPs)
 	if err != nil {
 		return err
 	}
@@ -46,8 +46,8 @@ func enroll(ctx context.Context, args []string) error {
 	return err
 }
 
-func registerNode(ctx context.Context, address, token, stateDir, output string, detectIPs func(context.Context) (string, string)) (uint64, error) {
-	panelAddress, err := nodegrpc.ParsePanelAddress(address)
+func registerNode(ctx context.Context, host, token, stateDir, output string, detectIPs func(context.Context) (string, string), dialOptions ...grpc.DialOption) (uint64, error) {
+	panelHost, err := nodegrpc.ParsePanelHost(host)
 	if err != nil {
 		return 0, err
 	}
@@ -69,11 +69,11 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 			return 0, err
 		}
 	}
-	transport, err := panelAddress.ClientTLS(caFile, fingerprint)
+	transport, err := panelHost.ClientTLS(caFile, fingerprint)
 	if err != nil {
 		return 0, fmt.Errorf("load panel CA: %w", err)
 	}
-	conn, err := panelAddress.NewClientConn(grpc.WithTransportCredentials(transport))
+	conn, err := panelHost.NewClientConn(append(dialOptions, grpc.WithTransportCredentials(transport))...)
 	if err != nil {
 		return 0, err
 	}
@@ -94,7 +94,7 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 	}
 	config := nodebridge.Config{
 		NodeID: reply.GetNodeId(), Username: reply.GetUsername(), Password: reply.GetPassword(),
-		ReportAddress: address, ReportCAFile: caFile, ReportCertSHA256: fingerprint,
+		Host: panelHost.Host(), ReportCAFile: caFile, ReportCertSHA256: fingerprint,
 	}
 	if err = writeEnrollment(output, config); err != nil {
 		return 0, fmt.Errorf("registration succeeded, but local configuration failed: %w", err)

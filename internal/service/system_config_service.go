@@ -54,12 +54,15 @@ func (s *SystemConfigService) GetPublicConfig() (*dto.PublicSystemConfigResp, er
 		return nil, err
 	}
 
-	return &dto.PublicSystemConfigResp{
-		SiteTitle:     site.SiteTitle,
-		LogoURL:       site.LogoURL,
-		Copyright:     site.Copyright,
-		ReportAddress: config.Get().Report.Address,
-	}, nil
+	public := &dto.PublicSystemConfigResp{
+		SiteTitle: site.SiteTitle,
+		LogoURL:   site.LogoURL,
+		Copyright: site.Copyright,
+	}
+	if cfg := config.Get(); cfg.Report.Listen != "" {
+		public.Host = cfg.Host
+	}
+	return public, nil
 }
 
 // UpdateConfig 更新配置

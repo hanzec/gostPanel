@@ -54,7 +54,7 @@ func TestSystemHTTPSettingsAndRulesets(t *testing.T) {
 	}
 	reply := f.request(t, "GET", "/system/public-config", "", 200)
 	public := handlerData[dto.PublicSystemConfigResp](t, reply)
-	if public.SiteTitle != "Forwarding panel" || public.ReportAddress != "panel.example:39102" ||
+	if public.SiteTitle != "Forwarding panel" || public.Host != "panel.example" ||
 		strings.Contains(string(reply.Data), "mail-password") {
 		t.Fatalf("public config: %s", reply.Data)
 	}

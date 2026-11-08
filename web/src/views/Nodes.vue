@@ -391,9 +391,9 @@ const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "
 
 const installCommand = computed(() => {
   if (!registration.value) return ''
-  const { address, token } = registration.value
+  const { host, token } = registration.value
   return 'curl -fsSL ' + shellQuote(INSTALL_SCRIPT_URL) + ' | bash -s -- ' +
-    '--panel-address ' + shellQuote(address) + ' --token ' + shellQuote(token)
+    '--host ' + shellQuote(host) + ' --token ' + shellQuote(token)
 })
 
 const showInstallCommand = (row) => {
@@ -444,9 +444,9 @@ const prepareInstall = async () => {
       installError.value = '无法读取面板注册地址，请重试。'
       return
     }
-    const address = config.data?.reportAddress?.trim()
-    if (!address) {
-      installError.value = '请在面板配置中设置 report.address 后重试。'
+    const host = config.data?.host?.trim()
+    if (!host) {
+      installError.value = '请配置面板 host 和 report.listen 后重试。'
       return
     }
 
@@ -463,7 +463,7 @@ const prepareInstall = async () => {
       expireRegistration()
       return
     }
-    registration.value = { address, token, expiresAt }
+    registration.value = { host, token, expiresAt }
     registrationTimer = setTimeout(expireRegistration, remaining)
   } finally {
     if (current()) installLoading.value = false

@@ -13,6 +13,7 @@ import (
 	"yagp/internal/buildinfo"
 	"yagp/internal/nodebridge"
 
+	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,12 +55,12 @@ func run(ctx context.Context, args []string) error {
 	return nodebridge.Run(ctx, config)
 }
 
-func printNftTemplate(ctx context.Context, configFile string) error {
+func printNftTemplate(ctx context.Context, configFile string, dialOptions ...grpc.DialOption) error {
 	config, err := readConfig(configFile)
 	if err != nil {
 		return err
 	}
-	template, err := nodebridge.GetNftTemplate(ctx, config)
+	template, err := nodebridge.GetNftTemplate(ctx, config, dialOptions...)
 	if err != nil {
 		return err
 	}

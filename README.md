@@ -18,13 +18,13 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 ### 安装新节点
 
-先在面板配置 [TLS 注册和上报地址](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写节点名称。配置了 `report.address` 后，添加节点会打开安装窗口并生成一次性令牌。点击 **复制命令**，在目标 Linux 主机以 root 身份执行。
+先在面板配置 [TLS 注册和上报](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写节点名称，打开安装窗口并获取一次性令牌。点击 **复制命令**，在目标 Linux 主机以 root 身份执行。
 
 也可用下面的模板，把地址和令牌替换为面板提供的值。令牌有效期为 15 分钟，注册成功后立即失效。重新签发会撤销上一枚未使用的令牌。[节点安装脚本](./scripts/install_node.sh)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh \
-  | bash -s -- --panel-address 'panel.example.com:443/api/v1/grpc' --token 'TOKEN_FROM_PANEL'
+  | bash -s -- --host 'panel.example.com' --token 'TOKEN_FROM_PANEL'
 ```
 
 ### 升级已安装节点
@@ -128,9 +128,9 @@ database:
 
 ### 启用节点注册和流量上报
 
-`report.address` 是节点主动连接面板的地址，也是安装命令中 `--panel-address` 的值。通过 Traefik 时使用 `主机:443/api/v1/grpc`，直连时使用 `主机:端口`。两种方式都无需添加 `https://`。
+顶级 `host` 填节点能访问的面板域名或 IP。`report.listen` 是面板进程的 gRPC 监听地址，留空时停用节点上报。安装命令只传 `--host` 和一次性 `--token`，守护进程固定连接 `https://host:443/api/grpc`。Compose 通过 `.env` 中的 `YAGP_HOST` 同时配置面板的 `host` 和 Traefik 的路由域名。
 
-**Docker Compose：** Traefik 在 `443` 终止 TLS，并把 `/api/v1/grpc/Connect` 改写为 `/yagp.v1/Connect`，通过 HTTP/2（h2c）转发到 Docker 网络内的 `39101`。节点主动建立一条双向流，流量和 IP 上报、管理命令和执行结果都走这条流。默认配置可省略 `proxy_ip`，保持 `39101` 在共享 Docker 网络内，面板记录节点自己探测上报的 IP。需要额外限制回源时，可将 `proxy_ip` 设为代理的固定 IP。只有设置了该限制，面板才会在节点未上报 IP 时采用代理发送的 `X-Real-IP`。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
+**Docker Compose：** Traefik 在 `443` 终止 TLS，通过 HTTP/2（h2c）将 `/api/grpc` 下的节点请求转发到 Docker 网络内的 `39101`。节点主动建立一条双向流，流量和 IP 上报、管理命令和执行结果都走这条流。保持 `39101` 在共享 Docker 网络内，面板记录节点自己探测上报的 IP。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
 
 Compose 按真实客户端 IP 分别限制注册和建连请求。`RegisterNode` 平均每分钟 6 次、突发 5 次。`Connect` 默认平均每分钟 60 次、突发 30 次，仅在建立新流时计数。节点断线后会退避重连。多个节点共用出口 IP 时，可在 `.env` 中按需调整 `YAGP_CONNECT_RATE_PER_MINUTE` 和 `YAGP_CONNECT_RATE_BURST`。
 
@@ -150,19 +150,20 @@ entryPoints:
 ```
 
 ```yaml
+host: "panel.example.com"
 report:
   listen: ":39101"
-  address: "panel.example.com:443/api/v1/grpc"
 ```
 
-面板和节点需要一起升级到支持双向流的版本。按[一键升级步骤](#升级已安装节点)在每台节点上运行 `upgrade --node-id`，继续使用原节点 ID 和凭据，无需重新注册。已使用 `主机:443/api/v1/grpc` 的节点可沿用原配置。从面板直连端口迁移到 Traefik 时，更新 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 并重启服务。如果 Traefik 使用公有 CA 签发的证书，清除节点原有的 `report_ca_file` 和 `report_cert_sha256`。升级后可关闭节点原来的入站 gRPC 管理端口。
+升级时同步更新面板、`docker-compose.yml` 和守护进程。在每台已有节点的 `/etc/yagp-daemon/<ID>/node.yaml` 中，将原来的 `report_address` 换成 `host: "panel.example.com"`，再按[一键升级步骤](#升级已安装节点)升级。保留原节点 ID 和凭据即可继续使用。从自签证书直连迁移到使用公有 CA 的 Traefik 时，清除节点原有的 `report_ca_file` 和 `report_cert_sha256`。
 
-**二进制直连部署：** 将监听端口开放给节点。面板首次启动时为 `report.address` 中的主机名或 IP 生成自签证书和私钥，保存在工作目录的 `data/report-tls.pem`，重启时复用。注册令牌包含证书指纹，节点在发送令牌前核验证书，并保存指纹用于后续重连。保留此文件以维持已有节点的信任。使用自备证书时，在 `report` 下同时配置 `cert_file` 和 `key_file`，节点按原有 CA 配置验证证书。
+**二进制直连部署：** 设置 `report.direct_tls: true`，监听节点可访问的 `443` 端口。面板首次启动时为顶级 `host` 生成自签证书和私钥，保存在工作目录的 `data/report-tls.pem`，重启时复用。注册令牌包含证书指纹，节点在发送令牌前核验证书，并保存指纹用于后续重连。保留此文件以维持已有节点的信任。使用自备证书时，在 `report` 下同时配置 `cert_file` 和 `key_file`，节点按原有 CA 配置验证证书。
 
 ```yaml
+host: "panel.internal.example"
 report:
-  listen: ":39101"
-  address: "panel.internal.example:39101"
+  listen: ":443"
+  direct_tls: true
 ```
 
 节点先通过一次性 token 注册，之后用面板发放的节点凭据建立双向流。节点验证面板的 TLS 证书。

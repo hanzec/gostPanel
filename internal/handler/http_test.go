@@ -36,7 +36,7 @@ func newHandlerHTTPFixture(t *testing.T) *handlerHTTPFixture {
 	}
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(configPath, []byte("report:\n  listen: 127.0.0.1:39102\n  address: panel.example:39102\n"), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte("host: panel.example\nreport:\n  listen: 127.0.0.1:39102\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := config.Load(configPath); err != nil {

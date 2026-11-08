@@ -23,8 +23,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+const enrollmentTestHost = "127.0.0.1"
 
 type enrollmentPanel struct {
 	nodegrpc.UnimplementedV1Server
@@ -42,16 +43,12 @@ func (p enrollmentPanel) GetNftTemplate(_ context.Context, req *nodegrpc.NftTemp
 	return &nodegrpc.NftConfig{Config: `{"nftables":[]}`}, nil
 }
 
-func (p enrollmentPanel) UpdateNodeIPs(context.Context, *nodegrpc.NodeIPsRequest) (*emptypb.Empty, error) {
-	return &emptypb.Empty{}, nil
-}
-
-func testPanel(t *testing.T, panel enrollmentPanel) (address, caFile string) {
+func testPanel(t *testing.T, panel enrollmentPanel) (string, grpc.DialOption) {
 	t.Helper()
 	https := httptest.NewTLSServer(nil)
 	cert := https.TLS.Certificates[0]
 	https.Close()
-	caFile = filepath.Join(t.TempDir(), "panel.pem")
+	caFile := filepath.Join(t.TempDir(), "panel.pem")
 	data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]})
 	if err := os.WriteFile(caFile, data, 0600); err != nil {
 		t.Fatal(err)
@@ -61,10 +58,12 @@ func testPanel(t *testing.T, panel enrollmentPanel) (address, caFile string) {
 		t.Fatal(err)
 	}
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}})))
-	nodegrpc.RegisterV1Server(server, panel)
+	nodegrpc.RegisterPanelServer(server, panel)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
-	return listener.Addr().String(), caFile
+	return caFile, grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
+	})
 }
 
 func TestRegisterNodeWritesEnrolledCredentials(t *testing.T) {
@@ -78,10 +77,10 @@ func TestRegisterNodeWritesEnrolledCredentials(t *testing.T) {
 		}
 		return &nodegrpc.RegisterNodeReply{NodeId: 42, Username: "registered", Password: "test-secret"}, nil
 	}}
-	address, ca := testPanel(t, panel)
+	ca, dial := testPanel(t, panel)
 	t.Setenv("YAGP_PANEL_CA_FILE", ca)
 	output := t.TempDir()
-	id, err := registerNode(ctx, address, token, stateDir, output, detect)
+	id, err := registerNode(ctx, enrollmentTestHost, token, stateDir, output, detect, dial)
 	if err != nil || id != 42 {
 		t.Fatalf("enrollment = %d, %v", id, err)
 	}
@@ -91,7 +90,7 @@ func TestRegisterNodeWritesEnrolledCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.NodeID != id || cfg.Username != "registered" || cfg.Password != "test-secret" ||
-		cfg.ReportAddress != address || cfg.ReportCAFile != ca || cfg.ObserverListen == cfg.AdminAddress ||
+		cfg.Host != enrollmentTestHost || cfg.ReportCAFile != ca || cfg.ObserverListen == cfg.AdminAddress ||
 		!nodebridge.IsLoopbackAddress(cfg.AdminAddress) || !nodebridge.IsLoopbackAddress(cfg.ObserverListen) {
 		t.Fatalf("invalid staged node configuration: %+v", cfg)
 	}
@@ -103,17 +102,17 @@ func TestRegisterNodeWritesEnrolledCredentials(t *testing.T) {
 	if err != nil || !strings.Contains(string(gost), cfg.AdminAddress) || !strings.Contains(string(gost), "pathPrefix: /api") {
 		t.Fatalf("invalid Gost configuration: %s, %v", gost, err)
 	}
-	if err := run(ctx, []string{"nft-template", "-c", configPath}); err != nil {
+	if err := printNftTemplate(ctx, configPath, dial); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registerNode(ctx, address, token, stateDir, output, detect); err == nil || !errors.Is(err, os.ErrExist) {
+	if _, err := registerNode(ctx, enrollmentTestHost, token, stateDir, output, detect, dial); err == nil || !errors.Is(err, os.ErrExist) {
 		t.Fatalf("re-enrollment overwrote staged files: %v", err)
 	}
 }
 
 func TestRegisterNodePinsGeneratedPanelCertificate(t *testing.T) {
 	var calls atomic.Int32
-	address, caFile := testPanel(t, enrollmentPanel{register: func(req *nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
+	caFile, dial := testPanel(t, enrollmentPanel{register: func(req *nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
 		calls.Add(1)
 		return &nodegrpc.RegisterNodeReply{NodeId: 42, Username: "registered", Password: "test-secret"}, nil
 	}})
@@ -128,20 +127,20 @@ func TestRegisterNodePinsGeneratedPanelCertificate(t *testing.T) {
 	t.Setenv("YAGP_PANEL_CA_FILE", filepath.Join(t.TempDir(), "unused-ca.pem"))
 	stateDir, output := t.TempDir(), t.TempDir()
 	detect := func(context.Context) (string, string) { return "", "" }
-	if _, err := registerNode(t.Context(), address, baseToken+"."+strings.Repeat("0", 64), stateDir, output, detect); err == nil ||
+	if _, err := registerNode(t.Context(), enrollmentTestHost, baseToken+"."+strings.Repeat("0", 64), stateDir, output, detect, dial); err == nil ||
 		!strings.Contains(err.Error(), "fingerprint mismatch") || calls.Load() != 0 {
 		t.Fatalf("invalid fingerprint reached enrollment: %v, %d requests", err, calls.Load())
 	}
-	id, err := registerNode(t.Context(), address, baseToken+"."+fingerprint, stateDir, output, detect)
+	id, err := registerNode(t.Context(), enrollmentTestHost, baseToken+"."+fingerprint, stateDir, output, detect, dial)
 	if err != nil || id != 42 || calls.Load() != 1 {
 		t.Fatalf("enrollment with pin = %d, %v, %d requests", id, err, calls.Load())
 	}
 	configPath := filepath.Join(output, "node.yaml")
 	config, err := readConfig(configPath)
-	if err != nil || config.ReportCertSHA256 != fingerprint || config.ReportCAFile != "" {
+	if err != nil || config.Host != enrollmentTestHost || config.ReportCertSHA256 != fingerprint || config.ReportCAFile != "" {
 		t.Fatalf("staged certificate identity = %q, %q, %v", config.ReportCertSHA256, config.ReportCAFile, err)
 	}
-	if err := run(t.Context(), []string{"nft-template", "-c", configPath}); err != nil {
+	if err := printNftTemplate(t.Context(), configPath, dial); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -151,19 +150,19 @@ func TestRegisterNodeRejectsInvalidInputAndPanelReply(t *testing.T) {
 	token := "42." + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	detect := func(context.Context) (string, string) { return "", "" }
 	stateDir, output := t.TempDir(), t.TempDir()
-	for _, address := range []string{"localhost", "localhost:0", "localhost:65536", "bad/host:42", ":42"} {
-		if _, err := registerNode(ctx, address, token, stateDir, output, detect); err == nil || !strings.Contains(err.Error(), "HOST:PORT") {
-			t.Errorf("address %q: %v", address, err)
+	for _, host := range []string{"localhost:0", "localhost:65536", "bad/host:42", ":42", "localhost/api/grpc"} {
+		if _, err := registerNode(ctx, host, token, stateDir, output, detect); err == nil || !strings.Contains(err.Error(), "panel host must be a bare DNS name or IP address") {
+			t.Errorf("host %q: %v", host, err)
 		}
 	}
-	if _, err := registerNode(ctx, "127.0.0.1:42", "invalid", stateDir, output, detect); err == nil || !strings.Contains(err.Error(), "registration token") {
+	if _, err := registerNode(ctx, enrollmentTestHost, "invalid", stateDir, output, detect); err == nil || !strings.Contains(err.Error(), "registration token") {
 		t.Fatalf("invalid token: %v", err)
 	}
 	installed := t.TempDir()
 	if err := os.Mkdir(filepath.Join(installed, "42"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registerNode(ctx, "127.0.0.1:42", token, installed, output, detect); err == nil || !strings.Contains(err.Error(), "existing node directory") {
+	if _, err := registerNode(ctx, enrollmentTestHost, token, installed, output, detect); err == nil || !strings.Contains(err.Error(), "existing node directory") {
 		t.Fatalf("existing node: %v", err)
 	}
 	for _, test := range []struct {
@@ -177,11 +176,11 @@ func TestRegisterNodeRejectsInvalidInputAndPanelReply(t *testing.T) {
 		{"rejected token", nil, status.Error(codes.PermissionDenied, "token expired"), "token expired"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			address, ca := testPanel(t, enrollmentPanel{register: func(*nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
+			ca, dial := testPanel(t, enrollmentPanel{register: func(*nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
 				return test.response, test.err
 			}})
 			t.Setenv("YAGP_PANEL_CA_FILE", ca)
-			if _, err := registerNode(ctx, address, token, stateDir, output, detect); err == nil || !strings.Contains(err.Error(), test.want) {
+			if _, err := registerNode(ctx, enrollmentTestHost, token, stateDir, output, detect, dial); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("register error = %v, want %q", err, test.want)
 			}
 		})
@@ -205,7 +204,7 @@ func TestPanelCASelection(t *testing.T) {
 		t.Fatalf("local CA = %q, %v", got, err)
 	}
 	token := "42." + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
-	if _, err := registerNode(context.Background(), "127.0.0.1:42", token, dir, t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "load panel CA") {
+	if _, err := registerNode(context.Background(), enrollmentTestHost, token, dir, t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "load panel CA") {
 		t.Fatalf("invalid local CA = %v", err)
 	}
 }

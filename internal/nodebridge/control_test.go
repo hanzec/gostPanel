@@ -121,7 +121,7 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 	occupied := listener.Addr().String()
 	valid := Config{
 		NodeID: 42, Username: controlTestUser, Password: controlTestPassword,
-		AdminAddress: "127.0.0.1:1", ReportAddress: occupied, ObserverListen: "127.0.0.1:0",
+		AdminAddress: "127.0.0.1:1", Host: "127.0.0.1", ObserverListen: "127.0.0.1:0",
 	}
 	for _, test := range []struct {
 		name, want string
@@ -129,7 +129,7 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 	}{
 		{"credentials", "node ID and credentials", func(cfg *Config) { cfg.Username = "node:invalid" }},
 		{"admin address", "loopback", func(cfg *Config) { cfg.AdminAddress = "192.0.2.1:80" }},
-		{"report address", "HOST:PORT", func(cfg *Config) { cfg.ReportAddress = ":1" }},
+		{"panel host", "bare DNS name or IP address", func(cfg *Config) { cfg.Host = "127.0.0.1:1" }},
 		{"panel CA", "create panel report client", func(cfg *Config) { cfg.ReportCAFile = missingCA }},
 		{"occupied observer", "listen for local Gost observer", func(cfg *Config) { cfg.ObserverListen = occupied }},
 	} {
@@ -210,18 +210,18 @@ func TestGetNftTemplateAuthenticatesToPanel(t *testing.T) {
 	}
 	server := grpc.NewServer(grpc.Creds(serverTLS))
 	t.Cleanup(server.Stop)
-	nodegrpc.RegisterV1Server(server, nftTemplatePanel{})
+	nodegrpc.RegisterPanelServer(server, nftTemplatePanel{})
 	listener := listenLocal(t)
 	go func() { _ = server.Serve(listener) }()
 	cfg := Config{NodeID: 42, Username: controlTestUser, Password: controlTestPassword,
-		ReportAddress: listener.Addr().String(), ReportCAFile: certFile}
+		Host: "127.0.0.1", ReportCAFile: certFile}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if got, err := GetNftTemplate(ctx, cfg); err != nil || got != "{\"nftables\":[]}" {
+	if got, err := GetNftTemplate(ctx, cfg, dialPanelAt(listener)); err != nil || got != "{\"nftables\":[]}" {
 		t.Fatalf("template = %q, %v", got, err)
 	}
 	cfg.NodeID = 1
-	if _, err := GetNftTemplate(ctx, cfg); status.Code(err) != codes.NotFound {
+	if _, err := GetNftTemplate(ctx, cfg, dialPanelAt(listener)); status.Code(err) != codes.NotFound {
 		t.Fatalf("unknown node returned %v", err)
 	}
 	cfg.ReportCAFile = filepath.Join(t.TempDir(), "missing.pem")

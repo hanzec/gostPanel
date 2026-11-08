@@ -14,7 +14,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"yagp/internal/config"
@@ -23,7 +22,7 @@ import (
 
 const reportTLSBundle = "data/report-tls.pem"
 
-func loadReportCertificate(cfg config.ReportConfig, address nodegrpc.PanelAddress) (tls.Certificate, error) {
+func loadReportCertificate(cfg config.ReportConfig, address nodegrpc.PanelHost) (tls.Certificate, error) {
 	if cfg.CertFile != "" || cfg.KeyFile != "" {
 		if cfg.CertFile == "" || cfg.KeyFile == "" {
 			return tls.Certificate{}, errors.New("report.cert_file 和 report.key_file 必须同时设置或留空")
@@ -33,7 +32,7 @@ func loadReportCertificate(cfg config.ReportConfig, address nodegrpc.PanelAddres
 
 	bundle, err := os.ReadFile(reportTLSBundle)
 	if errors.Is(err, os.ErrNotExist) {
-		if err = generateReportCertificate(address.Host()); err != nil && !errors.Is(err, os.ErrExist) {
+		if err = generateReportCertificate(address.Host()); err != nil {
 			return tls.Certificate{}, fmt.Errorf("生成面板证书 %s: %w", reportTLSBundle, err)
 		}
 		bundle, err = os.ReadFile(reportTLSBundle)
@@ -79,7 +78,7 @@ func generateReportCertificate(host string) error {
 	if ip := net.ParseIP(host); ip != nil {
 		template.IPAddresses = []net.IP{ip}
 	} else {
-		template.DNSNames = []string{strings.TrimSuffix(host, ".")}
+		template.DNSNames = []string{host}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
@@ -112,7 +111,11 @@ func persistReportCertificate(bundle []byte) error {
 		return err
 	}
 	// Publish the complete pair without replacing a certificate another instance has already installed.
-	return os.Link(file.Name(), reportTLSBundle)
+	err = os.Link(file.Name(), reportTLSBundle)
+	if errors.Is(err, os.ErrExist) {
+		return nil
+	}
+	return err
 }
 
 func reportCertificateFingerprint(cert tls.Certificate) string {
