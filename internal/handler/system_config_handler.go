@@ -48,12 +48,13 @@ func (h *SystemConfigHandler) GetPublicConfig(c *gin.Context) {
 
 // UpdateConfig 更新配置
 func (h *SystemConfigHandler) UpdateConfig(c *gin.Context) {
-	var req dto.UpdateSystemConfigReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var input systemConfigUpdateInput
+	if err := c.ShouldBindJSON(&input); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
+	req := input.configRequest()
 	if err := h.systemConfigService.UpdateConfig(&req); err != nil {
 		response.HandleError(c, err)
 		return
@@ -90,4 +91,53 @@ func (h *SystemConfigHandler) Backup(c *gin.Context) {
 	}
 
 	response.SuccessWithMessage(c, "备份成功", nil)
+}
+
+// Pointers distinguish omitted or null fields from explicit empty values.
+type systemConfigUpdateInput struct {
+	Email *struct {
+		Host      *string `json:"host" binding:"required"`
+		Port      *int    `json:"port" binding:"required"`
+		Username  *string `json:"username" binding:"required"`
+		Password  *string `json:"password" binding:"required"`
+		FromEmail *string `json:"fromEmail" binding:"required"`
+	} `json:"email" binding:"required"`
+	Config *struct {
+		SiteTitle *string `json:"siteTitle" binding:"required"`
+		LogoURL   *string `json:"logoUrl" binding:"required"`
+		Copyright *string `json:"copyright" binding:"required"`
+	} `json:"config" binding:"required"`
+	Log *struct {
+		RetentionDays *int    `json:"retentionDays" binding:"required"`
+		Level         *string `json:"level" binding:"required"`
+	} `json:"log" binding:"required"`
+	Backup *struct {
+		AutoBackup     *bool `json:"autoBackup" binding:"required"`
+		RetentionCount *int  `json:"retentionCount" binding:"required"`
+	} `json:"backup" binding:"required"`
+}
+
+func (input systemConfigUpdateInput) configRequest() dto.UpdateSystemConfigReq {
+	return dto.UpdateSystemConfigReq{
+		Email: dto.EmailConfigReq{
+			Host:      *input.Email.Host,
+			Port:      *input.Email.Port,
+			Username:  *input.Email.Username,
+			Password:  *input.Email.Password,
+			FromEmail: *input.Email.FromEmail,
+		},
+		Config: dto.PanelSettingReq{
+			SiteTitle: *input.Config.SiteTitle,
+			LogoURL:   *input.Config.LogoURL,
+			Copyright: *input.Config.Copyright,
+		},
+		Log: dto.LogConfigReq{
+			RetentionDays: *input.Log.RetentionDays,
+			Level:         *input.Log.Level,
+		},
+		Backup: dto.BackupConfigReq{
+			AutoBackup:     *input.Backup.AutoBackup,
+			RetentionCount: *input.Backup.RetentionCount,
+		},
+	}
 }
