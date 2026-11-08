@@ -12,7 +12,7 @@ permissions:
 jobs:
   version:
     if: ${{ !github.event.deleted && (github.ref_name == 'main' || github.ref_name == github.event.repository.default_branch) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
@@ -30,7 +30,7 @@ jobs:
 
   build:
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
