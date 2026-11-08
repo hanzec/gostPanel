@@ -86,7 +86,10 @@ export function getGostLogs(id) {
     return request.get(`/nodes/${id}/gost/logs`)
 }
 
-export function getNodeNftConfig(id) {
+export function getNodeNftConfig(id, loopbackPort) {
+    if (loopbackPort) {
+        return request.get(`/nodes/${id}/nft`, { params: { loopback_port: loopbackPort } })
+    }
     return request.get(`/nodes/${id}/nft`)
 }
 

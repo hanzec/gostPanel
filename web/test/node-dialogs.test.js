@@ -35,8 +35,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function open(component) {
-  wrapper = mountNodeComponent(component, { node, modelValue: true })
+function open(component, props = {}) {
+  wrapper = mountNodeComponent(component, { node, modelValue: true, ...props })
   return wrapper
 }
 
@@ -120,6 +120,12 @@ describe('nftables dialog', () => {
   const template = '{"nftables":[]}'
   const saved = '{"nftables":[{"saved":true}]}'
   const config = { table: 'yagp_7', config: saved, template }
+  const prerouting = { add: { chain: { family: 'inet', table: config.table, name: 'prerouting', type: 'nat', hook: 'prerouting', prio: -100 } } }
+  const loopback = [
+    { add: { chain: { family: 'inet', table: config.table, name: 'loopback_443', type: 'nat', hook: 'output', prio: -100 } } },
+    { add: { rule: { family: 'inet', table: config.table, chain: 'loopback_443', expr: [{ redirect: { port: 443 } }] } } }
+  ]
+  const loopbackTemplate = JSON.stringify({ nftables: loopback })
 
   it('retries loading, protects an edited draft and validates JSON before asking to apply', async () => {
     api.getNodeNftConfig.mockRejectedValueOnce(apiError('没有已注册的节点'))
@@ -202,6 +208,48 @@ describe('nftables dialog', () => {
     await flushPromises()
     expect(noTemplate.get('textarea').element.value).toBe('')
     expect(button(noTemplate, '应用到节点').element.disabled).toBe(true)
+  })
+
+  it('merges the loopback template with the saved chains and waits for confirmation before applying', async () => {
+    const existing = JSON.stringify({ nftables: [prerouting] })
+    api.getNodeNftConfig.mockResolvedValueOnce(response({ ...config, config: existing, template: loopbackTemplate }))
+    const view = open(NodeNftDialog, { loopbackPort: 443 })
+    await flushPromises()
+    const input = view.get('textarea')
+    expect(api.getNodeNftConfig).toHaveBeenCalledWith(node.id, 443)
+    expect(input.element.value).toBe(existing)
+    expect(view.text()).toContain('TCP 443')
+
+    await input.setValue('{}')
+    await click(view, '合并回环模板')
+    expect(view.get('[role="alert"]').text()).toContain('请先修正当前草稿')
+    await input.setValue(existing)
+    await click(view, '合并回环模板')
+    const merged = input.element.value
+    expect(JSON.parse(merged)).toEqual({ nftables: [prerouting, ...loopback] })
+    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
+    await click(view, '合并回环模板')
+    expect(view.get('[role="alert"]').text()).toContain('已包含 loopback_443')
+    expect(input.element.value).toBe(merged)
+
+    messages.confirm.mockRejectedValueOnce('cancel')
+    await click(view, '应用到节点')
+    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
+    api.applyNodeNftConfig.mockResolvedValueOnce(response({ ...config, config: merged }))
+    await click(view, '应用到节点')
+    expect(api.applyNodeNftConfig).toHaveBeenCalledOnce()
+    expect(api.applyNodeNftConfig).toHaveBeenCalledWith(node.id, merged)
+    expect(view.text()).toContain('最近一次成功应用')
+  })
+
+  it('starts with the loopback template for an unconfigured node', async () => {
+    api.getNodeNftConfig.mockResolvedValueOnce(response({ table: config.table, template: loopbackTemplate }))
+    const view = open(NodeNftDialog, { loopbackPort: 443 })
+    await flushPromises()
+    expect(view.get('textarea').element.value).toBe(loopbackTemplate)
+    expect(view.text()).toContain('当前显示回环模板')
+    expect(button(view, '合并回环模板').element.disabled).toBe(true)
+    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
   })
 })
 

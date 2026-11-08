@@ -51,8 +51,13 @@ type ServiceConfig struct {
 	CLimiter   string           `json:"climiter,omitempty"` // 并发连接数限制器名称
 	RLimiter   string           `json:"rlimiter,omitempty"` // 请求速率限制器名称
 	Observer   string           `json:"observer,omitempty"` // 观察器名称
+	SockOpts   *SocketOptions   `json:"sockopts,omitempty"`
 	Metadata   map[string]any   `json:"metadata,omitempty"` // 元数据配置
 	Status     *ServiceStatus   `json:"status,omitempty"`   // 服务运行状态
+}
+
+type SocketOptions struct {
+	Mark int `json:"mark"`
 }
 
 // ServiceStatus 服务运行时状态信息
@@ -74,9 +79,10 @@ type GostResponse struct {
 
 // HandlerConfig 处理器配置
 type HandlerConfig struct {
-	Type  string      `json:"type"`
-	Chain string      `json:"chain,omitempty"` // 链名称
-	Auth  *AuthConfig `json:"auth,omitempty"`
+	Type     string         `json:"type"`
+	Chain    string         `json:"chain,omitempty"` // 链名称
+	Auth     *AuthConfig    `json:"auth,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // ListenerConfig 监听器配置

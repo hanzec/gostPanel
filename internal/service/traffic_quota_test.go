@@ -36,14 +36,15 @@ func TestTrafficQuotaSync(t *testing.T) {
 	}
 	client := utils.GetGostClient(&node)
 	services := []gost.ServiceConfig{
-		{Name: "rule-1", Addr: ":5010", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "tcp"}},
-		{Name: "rule-2", Addr: ":5011", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "udp"}},
+		{Name: "rule-1", Addr: "127.0.0.1:5010", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "tcp"}},
+		{Name: "rule-2", Addr: "[2001:db8::4]:5011", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "udp"}},
 		{Name: "relay-tunnel-3", Addr: "[::]:5012", Handler: &gost.HandlerConfig{Type: "relay"}, Listener: &gost.ListenerConfig{Type: "quic"}},
 		{Name: "other-service", Addr: ":5013", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "tcp"}},
 		{Name: "rule-4", Addr: ":5010", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "tcp"}},
 		{Name: "rule-5", Addr: ":5014", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "tcp"}, Status: &gost.ServiceStatus{State: "failed"}},
 		{Name: "rule-6", Addr: ":0", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "tcp"}},
 		{Name: "rule-7", Addr: "invalid", Handler: &gost.HandlerConfig{Type: "forward"}, Listener: &gost.ListenerConfig{Type: "tcp"}},
+		{Name: "rule-8", Addr: "127.0.0.1:443", Handler: &gost.HandlerConfig{Type: "red"}, Listener: &gost.ListenerConfig{Type: "red"}},
 	}
 	now := time.Date(2026, 11, 8, 15, 59, 59, 0, time.UTC)
 	sync := func(limit, seed, used uint64, window int64, state string) {
@@ -53,7 +54,7 @@ func TestTrafficQuotaSync(t *testing.T) {
 			if req.GetLimitBytes() != limit || req.GetUsedBytes() != seed || req.GetWindowStart() != window {
 				t.Errorf("quota request = %v, want limit %d, seed %d, window %d", req, limit, seed, window)
 			}
-			if limit > 0 && (!slices.Equal(req.GetTcpPorts(), []uint32{5010}) || !slices.Equal(req.GetUdpPorts(), []uint32{5011, 5012})) {
+			if limit > 0 && (!slices.Equal(req.GetTcpPorts(), []uint32{443, 5010}) || !slices.Equal(req.GetUdpPorts(), []uint32{5011, 5012})) {
 				t.Errorf("quota ports = TCP %v UDP %v", req.GetTcpPorts(), req.GetUdpPorts())
 			}
 			if limit == 0 && (len(req.GetTcpPorts()) != 0 || len(req.GetUdpPorts()) != 0) {
