@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 	"yagp/internal/service"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
+	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -121,6 +123,121 @@ func TestAdminRouteBoundary(t *testing.T) {
 			if err != nil || id != 1 || reply.Data.ExpiresAt.IsZero() || rec.Header().Get("Cache-Control") != "private, no-store" {
 				t.Fatal("admin did not receive an uncached token and expiry for node 1")
 			}
+		}
+	}
+
+	t.Run("authentication error formats", func(t *testing.T) {
+		testAuthentikFailureResponses(t, engine)
+	})
+}
+
+func testAuthentikFailureResponses(t *testing.T, engine *gin.Engine) {
+	t.Helper()
+	logFile, err := os.CreateTemp(t.TempDir(), "access-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = logger.Init(&logger.Config{Level: "error"})
+		_ = logFile.Close()
+	})
+	stdout := os.Stdout
+	os.Stdout = logFile
+	err = logger.Init(&logger.Config{Level: "warn"})
+	os.Stdout = stdout
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		trustedProxy   = "192.0.2.20:8100"
+		untrustedProxy = "198.51.100.50:8100"
+		username       = "private-authentik-username"
+		groups         = "private-authentik-group"
+	)
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		peer   string
+		user   string
+		status int
+		reason string
+		html   bool
+	}{
+		{"homepage with an untrusted proxy", http.MethodGet, "/", untrustedProxy, username, http.StatusUnauthorized, "untrusted_proxy", true},
+		{"HEAD homepage with an untrusted proxy", http.MethodHead, "/", untrustedProxy, username, http.StatusUnauthorized, "untrusted_proxy", true},
+		{"deep link without identity", http.MethodGet, "/nodes/managed", trustedProxy, "", http.StatusUnauthorized, "invalid_identity", true},
+		{"homepage without administrator access", http.MethodGet, "/", trustedProxy, username, http.StatusForbidden, "admin_group_required", true},
+		{"API with browser accept header", http.MethodGet, "/api/v1/auth/info", trustedProxy, "", http.StatusUnauthorized, "invalid_identity", false},
+		{"asset with browser accept header", http.MethodGet, "/favicon.ico", trustedProxy, "", http.StatusUnauthorized, "invalid_identity", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			req.RemoteAddr = tt.peer
+			req.Header.Set("Accept", "text/html")
+			req.Header.Set("X-Forwarded-For", "203.0.113.60")
+			req.Header.Set("X-Authentik-Groups", groups)
+			if tt.user != "" {
+				req.Header.Set("X-Authentik-Username", tt.user)
+			}
+			rec := httptest.NewRecorder()
+			engine.ServeHTTP(rec, req)
+			if rec.Code != tt.status || rec.Header().Get("Cache-Control") != "private, no-store" {
+				t.Fatalf("status = %d, headers = %v, body = %s", rec.Code, rec.Header(), rec.Body)
+			}
+
+			contentType := rec.Header().Get("Content-Type")
+			if !tt.html {
+				var reply response.Response
+				if !strings.HasPrefix(contentType, "application/json") || json.Unmarshal(rec.Body.Bytes(), &reply) != nil ||
+					reply.Code != response.CodeUnauthorized || reply.Message != "请通过 Authentik 登录" || reply.Data != nil {
+					t.Fatalf("expected the existing JSON auth error, got %s: %s", contentType, rec.Body)
+				}
+				return
+			}
+
+			if !strings.HasPrefix(contentType, "text/html") {
+				t.Fatalf("expected HTML, got %s: %s", contentType, rec.Body)
+			}
+			if tt.method == http.MethodHead {
+				if rec.Body.Len() != 0 {
+					t.Fatalf("expected an empty HEAD response, got %d bytes", rec.Body.Len())
+				}
+				return
+			}
+
+			body := rec.Body.String()
+			if !strings.Contains(body, tt.reason) {
+				t.Fatalf("expected HTML with reason %q, got %s", tt.reason, body)
+			}
+			for _, private := range []string{`id="app"`, username, groups, "yagp-admins", "192.0.2.20", "198.51.100.50", "203.0.113.60"} {
+				if strings.Contains(body, private) {
+					t.Errorf("error page disclosed %q", private)
+				}
+			}
+		})
+	}
+
+	data, err := os.ReadFile(logFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != len(tests) {
+		t.Fatalf("expected one warning per auth failure, got %d: %s", len(lines), data)
+	}
+	for i, line := range lines {
+		var record struct {
+			AuthFailure string `json:"auth_failure"`
+			RemoteAddr  string `json:"remote_addr"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil || record.AuthFailure != tests[i].reason || record.RemoteAddr != tests[i].peer {
+			t.Errorf("access log for %s: %s", tests[i].name, line)
+		}
+		if strings.Contains(line, username) || strings.Contains(line, groups) {
+			t.Errorf("access log for %s disclosed identity headers", tests[i].name)
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	"yagp/internal/middleware"
 	"yagp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -26,8 +27,15 @@ func (r *Router) setupStatic(engine *gin.Engine) {
 
 	// 使用 NoRoute 接管所有未匹配的请求
 	engine.NoRoute(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/api") {
+		requestPath := c.Request.URL.Path
+		if strings.HasPrefix(requestPath, "/api") {
 			c.Abort()
+			return
+		}
+		isPageMethod := c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead
+		isAsset := requestPath == "/assets" || strings.HasPrefix(requestPath, "/assets/")
+		if isPageMethod && !isAsset && (requestPath == "/index.html" || !strings.Contains(path.Base(requestPath), ".")) {
+			middleware.MarkAuthentikPage(c)
 		}
 	}, r.adminAuth, func(c *gin.Context) {
 		// 规范化路径

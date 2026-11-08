@@ -15,6 +15,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	authentikPageKey    = "authentik_page"
+	authentikFailureKey = "authentik_failure"
+)
+
+// MarkAuthentikPage selects an HTML response for authentication failures on a page route.
+func MarkAuthentikPage(c *gin.Context) {
+	c.Set(authentikPageKey, true)
+}
+
 func NewAuthentikAuth(cfg config.AuthentikConfig) (gin.HandlerFunc, error) {
 	group := strings.TrimSpace(cfg.AdminGroup)
 	if group == "" || strings.Contains(group, "|") {
@@ -39,26 +49,45 @@ func NewAuthentikAuth(cfg config.AuthentikConfig) (gin.HandlerFunc, error) {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "private, no-store")
 		req := c.Request
+		if !trustedPeer(req.RemoteAddr, proxies) {
+			denyAuthentik(c, untrustedProxy)
+			return
+		}
 		usernames := req.Header.Values("X-Authentik-Username")
-		if !trustedPeer(req.RemoteAddr, proxies) || len(usernames) != 1 || strings.TrimSpace(usernames[0]) == "" {
-			response.Unauthorized(c, "请通过 Authentik 登录")
-			c.Abort()
+		var username string
+		if len(usernames) == 1 {
+			username = strings.TrimSpace(usernames[0])
+		}
+		if username == "" {
+			denyAuthentik(c, invalidIdentity)
 			return
 		}
 		groups := req.Header.Values("X-Authentik-Groups")
 		if len(groups) != 1 || !slices.Contains(strings.Split(groups[0], "|"), group) {
-			response.Forbidden(c, "需要 Authentik 管理员组权限")
-			c.Abort()
+			denyAuthentik(c, adminGroupRequired)
 			return
 		}
 		if !sameOriginRequest(req) {
-			response.Forbidden(c, "拒绝跨站操作请求")
-			c.Abort()
+			denyAuthentik(c, crossOriginRequest)
 			return
 		}
-		c.Set("username", strings.TrimSpace(usernames[0]))
+		c.Set("username", username)
 		c.Next()
 	}, nil
+}
+
+func denyAuthentik(c *gin.Context, failure authentikRejection) {
+	c.Set(authentikFailureKey, failure.Reason)
+	c.Abort()
+	if c.GetBool(authentikPageKey) {
+		renderAuthentikErrorPage(c, failure)
+		return
+	}
+	if failure.Status == http.StatusUnauthorized {
+		response.Unauthorized(c, failure.Message)
+		return
+	}
+	response.Forbidden(c, failure.Message)
 }
 
 func trustedPeer(remote string, proxies []netip.Prefix) bool {
