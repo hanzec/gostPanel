@@ -81,6 +81,25 @@ func TestGenerateNotesRequiresFullHistory(t *testing.T) {
 	}
 }
 
+func TestGenerateNotesHandlesEmptyHistoryAndSubjects(t *testing.T) {
+	dir := newGitRepository(t)
+	if _, err := generateNotes(dir, ""); err == nil {
+		t.Fatal("an empty repository produced release notes")
+	}
+	mustGit(t, dir, "commit", "--allow-empty", "--allow-empty-message", "-m", "")
+	commit(t, dir, "perf: reduce startup latency")
+	commit(t, dir, "deploy: ship to staging")
+	notes, err := generateNotes(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"### Fixes\n\n- perf: reduce startup latency", "### Other changes\n\n- deploy: ship to staging", "- (no subject)"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("release notes are missing %q:\n%s", want, notes)
+		}
+	}
+}
+
 func newGitRepository(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
