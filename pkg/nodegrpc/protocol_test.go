@@ -81,13 +81,13 @@ func TestNodeAndPanelWireCompatibility(t *testing.T) {
 		exchange(NewNodeClient, Node_StartUpgrade_FullMethodName, NodeClient.StartUpgrade,
 			&NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"},
 			&NodeUpgradeStatus{Supported: true, Component: "gost", TargetVersion: "v3.3.3", State: "queued"}),
-		exchange(NewPanelClient, Panel_Report_FullMethodName, PanelClient.Report, forwardedReport, &observer.ObserveReply{Ok: true}),
-		exchange(NewPanelClient, Panel_RegisterNode_FullMethodName, PanelClient.RegisterNode,
+		exchange(NewV1Client, V1_Report_FullMethodName, V1Client.Report, forwardedReport, &observer.ObserveReply{Ok: true}),
+		exchange(NewV1Client, V1_RegisterNode_FullMethodName, V1Client.RegisterNode,
 			&RegisterNodeRequest{Token: "42.fixture", NodeCertificatePem: "fixture cert", Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"},
 			&RegisterNodeReply{NodeId: 42, Username: username, Password: password, ControlPort: 8443}),
-		exchange(NewPanelClient, Panel_GetNftTemplate_FullMethodName, PanelClient.GetNftTemplate,
+		exchange(NewV1Client, V1_GetNftTemplate_FullMethodName, V1Client.GetNftTemplate,
 			&NftTemplateRequest{NodeId: 42}, config),
-		exchange(NewPanelClient, Panel_UpdateNodeIPs_FullMethodName, PanelClient.UpdateNodeIPs,
+		exchange(NewV1Client, V1_UpdateNodeIPs_FullMethodName, V1Client.UpdateNodeIPs,
 			&NodeIPsRequest{NodeId: 42, Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"}, empty),
 	}
 	byMethod := make(map[string]protocolExchange, len(calls))
@@ -162,7 +162,7 @@ func protocolListener(t *testing.T, cert tls.Certificate, options ...grpc.Server
 		Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12,
 	})))...)
 	RegisterNodeServer(server, UnimplementedNodeServer{})
-	RegisterPanelServer(server, UnimplementedPanelServer{})
+	RegisterV1Server(server, UnimplementedV1Server{})
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() {
 		server.Stop()

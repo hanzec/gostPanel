@@ -88,7 +88,7 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 	ipv4, ipv6 := detectIPs(ctx)
 	rpcCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	reply, err := nodegrpc.NewPanelClient(conn).RegisterNode(rpcCtx, &nodegrpc.RegisterNodeRequest{
+	reply, err := nodegrpc.NewV1Client(conn).RegisterNode(rpcCtx, &nodegrpc.RegisterNodeRequest{
 		Token: token, NodeCertificatePem: string(cert),
 		Ipv4: ipv4, Ipv6: ipv6,
 	})

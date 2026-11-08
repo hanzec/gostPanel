@@ -82,7 +82,7 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	}
 	recorder := &reportRecorder{username: username, password: password, reports: make(chan *nodegrpc.ReportRequest, 1)}
 	panel := grpc.NewServer(grpc.Creds(serverTLS))
-	nodegrpc.RegisterPanelServer(panel, recorder)
+	nodegrpc.RegisterV1Server(panel, recorder)
 	panelListener := listenLocal(t)
 	go func() { _ = panel.Serve(panelListener) }()
 	t.Cleanup(panel.Stop)
@@ -196,7 +196,7 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 }
 
 type reportRecorder struct {
-	nodegrpc.UnimplementedPanelServer
+	nodegrpc.UnimplementedV1Server
 	username, password string
 	reports            chan *nodegrpc.ReportRequest
 }

@@ -126,7 +126,7 @@ database:
 
 `report.address` 是节点注册、上报和获取 nft 模板时使用的地址，也是安装命令中 `--panel-address` 的值。通过 Traefik 时使用 `主机:端口/api/v1/grpc`，直连时使用 `主机:端口`。两种方式都无需添加 `https://`。
 
-**Docker Compose：** Traefik 在 `443` 终止 TLS。节点的 RPC 路径以 `/api/v1/grpc/yagp.node.v1.Panel/` 开头，例如 `/api/v1/grpc/yagp.node.v1.Panel/RegisterNode`。Traefik 去掉 `/api/v1/grpc` 前缀后，将请求转发到 Docker 网络内的 `39101`（HTTP/2，即 h2c）。该路由使用节点认证，网页和管理 API 仍使用 Authentik。面板无需单独的上报证书。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
+**Docker Compose：** Traefik 在 `443` 终止 TLS。节点使用 `/api/v1/grpc/<方法>`，例如 `/api/v1/grpc/RegisterNode`。Traefik 将该路径改写为面板 gRPC 服务的原生路径 `/yagp.v1/RegisterNode`，再通过 HTTP/2（h2c）转发到 Docker 网络内的 `39101`。这四个 RPC 使用节点认证，网页和管理 API 仍使用 Authentik。面板无需单独的上报证书。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
 
 ```yaml
 report:
@@ -135,7 +135,7 @@ report:
   proxy_ip: "172.30.0.2"
 ```
 
-迁移已有节点时，先按[一键升级步骤](#升级已安装节点)升级 `yagp-daemon`，再将 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 改为新地址并重启对应服务。若改用公有 CA 签发的证书，清除原来的 `report_ca_file`，让节点使用系统 CA。节点 ID、凭据和节点证书可以继续使用，无需重新注册。
+面板和节点需要一起升级到支持 `yagp.v1` 的版本。按[一键升级步骤](#升级已安装节点)升级 `yagp-daemon`。如果节点已使用 `主机:端口/api/v1/grpc`，无需改配置；如果从独立端口迁移到 Traefik，则更新 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 并重启对应服务。若改用公有 CA 签发的证书，清除原来的 `report_ca_file`，让节点使用系统 CA。节点 ID、凭据和节点证书可以继续使用，无需重新注册。
 
 **二进制直连部署：** 不设置 `proxy_ip`，给 gRPC 监听器配置证书和私钥。证书须覆盖 `report.address` 中的主机名或 IP，并将监听端口开放给节点。
 
@@ -182,9 +182,9 @@ report:
 
 按 [一键安装步骤](#安装新节点) 添加实例。需要重新生成命令时，可在该实例的 **安装** 窗口点击 **签发注册令牌**。
 
-节点在线后即可创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 gRPC `Panel.Report`。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
+节点在线后即可创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 `Report` RPC。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
-首次注册时，`yagp-daemon` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `Panel.RegisterNode` 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-daemon/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
+首次注册时，`yagp-daemon` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `RegisterNode` RPC 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-daemon/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
 
 参照 Komari，`yagp-daemon` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。两种地址均未获取时，面板使用可信 Traefik 转发的节点 IP，或在直连部署中使用注册连接的来源 IP。面板优先使用记录到的 IPv4，其次使用 IPv6。节点的 gRPC 端口须能通过该地址从面板访问。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
 

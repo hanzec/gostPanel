@@ -24,7 +24,7 @@ import (
 )
 
 type enrollmentPanel struct {
-	nodegrpc.UnimplementedPanelServer
+	nodegrpc.UnimplementedV1Server
 	register func(*nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error)
 }
 
@@ -58,7 +58,7 @@ func testPanel(t *testing.T, panel enrollmentPanel) (address, caFile string) {
 		t.Fatal(err)
 	}
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}})))
-	nodegrpc.RegisterPanelServer(server, panel)
+	nodegrpc.RegisterV1Server(server, panel)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	return listener.Addr().String(), caFile

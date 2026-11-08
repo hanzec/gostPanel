@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package yagp;
+
+option go_package = "yagp/pkg/nodegrpc";
+
+import "google/protobuf/empty.proto";
+import "node.proto";
+import "observer.proto";
+
+service v1 {
+  rpc Report(.yagp.node.v1.ReportRequest) returns (.proto.ObserveReply);
+  rpc RegisterNode(.yagp.node.v1.RegisterNodeRequest) returns (.yagp.node.v1.RegisterNodeReply);
+  rpc GetNftTemplate(.yagp.node.v1.NftTemplateRequest) returns (.yagp.node.v1.NftConfig);
+  rpc UpdateNodeIPs(.yagp.node.v1.NodeIPsRequest) returns (.google.protobuf.Empty);
+}

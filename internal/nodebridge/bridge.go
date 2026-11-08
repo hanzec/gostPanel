@@ -98,7 +98,7 @@ func Run(ctx context.Context, cfg Config) error {
 	})
 	observation := grpc.NewServer()
 	defer observation.Stop()
-	panel := nodegrpc.NewPanelClient(reportConn)
+	panel := nodegrpc.NewV1Client(reportConn)
 	observer.RegisterObserverServer(observation, &observerServer{
 		nodeID: cfg.NodeID,
 		token:  nodegrpc.ObserverToken(cfg.Username, cfg.Password),
@@ -237,7 +237,7 @@ type observerServer struct {
 	observer.UnimplementedObserverServer
 	nodeID uint64
 	token  string
-	panel  nodegrpc.PanelClient
+	panel  nodegrpc.V1Client
 }
 
 func (s *observerServer) Observe(ctx context.Context, req *observer.ObserveRequest) (*observer.ObserveReply, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"path"
 	"strconv"
 	"strings"
 
@@ -31,10 +32,10 @@ func (a PanelAddress) Proxied() bool { return a.proxied }
 
 func (a PanelAddress) NewClientConn(options ...grpc.DialOption) (*grpc.ClientConn, error) {
 	if a.proxied {
-		// Traefik removes this prefix before forwarding the standard gRPC method path.
+		// The public route exposes only the method name. Traefik restores the service name.
 		options = append(options, grpc.WithChainUnaryInterceptor(
 			func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-				return invoke(ctx, PanelProxyPath+method, req, reply, cc, opts...)
+				return invoke(ctx, PanelProxyPath+"/"+path.Base(method), req, reply, cc, opts...)
 			},
 		))
 	}
