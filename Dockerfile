@@ -1,5 +1,5 @@
 # 前端构建阶段
-FROM node:20-alpine AS web-builder
+FROM node:26.13.0-alpine AS web-builder
 WORKDIR /app/web
 COPY web/package*.json ./
 RUN npm ci
@@ -9,7 +9,7 @@ COPY web/public/ ./public/
 RUN npm run build
 
 # 后端构建阶段
-FROM golang:1.23-alpine AS backend-builder
+FROM golang:1.27.3-alpine AS backend-builder
 WORKDIR /app
 
 # 版本号参数（通过 --build-arg VERSION=xxx 传入）

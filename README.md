@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8.svg)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.27.3-00ADD8.svg)](https://go.dev/)
 
 </div>
 
@@ -228,7 +228,7 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TL
 
 ### 开发与编译
 
-使用 Go 1.23+ 和 Node.js 20.19+（20.x）或 22.12+ 构建。Go 编译时会嵌入前端产物，首次编译后端前需先构建前端。
+使用 Go 1.27.3 和 Node.js 26.13.0 LTS 构建。版本分别记录在 [go.mod](./go.mod) 和 [.node-version](./.node-version)。Go 编译时会嵌入前端产物，首次编译后端前需先构建前端。
 
 ```bash
 # 完整构建，产物为 yagp 和 yagp-daemon
