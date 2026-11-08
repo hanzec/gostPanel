@@ -30,6 +30,20 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+func TestTunnelChainUpdatesAllowed(t *testing.T) {
+	for name, want := range map[string]bool{
+		"tunnel-42-chain":   true,
+		"custom-chain":      false,
+		"tunnel-0-chain":    false,
+		"tunnel-042-chain":  false,
+		"tunnel-42-chain-1": false,
+	} {
+		if got := allowedCommand(http.MethodPut, "/config/chains/"+name); got != want {
+			t.Errorf("PUT chain %s allowed = %t, want %t", name, got, want)
+		}
+	}
+}
+
 func TestNodeBridgeControlAndReport(t *testing.T) {
 	const username, password = "node", "test-password"
 	var current *gost.ObserverConfig

@@ -290,7 +290,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 		return errors.ErrExtractHostFailed
 	}
 
-	chainName := fmt.Sprintf("tunnel-%d-chain", tunnel.ID)
+	chainName := tunnelChainName(tunnel.ID)
 	relayAddr := net.JoinHostPort(strings.Trim(exitHost, "[]"), strconv.Itoa(tunnel.RelayPort))
 
 	chain := &gost.ChainConfig{
@@ -340,6 +340,10 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 
 	logger.Infof("启动隧道成功: %s (Relay: %s -> Chain: %s)", tunnel.Name, relayName, chainName)
 	return nil
+}
+
+func tunnelChainName(id uint) string {
+	return fmt.Sprintf("tunnel-%d-chain", id)
 }
 
 // Stop 停止隧道

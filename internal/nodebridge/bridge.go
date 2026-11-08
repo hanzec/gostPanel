@@ -181,6 +181,7 @@ func (s *controlServer) GetObserverEndpoint(ctx context.Context, _ *emptypb.Empt
 }
 
 var resourceName = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*$`)
+var tunnelChainName = regexp.MustCompile(`^tunnel-[1-9][0-9]*-chain$`)
 
 func allowedCommand(method, path string) bool {
 	switch path {
@@ -208,7 +209,16 @@ func allowedCommand(method, path string) bool {
 		return method == http.MethodGet || method == http.MethodPut
 	}
 	if method == http.MethodPut {
-		return parts[2] == "observers" || (parts[2] == "services" && strings.HasPrefix(parts[3], "relay-tunnel-"))
+		switch parts[2] {
+		case "observers":
+			return true
+		case "services":
+			return strings.HasPrefix(parts[3], "relay-tunnel-")
+		case "chains":
+			return tunnelChainName.MatchString(parts[3])
+		default:
+			return false
+		}
 	}
 	return method == http.MethodGet || method == http.MethodDelete
 }
