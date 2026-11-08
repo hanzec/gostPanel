@@ -70,6 +70,10 @@ if [[ "$action" == uninstall ]]; then
         nft list table inet "yagp_node_$node_id" >/dev/null 2>&1; then
         nft delete table inet "yagp_node_$node_id"
     fi
+    if command -v nft >/dev/null 2>&1 &&
+        nft list table inet "yagp_quota_$node_id" >/dev/null 2>&1; then
+        nft delete table inet "yagp_quota_$node_id"
+    fi
     rm -f -- "$base_path/yagp-daemon" "$base_path/gost"
     printf '节点 %s 服务已卸载，配置位于 %s\n' "$node_id" "$base_path"
     exit 0

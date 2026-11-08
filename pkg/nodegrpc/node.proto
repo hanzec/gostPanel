@@ -51,6 +51,18 @@ message NftTemplateRequest {
   uint64 node_id = 1;
 }
 
+message TrafficQuotaRequest {
+  uint64 limit_bytes = 1;
+  uint64 used_bytes = 2;
+  int64 window_start = 3;
+  repeated uint32 tcp_ports = 4;
+  repeated uint32 udp_ports = 5;
+}
+
+message TrafficQuotaReply {
+  uint64 used_bytes = 1;
+}
+
 message NodeUpgradeRequest {
   string component = 1;
   string version = 2;
@@ -74,6 +86,7 @@ service Node {
   rpc GetGostLogs(GostLogsRequest) returns (GostLogsReply);
   rpc GetNftConfig(google.protobuf.Empty) returns (NftConfig);
   rpc ApplyNftConfig(NftConfig) returns (NftConfig);
+  rpc SyncTrafficQuota(TrafficQuotaRequest) returns (TrafficQuotaReply);
   rpc GetUpgradeStatus(google.protobuf.Empty) returns (NodeUpgradeStatus);
   rpc StartUpgrade(NodeUpgradeRequest) returns (NodeUpgradeStatus);
 }

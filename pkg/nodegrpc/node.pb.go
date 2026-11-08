@@ -483,6 +483,126 @@ func (x *NftTemplateRequest) GetNodeId() uint64 {
 	return 0
 }
 
+type TrafficQuotaRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LimitBytes    uint64                 `protobuf:"varint,1,opt,name=limit_bytes,json=limitBytes,proto3" json:"limit_bytes,omitempty"`
+	UsedBytes     uint64                 `protobuf:"varint,2,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	WindowStart   int64                  `protobuf:"varint,3,opt,name=window_start,json=windowStart,proto3" json:"window_start,omitempty"`
+	TcpPorts      []uint32               `protobuf:"varint,4,rep,packed,name=tcp_ports,json=tcpPorts,proto3" json:"tcp_ports,omitempty"`
+	UdpPorts      []uint32               `protobuf:"varint,5,rep,packed,name=udp_ports,json=udpPorts,proto3" json:"udp_ports,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrafficQuotaRequest) Reset() {
+	*x = TrafficQuotaRequest{}
+	mi := &file_node_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrafficQuotaRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrafficQuotaRequest) ProtoMessage() {}
+
+func (x *TrafficQuotaRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrafficQuotaRequest.ProtoReflect.Descriptor instead.
+func (*TrafficQuotaRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TrafficQuotaRequest) GetLimitBytes() uint64 {
+	if x != nil {
+		return x.LimitBytes
+	}
+	return 0
+}
+
+func (x *TrafficQuotaRequest) GetUsedBytes() uint64 {
+	if x != nil {
+		return x.UsedBytes
+	}
+	return 0
+}
+
+func (x *TrafficQuotaRequest) GetWindowStart() int64 {
+	if x != nil {
+		return x.WindowStart
+	}
+	return 0
+}
+
+func (x *TrafficQuotaRequest) GetTcpPorts() []uint32 {
+	if x != nil {
+		return x.TcpPorts
+	}
+	return nil
+}
+
+func (x *TrafficQuotaRequest) GetUdpPorts() []uint32 {
+	if x != nil {
+		return x.UdpPorts
+	}
+	return nil
+}
+
+type TrafficQuotaReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UsedBytes     uint64                 `protobuf:"varint,1,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrafficQuotaReply) Reset() {
+	*x = TrafficQuotaReply{}
+	mi := &file_node_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrafficQuotaReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrafficQuotaReply) ProtoMessage() {}
+
+func (x *TrafficQuotaReply) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrafficQuotaReply.ProtoReflect.Descriptor instead.
+func (*TrafficQuotaReply) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TrafficQuotaReply) GetUsedBytes() uint64 {
+	if x != nil {
+		return x.UsedBytes
+	}
+	return 0
+}
+
 type NodeUpgradeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Component     string                 `protobuf:"bytes,1,opt,name=component,proto3" json:"component,omitempty"`
@@ -493,7 +613,7 @@ type NodeUpgradeRequest struct {
 
 func (x *NodeUpgradeRequest) Reset() {
 	*x = NodeUpgradeRequest{}
-	mi := &file_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -505,7 +625,7 @@ func (x *NodeUpgradeRequest) String() string {
 func (*NodeUpgradeRequest) ProtoMessage() {}
 
 func (x *NodeUpgradeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -518,7 +638,7 @@ func (x *NodeUpgradeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeUpgradeRequest.ProtoReflect.Descriptor instead.
 func (*NodeUpgradeRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{9}
+	return file_node_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *NodeUpgradeRequest) GetComponent() string {
@@ -550,7 +670,7 @@ type NodeUpgradeStatus struct {
 
 func (x *NodeUpgradeStatus) Reset() {
 	*x = NodeUpgradeStatus{}
-	mi := &file_node_proto_msgTypes[10]
+	mi := &file_node_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -562,7 +682,7 @@ func (x *NodeUpgradeStatus) String() string {
 func (*NodeUpgradeStatus) ProtoMessage() {}
 
 func (x *NodeUpgradeStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[10]
+	mi := &file_node_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -575,7 +695,7 @@ func (x *NodeUpgradeStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeUpgradeStatus.ProtoReflect.Descriptor instead.
 func (*NodeUpgradeStatus) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{10}
+	return file_node_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *NodeUpgradeStatus) GetSupported() bool {
@@ -637,7 +757,7 @@ type ReportRequest struct {
 
 func (x *ReportRequest) Reset() {
 	*x = ReportRequest{}
-	mi := &file_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -649,7 +769,7 @@ func (x *ReportRequest) String() string {
 func (*ReportRequest) ProtoMessage() {}
 
 func (x *ReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -662,7 +782,7 @@ func (x *ReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportRequest.ProtoReflect.Descriptor instead.
 func (*ReportRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{11}
+	return file_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ReportRequest) GetNodeId() uint64 {
@@ -691,7 +811,7 @@ type RegisterNodeRequest struct {
 
 func (x *RegisterNodeRequest) Reset() {
 	*x = RegisterNodeRequest{}
-	mi := &file_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -703,7 +823,7 @@ func (x *RegisterNodeRequest) String() string {
 func (*RegisterNodeRequest) ProtoMessage() {}
 
 func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -716,7 +836,7 @@ func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeRequest.ProtoReflect.Descriptor instead.
 func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{12}
+	return file_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RegisterNodeRequest) GetToken() string {
@@ -759,7 +879,7 @@ type RegisterNodeReply struct {
 
 func (x *RegisterNodeReply) Reset() {
 	*x = RegisterNodeReply{}
-	mi := &file_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -771,7 +891,7 @@ func (x *RegisterNodeReply) String() string {
 func (*RegisterNodeReply) ProtoMessage() {}
 
 func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -784,7 +904,7 @@ func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeReply.ProtoReflect.Descriptor instead.
 func (*RegisterNodeReply) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{13}
+	return file_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RegisterNodeReply) GetNodeId() uint64 {
@@ -826,7 +946,7 @@ type NodeIPsRequest struct {
 
 func (x *NodeIPsRequest) Reset() {
 	*x = NodeIPsRequest{}
-	mi := &file_node_proto_msgTypes[14]
+	mi := &file_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -838,7 +958,7 @@ func (x *NodeIPsRequest) String() string {
 func (*NodeIPsRequest) ProtoMessage() {}
 
 func (x *NodeIPsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[14]
+	mi := &file_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -851,7 +971,7 @@ func (x *NodeIPsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeIPsRequest.ProtoReflect.Descriptor instead.
 func (*NodeIPsRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{14}
+	return file_node_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *NodeIPsRequest) GetNodeId() uint64 {
@@ -908,7 +1028,18 @@ const file_node_proto_rawDesc = "" +
 	"\tNftConfig\x12\x16\n" +
 	"\x06config\x18\x01 \x01(\tR\x06config\"-\n" +
 	"\x12NftTemplateRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\"L\n" +
+	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\"\xb2\x01\n" +
+	"\x13TrafficQuotaRequest\x12\x1f\n" +
+	"\vlimit_bytes\x18\x01 \x01(\x04R\n" +
+	"limitBytes\x12\x1d\n" +
+	"\n" +
+	"used_bytes\x18\x02 \x01(\x04R\tusedBytes\x12!\n" +
+	"\fwindow_start\x18\x03 \x01(\x03R\vwindowStart\x12\x1b\n" +
+	"\ttcp_ports\x18\x04 \x03(\rR\btcpPorts\x12\x1b\n" +
+	"\tudp_ports\x18\x05 \x03(\rR\budpPorts\"2\n" +
+	"\x11TrafficQuotaReply\x12\x1d\n" +
+	"\n" +
+	"used_bytes\x18\x01 \x01(\x04R\tusedBytes\"L\n" +
 	"\x12NodeUpgradeRequest\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\"\xec\x01\n" +
@@ -936,7 +1067,7 @@ const file_node_proto_rawDesc = "" +
 	"\x0eNodeIPsRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x12\n" +
 	"\x04ipv4\x18\x02 \x01(\tR\x04ipv4\x12\x12\n" +
-	"\x04ipv6\x18\x03 \x01(\tR\x04ipv62\xaa\x05\n" +
+	"\x04ipv6\x18\x03 \x01(\tR\x04ipv62\x82\x06\n" +
 	"\x04Node\x12C\n" +
 	"\aExecute\x12\x1c.yagp.node.v1.CommandRequest\x1a\x1a.yagp.node.v1.CommandReply\x12M\n" +
 	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.yagp.node.v1.ObserverEndpoint\x12O\n" +
@@ -944,7 +1075,8 @@ const file_node_proto_rawDesc = "" +
 	"\x12RestartGostService\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.GostServiceStatus\x12I\n" +
 	"\vGetGostLogs\x12\x1d.yagp.node.v1.GostLogsRequest\x1a\x1b.yagp.node.v1.GostLogsReply\x12?\n" +
 	"\fGetNftConfig\x12\x16.google.protobuf.Empty\x1a\x17.yagp.node.v1.NftConfig\x12B\n" +
-	"\x0eApplyNftConfig\x12\x17.yagp.node.v1.NftConfig\x1a\x17.yagp.node.v1.NftConfig\x12K\n" +
+	"\x0eApplyNftConfig\x12\x17.yagp.node.v1.NftConfig\x1a\x17.yagp.node.v1.NftConfig\x12V\n" +
+	"\x10SyncTrafficQuota\x12!.yagp.node.v1.TrafficQuotaRequest\x1a\x1f.yagp.node.v1.TrafficQuotaReply\x12K\n" +
 	"\x10GetUpgradeStatus\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.NodeUpgradeStatus\x12Q\n" +
 	"\fStartUpgrade\x12 .yagp.node.v1.NodeUpgradeRequest\x1a\x1f.yagp.node.v1.NodeUpgradeStatus2\xab\x02\n" +
 	"\x05Panel\x12:\n" +
@@ -965,7 +1097,7 @@ func file_node_proto_rawDescGZIP() []byte {
 	return file_node_proto_rawDescData
 }
 
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_node_proto_goTypes = []any{
 	(*CommandRequest)(nil),       // 0: yagp.node.v1.CommandRequest
 	(*CommandReply)(nil),         // 1: yagp.node.v1.CommandReply
@@ -976,47 +1108,51 @@ var file_node_proto_goTypes = []any{
 	(*GostLogsReply)(nil),        // 6: yagp.node.v1.GostLogsReply
 	(*NftConfig)(nil),            // 7: yagp.node.v1.NftConfig
 	(*NftTemplateRequest)(nil),   // 8: yagp.node.v1.NftTemplateRequest
-	(*NodeUpgradeRequest)(nil),   // 9: yagp.node.v1.NodeUpgradeRequest
-	(*NodeUpgradeStatus)(nil),    // 10: yagp.node.v1.NodeUpgradeStatus
-	(*ReportRequest)(nil),        // 11: yagp.node.v1.ReportRequest
-	(*RegisterNodeRequest)(nil),  // 12: yagp.node.v1.RegisterNodeRequest
-	(*RegisterNodeReply)(nil),    // 13: yagp.node.v1.RegisterNodeReply
-	(*NodeIPsRequest)(nil),       // 14: yagp.node.v1.NodeIPsRequest
-	(*proto.ObserveRequest)(nil), // 15: proto.ObserveRequest
-	(*emptypb.Empty)(nil),        // 16: google.protobuf.Empty
-	(*proto.ObserveReply)(nil),   // 17: proto.ObserveReply
+	(*TrafficQuotaRequest)(nil),  // 9: yagp.node.v1.TrafficQuotaRequest
+	(*TrafficQuotaReply)(nil),    // 10: yagp.node.v1.TrafficQuotaReply
+	(*NodeUpgradeRequest)(nil),   // 11: yagp.node.v1.NodeUpgradeRequest
+	(*NodeUpgradeStatus)(nil),    // 12: yagp.node.v1.NodeUpgradeStatus
+	(*ReportRequest)(nil),        // 13: yagp.node.v1.ReportRequest
+	(*RegisterNodeRequest)(nil),  // 14: yagp.node.v1.RegisterNodeRequest
+	(*RegisterNodeReply)(nil),    // 15: yagp.node.v1.RegisterNodeReply
+	(*NodeIPsRequest)(nil),       // 16: yagp.node.v1.NodeIPsRequest
+	(*proto.ObserveRequest)(nil), // 17: proto.ObserveRequest
+	(*emptypb.Empty)(nil),        // 18: google.protobuf.Empty
+	(*proto.ObserveReply)(nil),   // 19: proto.ObserveReply
 }
 var file_node_proto_depIdxs = []int32{
 	5,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
-	15, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	17, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	0,  // 2: yagp.node.v1.Node.Execute:input_type -> yagp.node.v1.CommandRequest
-	16, // 3: yagp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
-	16, // 4: yagp.node.v1.Node.GetGostServiceStatus:input_type -> google.protobuf.Empty
-	16, // 5: yagp.node.v1.Node.RestartGostService:input_type -> google.protobuf.Empty
+	18, // 3: yagp.node.v1.Node.GetObserverEndpoint:input_type -> google.protobuf.Empty
+	18, // 4: yagp.node.v1.Node.GetGostServiceStatus:input_type -> google.protobuf.Empty
+	18, // 5: yagp.node.v1.Node.RestartGostService:input_type -> google.protobuf.Empty
 	4,  // 6: yagp.node.v1.Node.GetGostLogs:input_type -> yagp.node.v1.GostLogsRequest
-	16, // 7: yagp.node.v1.Node.GetNftConfig:input_type -> google.protobuf.Empty
+	18, // 7: yagp.node.v1.Node.GetNftConfig:input_type -> google.protobuf.Empty
 	7,  // 8: yagp.node.v1.Node.ApplyNftConfig:input_type -> yagp.node.v1.NftConfig
-	16, // 9: yagp.node.v1.Node.GetUpgradeStatus:input_type -> google.protobuf.Empty
-	9,  // 10: yagp.node.v1.Node.StartUpgrade:input_type -> yagp.node.v1.NodeUpgradeRequest
-	11, // 11: yagp.node.v1.Panel.Report:input_type -> yagp.node.v1.ReportRequest
-	12, // 12: yagp.node.v1.Panel.RegisterNode:input_type -> yagp.node.v1.RegisterNodeRequest
-	8,  // 13: yagp.node.v1.Panel.GetNftTemplate:input_type -> yagp.node.v1.NftTemplateRequest
-	14, // 14: yagp.node.v1.Panel.UpdateNodeIPs:input_type -> yagp.node.v1.NodeIPsRequest
-	1,  // 15: yagp.node.v1.Node.Execute:output_type -> yagp.node.v1.CommandReply
-	2,  // 16: yagp.node.v1.Node.GetObserverEndpoint:output_type -> yagp.node.v1.ObserverEndpoint
-	3,  // 17: yagp.node.v1.Node.GetGostServiceStatus:output_type -> yagp.node.v1.GostServiceStatus
-	3,  // 18: yagp.node.v1.Node.RestartGostService:output_type -> yagp.node.v1.GostServiceStatus
-	6,  // 19: yagp.node.v1.Node.GetGostLogs:output_type -> yagp.node.v1.GostLogsReply
-	7,  // 20: yagp.node.v1.Node.GetNftConfig:output_type -> yagp.node.v1.NftConfig
-	7,  // 21: yagp.node.v1.Node.ApplyNftConfig:output_type -> yagp.node.v1.NftConfig
-	10, // 22: yagp.node.v1.Node.GetUpgradeStatus:output_type -> yagp.node.v1.NodeUpgradeStatus
-	10, // 23: yagp.node.v1.Node.StartUpgrade:output_type -> yagp.node.v1.NodeUpgradeStatus
-	17, // 24: yagp.node.v1.Panel.Report:output_type -> proto.ObserveReply
-	13, // 25: yagp.node.v1.Panel.RegisterNode:output_type -> yagp.node.v1.RegisterNodeReply
-	7,  // 26: yagp.node.v1.Panel.GetNftTemplate:output_type -> yagp.node.v1.NftConfig
-	16, // 27: yagp.node.v1.Panel.UpdateNodeIPs:output_type -> google.protobuf.Empty
-	15, // [15:28] is the sub-list for method output_type
-	2,  // [2:15] is the sub-list for method input_type
+	9,  // 9: yagp.node.v1.Node.SyncTrafficQuota:input_type -> yagp.node.v1.TrafficQuotaRequest
+	18, // 10: yagp.node.v1.Node.GetUpgradeStatus:input_type -> google.protobuf.Empty
+	11, // 11: yagp.node.v1.Node.StartUpgrade:input_type -> yagp.node.v1.NodeUpgradeRequest
+	13, // 12: yagp.node.v1.Panel.Report:input_type -> yagp.node.v1.ReportRequest
+	14, // 13: yagp.node.v1.Panel.RegisterNode:input_type -> yagp.node.v1.RegisterNodeRequest
+	8,  // 14: yagp.node.v1.Panel.GetNftTemplate:input_type -> yagp.node.v1.NftTemplateRequest
+	16, // 15: yagp.node.v1.Panel.UpdateNodeIPs:input_type -> yagp.node.v1.NodeIPsRequest
+	1,  // 16: yagp.node.v1.Node.Execute:output_type -> yagp.node.v1.CommandReply
+	2,  // 17: yagp.node.v1.Node.GetObserverEndpoint:output_type -> yagp.node.v1.ObserverEndpoint
+	3,  // 18: yagp.node.v1.Node.GetGostServiceStatus:output_type -> yagp.node.v1.GostServiceStatus
+	3,  // 19: yagp.node.v1.Node.RestartGostService:output_type -> yagp.node.v1.GostServiceStatus
+	6,  // 20: yagp.node.v1.Node.GetGostLogs:output_type -> yagp.node.v1.GostLogsReply
+	7,  // 21: yagp.node.v1.Node.GetNftConfig:output_type -> yagp.node.v1.NftConfig
+	7,  // 22: yagp.node.v1.Node.ApplyNftConfig:output_type -> yagp.node.v1.NftConfig
+	10, // 23: yagp.node.v1.Node.SyncTrafficQuota:output_type -> yagp.node.v1.TrafficQuotaReply
+	12, // 24: yagp.node.v1.Node.GetUpgradeStatus:output_type -> yagp.node.v1.NodeUpgradeStatus
+	12, // 25: yagp.node.v1.Node.StartUpgrade:output_type -> yagp.node.v1.NodeUpgradeStatus
+	19, // 26: yagp.node.v1.Panel.Report:output_type -> proto.ObserveReply
+	15, // 27: yagp.node.v1.Panel.RegisterNode:output_type -> yagp.node.v1.RegisterNodeReply
+	7,  // 28: yagp.node.v1.Panel.GetNftTemplate:output_type -> yagp.node.v1.NftConfig
+	18, // 29: yagp.node.v1.Panel.UpdateNodeIPs:output_type -> google.protobuf.Empty
+	16, // [16:30] is the sub-list for method output_type
+	2,  // [2:16] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -1033,7 +1169,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

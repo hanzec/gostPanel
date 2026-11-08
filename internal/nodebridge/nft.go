@@ -155,9 +155,14 @@ func checkNftBatch(ctx context.Context, nft string, batch []byte) error {
 }
 
 func runNft(ctx context.Context, nft string, batch []byte, args ...string) error {
+	_, err := nftOutput(ctx, nft, batch, args...)
+	return err
+}
+
+func nftOutput(ctx context.Context, nft string, batch []byte, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, nft, args...)
 	cmd.Stdin = bytes.NewReader(batch)
-	_, err := cmd.Output()
+	output, err := cmd.Output()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		detail := strings.TrimSpace(string(exit.Stderr))
@@ -165,10 +170,10 @@ func runNft(ctx context.Context, nft string, batch []byte, args ...string) error
 			detail = strings.ToValidUTF8(detail[:2048], "�") + "…"
 		}
 		if detail != "" {
-			return errors.New(detail)
+			return nil, errors.New(detail)
 		}
 	}
-	return err
+	return output, err
 }
 
 func stageNftConfig(path, config string) (string, error) {

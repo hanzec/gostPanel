@@ -28,6 +28,7 @@ const (
 	Node_GetGostLogs_FullMethodName          = "/yagp.node.v1.Node/GetGostLogs"
 	Node_GetNftConfig_FullMethodName         = "/yagp.node.v1.Node/GetNftConfig"
 	Node_ApplyNftConfig_FullMethodName       = "/yagp.node.v1.Node/ApplyNftConfig"
+	Node_SyncTrafficQuota_FullMethodName     = "/yagp.node.v1.Node/SyncTrafficQuota"
 	Node_GetUpgradeStatus_FullMethodName     = "/yagp.node.v1.Node/GetUpgradeStatus"
 	Node_StartUpgrade_FullMethodName         = "/yagp.node.v1.Node/StartUpgrade"
 )
@@ -43,6 +44,7 @@ type NodeClient interface {
 	GetGostLogs(ctx context.Context, in *GostLogsRequest, opts ...grpc.CallOption) (*GostLogsReply, error)
 	GetNftConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NftConfig, error)
 	ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...grpc.CallOption) (*NftConfig, error)
+	SyncTrafficQuota(ctx context.Context, in *TrafficQuotaRequest, opts ...grpc.CallOption) (*TrafficQuotaReply, error)
 	GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
 	StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
 }
@@ -125,6 +127,16 @@ func (c *nodeClient) ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...
 	return out, nil
 }
 
+func (c *nodeClient) SyncTrafficQuota(ctx context.Context, in *TrafficQuotaRequest, opts ...grpc.CallOption) (*TrafficQuotaReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrafficQuotaReply)
+	err := c.cc.Invoke(ctx, Node_SyncTrafficQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *nodeClient) GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(NodeUpgradeStatus)
@@ -156,6 +168,7 @@ type NodeServer interface {
 	GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error)
 	GetNftConfig(context.Context, *emptypb.Empty) (*NftConfig, error)
 	ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error)
+	SyncTrafficQuota(context.Context, *TrafficQuotaRequest) (*TrafficQuotaReply, error)
 	GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error)
 	StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error)
 	mustEmbedUnimplementedNodeServer()
@@ -188,6 +201,9 @@ func (UnimplementedNodeServer) GetNftConfig(context.Context, *emptypb.Empty) (*N
 }
 func (UnimplementedNodeServer) ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ApplyNftConfig not implemented")
+}
+func (UnimplementedNodeServer) SyncTrafficQuota(context.Context, *TrafficQuotaRequest) (*TrafficQuotaReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncTrafficQuota not implemented")
 }
 func (UnimplementedNodeServer) GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetUpgradeStatus not implemented")
@@ -342,6 +358,24 @@ func _Node_ApplyNftConfig_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Node_SyncTrafficQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TrafficQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).SyncTrafficQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_SyncTrafficQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).SyncTrafficQuota(ctx, req.(*TrafficQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Node_GetUpgradeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
@@ -412,6 +446,10 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ApplyNftConfig",
 			Handler:    _Node_ApplyNftConfig_Handler,
+		},
+		{
+			MethodName: "SyncTrafficQuota",
+			Handler:    _Node_SyncTrafficQuota_Handler,
 		},
 		{
 			MethodName: "GetUpgradeStatus",

@@ -78,6 +78,14 @@ func Run(ctx context.Context, cfg Config) error {
 			log.Printf("restore nftables config: %v", err)
 		}
 	}
+	if cfg.ConfigFile != "" {
+		restoreCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := restoreTrafficQuota(restoreCtx, cfg)
+		cancel()
+		if err != nil {
+			log.Printf("restore traffic quota: %v", err)
+		}
+	}
 
 	control := grpc.NewServer(grpc.Creds(controlTLS))
 	defer control.Stop()
