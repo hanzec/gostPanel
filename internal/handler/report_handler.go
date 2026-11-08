@@ -28,10 +28,11 @@ const connectAuthTimeout = 3 * time.Second
 
 type ReportHandler struct {
 	nodegrpc.UnimplementedV1Server
-	db          *gorm.DB
-	traffic     *service.ObserverService
-	nodes       *service.NodeService
-	behindProxy bool
+	db           *gorm.DB
+	traffic      *service.ObserverService
+	nodes        *service.NodeService
+	behindProxy  bool
+	reportLimits reportRateLimits
 }
 
 func NewReportHandler(db *gorm.DB, behindProxy bool) *ReportHandler {
@@ -71,7 +72,15 @@ func (h *ReportHandler) Connect(stream nodegrpc.V1_ConnectServer) error {
 	}
 	methods := nodegrpc.NewDispatcher(&streamReports{ReportHandler: h, id: uint64(node.ID)},
 		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName, nodegrpc.V1_GetNftTemplate_FullMethodName)
-	session := nodegrpc.NewSession(stream, methods)
+	session := nodegrpc.NewSession(stream, func(ctx context.Context, method string, payload []byte) ([]byte, error) {
+		switch method {
+		case nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName:
+			if !h.reportLimits.allow(node.ID, method) {
+				return nil, status.Error(codes.ResourceExhausted, "node report rate limit exceeded")
+			}
+		}
+		return methods(ctx, method, payload)
+	})
 	defer session.Close()
 	unregister := gost.RegisterNodeStream(node.ID, node.Username, node.Password, session)
 	defer unregister()
