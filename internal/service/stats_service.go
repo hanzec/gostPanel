@@ -28,11 +28,17 @@ func NewStatsService(db *gorm.DB) *StatsService {
 
 // DashboardStats 仪表盘统计
 type DashboardStats struct {
-	Nodes    NodeStats   `json:"nodes"`
-	Rules    RuleStats   `json:"rules"`
-	Tunnels  TunnelStats `json:"tunnels"`
-	Version  string      `json:"version"`
-	Database string      `json:"database"`
+	Nodes    NodeStats        `json:"nodes"`
+	Rules    RuleStats        `json:"rules"`
+	Tunnels  TunnelStats      `json:"tunnels"`
+	Traffic  DashboardTraffic `json:"traffic"`
+	Version  string           `json:"version"`
+	Database string           `json:"database"`
+}
+
+type DashboardTraffic struct {
+	repository.TrafficTotals
+	Tunnels []repository.TunnelExitTraffic `json:"tunnels"`
 }
 
 // NodeStats 节点统计
@@ -115,6 +121,14 @@ func (s *StatsService) GetDashboardStats() (*DashboardStats, error) {
 		Total:   tunnelTotal,
 		Running: tunnelRunning,
 		Stopped: tunnelTotal - tunnelRunning,
+	}
+	stats.Traffic.Tunnels, err = s.tunnelRepo.ExitTraffic()
+	if err != nil {
+		return nil, err
+	}
+	for _, tunnel := range stats.Traffic.Tunnels {
+		stats.Traffic.InputBytes += tunnel.InputBytes
+		stats.Traffic.OutputBytes += tunnel.OutputBytes
 	}
 
 	stats.Version = buildinfo.Version

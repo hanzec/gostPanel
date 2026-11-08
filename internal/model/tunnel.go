@@ -15,6 +15,15 @@ const (
 	TunnelStatusError   TunnelStatus = "error"   // 错误
 )
 
+// RelayTraffic stores cumulative exit traffic and the most recent Gost service counters.
+type RelayTraffic struct {
+	InputBytes       int64 `gorm:"not null;default:0"`
+	OutputBytes      int64 `gorm:"not null;default:0"`
+	LastInputBytes   int64 `gorm:"not null;default:0"`
+	LastOutputBytes  int64 `gorm:"not null;default:0"`
+	ServiceCreatedAt int64 `gorm:"not null;default:0"`
+}
+
 // GostTunnel 隧道模型 - 管理入口节点与出口节点的链路关系
 // 启动隧道时：在出口节点创建 Relay 服务，在入口节点创建 Chain 连接到出口节点
 type GostTunnel struct {
@@ -27,8 +36,9 @@ type GostTunnel struct {
 	Status      TunnelStatus `gorm:"size:20;default:stopped" json:"status"`
 
 	// Gost 服务相关 ID（启动时创建）
-	ServiceID string `gorm:"size:100" json:"service_id"` // 出口节点 Relay 服务 ID
-	ChainID   string `gorm:"size:100" json:"chain_id"`   // 入口节点 Chain ID
+	ServiceID    string       `gorm:"size:100" json:"service_id"` // 出口节点 Relay 服务 ID
+	ChainID      string       `gorm:"size:100" json:"chain_id"`   // 入口节点 Chain ID
+	RelayTraffic RelayTraffic `gorm:"embedded;embeddedPrefix:relay_" json:"-"`
 
 	Remark    string         `gorm:"type:text" json:"remark"`
 	CreatedAt time.Time      `json:"created_at"`
