@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -153,7 +154,9 @@ func testAuthentikFailureResponses(t *testing.T, engine *gin.Engine) {
 		trustedProxy   = "192.0.2.20:8100"
 		untrustedProxy = "198.51.100.50:8100"
 		username       = "private-authentik-username"
-		groups         = "private-authentik-group"
+		staffGroup     = "private-authentik-staff"
+		readOnlyGroup  = "private-authentik-read-only"
+		groups         = staffGroup + "|" + readOnlyGroup
 	)
 	tests := []struct {
 		name   string
@@ -161,16 +164,18 @@ func testAuthentikFailureResponses(t *testing.T, engine *gin.Engine) {
 		path   string
 		peer   string
 		user   string
+		groups string
 		status int
 		reason string
 		html   bool
 	}{
-		{"homepage with an untrusted proxy", http.MethodGet, "/", untrustedProxy, username, http.StatusUnauthorized, "untrusted_proxy", true},
-		{"HEAD homepage with an untrusted proxy", http.MethodHead, "/", untrustedProxy, username, http.StatusUnauthorized, "untrusted_proxy", true},
-		{"deep link without identity", http.MethodGet, "/nodes/managed", trustedProxy, "", http.StatusUnauthorized, "invalid_identity", true},
-		{"homepage without administrator access", http.MethodGet, "/", trustedProxy, username, http.StatusForbidden, "admin_group_required", true},
-		{"API with browser accept header", http.MethodGet, "/api/v1/auth/info", trustedProxy, "", http.StatusUnauthorized, "invalid_identity", false},
-		{"asset with browser accept header", http.MethodGet, "/favicon.ico", trustedProxy, "", http.StatusUnauthorized, "invalid_identity", false},
+		{"homepage with an untrusted proxy", http.MethodGet, "/", untrustedProxy, username, groups, http.StatusUnauthorized, "untrusted_proxy", true},
+		{"HEAD homepage with an untrusted proxy", http.MethodHead, "/", untrustedProxy, username, groups, http.StatusUnauthorized, "untrusted_proxy", true},
+		{"deep link without identity", http.MethodGet, "/nodes/managed", trustedProxy, "", groups, http.StatusUnauthorized, "invalid_identity", true},
+		{"homepage without administrator access", http.MethodGet, "/", trustedProxy, username, groups, http.StatusForbidden, "admin_group_required", true},
+		{"homepage without a groups header", http.MethodGet, "/", trustedProxy, username, "", http.StatusForbidden, "admin_group_required", true},
+		{"API with browser accept header", http.MethodGet, "/api/v1/auth/info", trustedProxy, "", groups, http.StatusUnauthorized, "invalid_identity", false},
+		{"asset with browser accept header", http.MethodGet, "/favicon.ico", trustedProxy, "", groups, http.StatusUnauthorized, "invalid_identity", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -178,7 +183,9 @@ func testAuthentikFailureResponses(t *testing.T, engine *gin.Engine) {
 			req.RemoteAddr = tt.peer
 			req.Header.Set("Accept", "text/html")
 			req.Header.Set("X-Forwarded-For", "203.0.113.60")
-			req.Header.Set("X-Authentik-Groups", groups)
+			if tt.groups != "" {
+				req.Header.Set("X-Authentik-Groups", tt.groups)
+			}
 			if tt.user != "" {
 				req.Header.Set("X-Authentik-Username", tt.user)
 			}
@@ -212,7 +219,7 @@ func testAuthentikFailureResponses(t *testing.T, engine *gin.Engine) {
 			if !strings.Contains(body, tt.reason) {
 				t.Fatalf("expected HTML with reason %q, got %s", tt.reason, body)
 			}
-			for _, private := range []string{`id="app"`, username, groups, "yagp-admins", "192.0.2.20", "198.51.100.50", "203.0.113.60"} {
+			for _, private := range []string{`id="app"`, username, staffGroup, readOnlyGroup, "yagp-admins", "192.0.2.20", "198.51.100.50", "203.0.113.60"} {
 				if strings.Contains(body, private) {
 					t.Errorf("error page disclosed %q", private)
 				}
@@ -229,15 +236,28 @@ func testAuthentikFailureResponses(t *testing.T, engine *gin.Engine) {
 		t.Fatalf("expected one warning per auth failure, got %d: %s", len(lines), data)
 	}
 	for i, line := range lines {
+		tt := tests[i]
 		var record struct {
-			AuthFailure string `json:"auth_failure"`
-			RemoteAddr  string `json:"remote_addr"`
+			AuthFailure     string   `json:"auth_failure"`
+			RemoteAddr      string   `json:"remote_addr"`
+			AuthentikGroups []string `json:"authentik_groups"`
 		}
-		if err := json.Unmarshal([]byte(line), &record); err != nil || record.AuthFailure != tests[i].reason || record.RemoteAddr != tests[i].peer {
-			t.Errorf("access log for %s: %s", tests[i].name, line)
+		if err := json.Unmarshal([]byte(line), &record); err != nil || record.AuthFailure != tt.reason || record.RemoteAddr != tt.peer {
+			t.Errorf("access log for %s: %s", tt.name, line)
 		}
 		if strings.Contains(line, username) || strings.Contains(line, groups) {
-			t.Errorf("access log for %s disclosed identity headers", tests[i].name)
+			t.Errorf("access log for %s disclosed raw identity headers", tt.name)
+		}
+		if tt.reason == "admin_group_required" {
+			want := []string{}
+			if tt.groups != "" {
+				want = []string{staffGroup, readOnlyGroup}
+			}
+			if record.AuthentikGroups == nil || !slices.Equal(record.AuthentikGroups, want) {
+				t.Errorf("access log for %s has groups %v, want %v", tt.name, record.AuthentikGroups, want)
+			}
+		} else if strings.Contains(line, `"authentik_groups"`) || strings.Contains(line, staffGroup) || strings.Contains(line, readOnlyGroup) {
+			t.Errorf("access log for %s disclosed groups: %s", tt.name, line)
 		}
 	}
 }

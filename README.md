@@ -110,7 +110,7 @@ authentik:
   admin_group: "yagp-admins"
 ```
 
-登录回到面板后仍看到 401 或 403 时，在面板错误页查看诊断代码，并用 `docker compose logs --tail 50 yagp` 查看同次拒绝的 `auth_failure` 和 `remote_addr`。`untrusted_proxy` 表示面板实际连接到的代理地址不在 `trusted_proxies` 中，`invalid_identity` 表示面板未收到有效的 `X-Authentik-Username`，`admin_group_required` 表示管理员组检查未通过。
+登录回到面板后仍看到 401 或 403 时，在面板错误页查看诊断代码，并用 `docker compose logs --tail 50 yagp` 查看同次拒绝的 `auth_failure` 和 `remote_addr`。`untrusted_proxy` 表示面板实际连接到的代理地址不在 `trusted_proxies` 中，`invalid_identity` 表示面板未收到有效的 `X-Authentik-Username`，`admin_group_required` 表示管理员组检查未通过。遇到 `admin_group_required` 时，可用日志中的 `authentik_groups` 核对实际收到的用户组。
 
 浏览器访问面板的 HTTPS 地址，由 Authentik 处理登录。面板读取管理员身份并执行组校验。
 
