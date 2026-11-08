@@ -46,7 +46,18 @@ services:
       traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.burst: "5"
       # Traefik replaces X-Real-IP from untrusted peers before this middleware runs.
       traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
-      traefik.http.routers.yagp-grpc.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && PathRegexp(`^/api/v1/grpc/(Connect|GetNftTemplate)$`)"
+      # Count each new Connect request once. An open stream does not consume more tokens.
+      traefik.http.routers.yagp-grpc-connect.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/v1/grpc/Connect`)"
+      traefik.http.routers.yagp-grpc-connect.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-grpc-connect.tls: "true"
+      traefik.http.routers.yagp-grpc-connect.priority: "50"
+      traefik.http.routers.yagp-grpc-connect.service: yagp-grpc
+      traefik.http.routers.yagp-grpc-connect.middlewares: yagp-grpc-connect-limit,yagp-grpc-path
+      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.average: ${YAGP_CONNECT_RATE_PER_MINUTE:-60}
+      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.period: 1m
+      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.burst: ${YAGP_CONNECT_RATE_BURST:-30}
+      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
+      traefik.http.routers.yagp-grpc.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/v1/grpc/GetNftTemplate`)"
       traefik.http.routers.yagp-grpc.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
       traefik.http.routers.yagp-grpc.tls: "true"
       traefik.http.routers.yagp-grpc.priority: "50"

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"yagp/internal/model"
 	"yagp/internal/service"
@@ -22,6 +23,8 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"gorm.io/gorm"
 )
+
+const connectAuthTimeout = 3 * time.Second
 
 type ReportHandler struct {
 	nodegrpc.UnimplementedV1Server
@@ -62,20 +65,11 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 }
 
 func (h *ReportHandler) Connect(stream nodegrpc.V1_ConnectServer) error {
-	ctx := stream.Context()
-	ids := metadata.ValueFromIncomingContext(ctx, nodegrpc.NodeIDMetadata)
-	if len(ids) != 1 {
-		return status.Error(codes.Unauthenticated, "missing node identity")
-	}
-	id, err := strconv.ParseUint(ids[0], 10, 64)
-	if err != nil || id == 0 {
-		return status.Error(codes.Unauthenticated, "invalid node identity")
-	}
-	node, err := h.authenticateNode(ctx, id)
+	node, err := h.authenticateConnect(stream.Context())
 	if err != nil {
 		return err
 	}
-	methods := nodegrpc.NewDispatcher(&streamReports{ReportHandler: h, id: id},
+	methods := nodegrpc.NewDispatcher(&streamReports{ReportHandler: h, id: uint64(node.ID)},
 		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName, nodegrpc.V1_GetNftTemplate_FullMethodName)
 	session := nodegrpc.NewSession(stream, methods)
 	defer session.Close()
@@ -85,6 +79,21 @@ func (h *ReportHandler) Connect(stream nodegrpc.V1_ConnectServer) error {
 		return err
 	}
 	return session.Run()
+}
+
+func (h *ReportHandler) authenticateConnect(ctx context.Context) (*model.GostNode, error) {
+	ids := metadata.ValueFromIncomingContext(ctx, nodegrpc.NodeIDMetadata)
+	if len(ids) != 1 {
+		return nil, status.Error(codes.Unauthenticated, "missing node identity")
+	}
+	id, err := strconv.ParseUint(ids[0], 10, 64)
+	if err != nil || id == 0 {
+		return nil, status.Error(codes.Unauthenticated, "invalid node identity")
+	}
+	// Keep the authentication deadline separate from the established stream's lifetime.
+	authCtx, cancel := context.WithTimeout(ctx, connectAuthTimeout)
+	defer cancel()
+	return h.authenticateNode(authCtx, id)
 }
 
 type streamReports struct {
@@ -197,6 +206,9 @@ func (h *streamReports) Report(ctx context.Context, request *nodegrpc.ReportRequ
 func (h *ReportHandler) authenticateNode(ctx context.Context, id uint64) (*model.GostNode, error) {
 	var node model.GostNode
 	err := h.db.WithContext(ctx).First(&node, id).Error
+	if contextErr := ctx.Err(); contextErr != nil {
+		return nil, status.FromContextError(contextErr).Err()
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) ||
 		(err == nil && (node.Username == "" || node.Password == "" || !nodegrpc.MatchCredentials(ctx, node.Username, node.Password))) {
 		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,7 +23,6 @@ import (
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
@@ -61,20 +61,41 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 		_, _ = w.Write([]byte(`{"services":[]}`))
 	}))
 	t.Cleanup(admin.Close)
-	panelCertFile, panelKeyFile, _ := testTLSFiles(t, x509.Certificate{IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)}})
-	serverTLS, err := credentials.NewServerTLSFromFile(panelCertFile, panelKeyFile)
-	if err != nil {
-		t.Fatal(err)
-	}
 	recorder := &reportRecorder{
 		username: username, password: password, reports: make(chan *nodegrpc.ReportRequest, 2),
 		sessions: make(chan *nodegrpc.Session, 2),
 	}
-	panel := grpc.NewServer(grpc.Creds(serverTLS))
+	panel := grpc.NewServer()
 	nodegrpc.RegisterV1Server(panel, recorder)
-	panelListener := listenLocal(t)
-	go func() { _ = panel.Serve(panelListener) }()
 	t.Cleanup(panel.Stop)
+	var attempts atomic.Int32
+	limitedAt := make(chan time.Time, 1)
+	proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 || r.URL.Path != nodegrpc.PanelProxyPath+"/Connect" {
+			t.Errorf("unexpected panel request: %s %s", r.Proto, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		switch attempts.Add(1) {
+		case 2:
+			limitedAt <- time.Now()
+			http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+			return
+		case 3:
+			if delay := time.Since(<-limitedAt); delay < 2*time.Second {
+				t.Errorf("reconnect after HTTP 429 waited %v, want at least 2 seconds", delay)
+			}
+		}
+		r.URL.Path = nodegrpc.V1_Connect_FullMethodName
+		panel.ServeHTTP(w, r)
+	}))
+	proxy.EnableHTTP2 = true
+	proxy.StartTLS()
+	t.Cleanup(proxy.Close)
+	panelCertFile := filepath.Join(t.TempDir(), "panel-ca.pem")
+	if err := os.WriteFile(panelCertFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: proxy.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	observerListener := listenLocal(t)
 	observerAddress := observerListener.Addr().String()
@@ -84,7 +105,7 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	go func() {
 		done <- Run(ctx, Config{
 			NodeID: 42, Username: username, Password: password, ObserverListen: observerAddress,
-			AdminAddress: strings.TrimPrefix(admin.URL, "http://"), ReportAddress: panelListener.Addr().String(),
+			AdminAddress: strings.TrimPrefix(admin.URL, "http://"), ReportAddress: proxy.Listener.Addr().String() + nodegrpc.PanelProxyPath,
 			ReportCAFile: panelCertFile,
 		})
 	}()
@@ -99,7 +120,7 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = observerConn.Close() })
-	timeout, stop := context.WithTimeout(t.Context(), 8*time.Second)
+	timeout, stop := context.WithTimeout(t.Context(), 12*time.Second)
 	defer stop()
 	if ready, err := healthpb.NewHealthClient(observerConn).Check(timeout,
 		&healthpb.HealthCheckRequest{Service: daemonHealthService + buildinfo.Version}, grpc.WaitForReady(true)); err != nil ||

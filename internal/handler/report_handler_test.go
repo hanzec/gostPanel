@@ -144,6 +144,40 @@ func TestReportStreamAuthenticatesOneNodeIdentity(t *testing.T) {
 	}
 }
 
+func TestReportStreamAuthenticationTimeoutKeepsEstablishedStream(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	node := model.GostNode{Name: "registered", Username: "node", Password: "secret"}
+	if err := f.db.Create(&node).Error; err != nil {
+		t.Fatal(err)
+	}
+	client := startTestReportServer(t, f.db)
+	ctx, cancel := context.WithTimeout(t.Context(), connectAuthTimeout+5*time.Second)
+	defer cancel()
+	reports := startTestReportStream(t, ctx, client, node, nil)
+
+	// Occupy the database's only connection to stall authentication at the SQL pool.
+	sqlDB, err := f.db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
+	_, authErr := connectTestReportStream(ctx, client, uint64(node.ID), auth)
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if status.Code(authErr) != codes.DeadlineExceeded || ctx.Err() != nil {
+		t.Fatalf("Connect stalled by the SQL pool = %v, client context = %v", authErr, ctx.Err())
+	}
+	if _, err := reports.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: uint64(node.ID)}); err != nil {
+		t.Fatalf("established stream after authentication timeout = %v", err)
+	}
+}
+
 func trafficEvent(id uint, input, output, connections uint64) *observer.Event {
 	return &observer.Event{
 		Kind: "service", Service: fmt.Sprintf("rule-%d", id), Type: "stats",
