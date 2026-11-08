@@ -49,7 +49,8 @@ export function updateNode(id, data) {
 export function issueNodeRegistrationToken(id) {
     return request({
         url: `/nodes/${id}/registration-token`,
-        method: 'post'
+        method: 'post',
+        silentError: true
     })
 }
 

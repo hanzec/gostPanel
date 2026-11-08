@@ -140,6 +140,9 @@
       :title="isEdit ? '编辑节点' : '添加节点'"
       width="min(600px, calc(100vw - 24px))"
       :close-on-click-modal="false"
+      :close-on-press-escape="!submitLoading"
+      :show-close="!submitLoading"
+      @closed="openCreatedNodeInstall"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="handleSubmit">
         <p class="node-address-help ops-muted">节点注册时会自动获取连接地址。</p>
@@ -156,7 +159,7 @@
         </div>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button :disabled="submitLoading" @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加节点' }}</el-button>
       </template>
     </el-dialog>
@@ -196,7 +199,7 @@
       :title="'安装节点 · ' + (installNode?.name || '')"
       width="min(680px, calc(100vw - 24px))"
       :close-on-click-modal="false"
-      @close="clearRegistration"
+      @close="resetInstall"
     >
       <p class="install-intro ops-muted">在目标服务器上以 root 身份执行安装命令。节点首次通过 TLS 注册时会自动获取节点 ID 和凭据，并探测 IP。</p>
       <dl v-if="installNode" class="install-meta">
@@ -204,28 +207,41 @@
         <div><dt>gRPC 地址</dt><dd class="ops-mono">{{ nodeEndpoint(installNode) }}</dd></div>
       </dl>
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="面板注册地址" for="node-panel-address">
-          <el-input id="node-panel-address" v-model.trim="panelAddress" placeholder="panel.example.com:39101" spellcheck="false" />
+        <el-form-item
+          label="面板注册地址"
+          for="node-panel-address"
+          :error="panelAddress && !panelAddressValid ? '请输入有效的主机和端口。' : ''"
+        >
+          <el-input
+            id="node-panel-address"
+            v-model.trim="panelAddress"
+            placeholder="panel.example.com:39101"
+            :disabled="loadingPanelAddress"
+            spellcheck="false"
+          />
         </el-form-item>
       </el-form>
 
       <div class="install-registration">
         <p class="ops-muted" role="status">
-          <template v-if="registrationToken">
+          <template v-if="loadingPanelAddress">正在读取面板注册地址。</template>
+          <template v-else-if="issuingToken">正在签发注册令牌。</template>
+          <template v-else-if="registrationToken">
             令牌到期时间 <time :datetime="registrationExpiresAt">{{ formatTime(registrationExpiresAt) }}</time>
           </template>
           <template v-else-if="registrationExpiresAt">令牌已过期，请重新签发。</template>
           <template v-else>令牌在注册成功后立即失效。</template>
         </p>
-        <el-button type="primary" :loading="issuingToken" :disabled="!panelAddress" @click="issueRegistrationToken">
+        <el-button :type="installCommand ? '' : 'primary'" :loading="issuingToken" :disabled="!panelAddressValid" @click="issueRegistrationToken">
           {{ registrationExpiresAt ? '重新签发令牌' : '签发注册令牌' }}
         </el-button>
       </div>
+      <p v-if="registrationError" class="install-error" role="alert">签发失败，节点已保存。请重试签发。</p>
 
       <section class="install-command" aria-labelledby="node-install-command">
         <div class="install-command-heading">
           <h3 id="node-install-command">安装命令</h3>
-          <el-button :icon="CopyDocument" :disabled="!installCommand || issuingToken" @click="copyInstallCommand">复制命令</el-button>
+          <el-button :type="installCommand ? 'primary' : ''" :icon="CopyDocument" :disabled="!installCommand || issuingToken" @click="copyInstallCommand">复制命令</el-button>
         </div>
         <pre v-if="installCommand" class="config-code"><code>{{ installCommand }}</code></pre>
         <p v-else class="ops-muted">填写面板地址并签发令牌后即可复制命令。</p>
@@ -312,9 +328,13 @@ const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
 const installNode = computed(() => nodeList.value.find(node => node.id === currentInstallNode.value?.id) || currentInstallNode.value)
 const panelAddress = ref('')
+const loadingPanelAddress = ref(false)
 const registrationToken = ref('')
 const registrationExpiresAt = ref('')
 const issuingToken = ref(false)
+const registrationError = ref(false)
+let createdInstallNode
+let installSession = 0
 let registrationTimer
 
 const formatBytes = (bytes) => {
@@ -342,19 +362,36 @@ const configSummary = (tab, entry) => {
 
 const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "'"
 
+const panelAddressValid = computed(() => {
+  const address = panelAddress.value
+  if (!address || /[\s/@?#\\]/.test(address)) return false
+  try {
+    const { hostname, port } = new URL('tcp://' + address)
+    return Boolean(hostname && Number(port) > 0)
+  } catch {
+    return false
+  }
+})
+
 const installCommand = computed(() => {
-  if (!panelAddress.value || !registrationToken.value) return ''
-  return 'bash <(curl -fsSL ' + shellQuote(INSTALL_SCRIPT_URL) + ') ' +
+  if (!panelAddressValid.value || !registrationToken.value) return ''
+  return 'curl -fsSL ' + shellQuote(INSTALL_SCRIPT_URL) + ' | bash -s -- ' +
     '--panel-address ' + shellQuote(panelAddress.value) + ' --token ' + shellQuote(registrationToken.value)
 })
 
-const showInstallCommand = async (row) => {
+const showInstallCommand = async (row, autoIssue = false) => {
+  resetInstall()
+  const session = installSession
   currentInstallNode.value = row
+  panelAddress.value = ''
+  loadingPanelAddress.value = true
   installDialogVisible.value = true
-  if (!panelAddress.value) {
-    const res = await getPublicSystemConfig().catch(() => null)
-    if (!panelAddress.value && res) panelAddress.value = (res.data.reportAddress || '').trim()
-  }
+
+  const res = await getPublicSystemConfig().catch(() => null)
+  if (session !== installSession || !installDialogVisible.value) return
+  panelAddress.value = res?.data?.reportAddress?.trim() || ''
+  loadingPanelAddress.value = false
+  if (autoIssue && panelAddressValid.value) await issueRegistrationToken()
 }
 
 const clearRegistration = () => {
@@ -363,18 +400,32 @@ const clearRegistration = () => {
   registrationExpiresAt.value = ''
 }
 
+const resetInstall = () => {
+  installSession++
+  loadingPanelAddress.value = false
+  issuingToken.value = false
+  registrationError.value = false
+  clearRegistration()
+}
+
 const issueRegistrationToken = async () => {
   const node = currentInstallNode.value
-  if (!node || issuingToken.value) return
+  if (!node || !panelAddressValid.value || issuingToken.value) return
+  const session = installSession
   issuingToken.value = true
+  registrationError.value = false
   const res = await issueNodeRegistrationToken(node.id).catch(() => null)
+  if (session !== installSession || !installDialogVisible.value) return
   issuingToken.value = false
-  if (!res || !installDialogVisible.value || currentInstallNode.value !== node) return
+  if (!res) {
+    registrationError.value = true
+    return
+  }
 
   clearRegistration()
   registrationExpiresAt.value = res.data.expires_at
   const remaining = Date.parse(registrationExpiresAt.value) - Date.now()
-  if (remaining <= 0) return
+  if (!(remaining > 0)) return
   registrationToken.value = res.data.token
   registrationTimer = setTimeout(() => { registrationToken.value = '' }, remaining)
 }
@@ -437,16 +488,17 @@ const openDialog = (row = null) => {
 
 const handleSubmit = async () => {
   if (!formRef.value || submitLoading.value) return
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
-
   submitLoading.value = true
   try {
+    const valid = await formRef.value.validate().catch(() => false)
+    if (!valid) return
+
     if (isEdit.value) {
       await updateNode(editId.value, form)
       ElMessage.success('节点已更新')
     } else {
-      await createNode(form)
+      const res = await createNode(form)
+      createdInstallNode = res.data
       ElMessage.success('节点已添加')
     }
     dialogVisible.value = false
@@ -456,6 +508,13 @@ const handleSubmit = async () => {
   } finally {
     submitLoading.value = false
   }
+}
+
+const openCreatedNodeInstall = () => {
+  if (!createdInstallNode) return
+  const row = createdInstallNode
+  createdInstallNode = null
+  showInstallCommand(row, true)
 }
 
 const handleDelete = async (row) => {
@@ -520,7 +579,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearInterval(refreshTimer)
   installDialogVisible.value = false
-  clearRegistration()
+  resetInstall()
 })
 </script>
 
@@ -557,6 +616,7 @@ onBeforeUnmount(() => {
 .install-meta dd { margin: 3px 0 0; overflow-wrap: anywhere; }
 .install-registration { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .install-registration p { margin: 0; }
+.install-error { color: var(--ops-danger); margin: 0 0 12px; }
 .install-command { border: 1px solid var(--ops-border); border-radius: 8px; padding: 12px; }
 .install-command-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .install-command-heading h3 { font-size: 14px; margin: 0; }
