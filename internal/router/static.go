@@ -25,6 +25,9 @@ func (r *Router) setupStatic(engine *gin.Engine) {
 		panic(err)
 	}
 
+	// The auth error page uses the icon before the administrator is authorized.
+	engine.StaticFileFS("/favicon.svg", "favicon.svg", http.FS(staticFS))
+
 	// 使用 NoRoute 接管所有未匹配的请求
 	engine.NoRoute(func(c *gin.Context) {
 		requestPath := c.Request.URL.Path

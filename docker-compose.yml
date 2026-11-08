@@ -36,6 +36,11 @@ services:
       traefik.http.middlewares.yagp-authentik.forwardauth.address: ${AUTHENTIK_OUTPOST_URL:?Set AUTHENTIK_OUTPOST_URL}/outpost.goauthentik.io/auth/traefik
       traefik.http.middlewares.yagp-authentik.forwardauth.trustforwardheader: "true"
       traefik.http.middlewares.yagp-authentik.forwardauth.authresponseheaders: X-Authentik-Username,X-Authentik-Groups
+      traefik.http.routers.yagp-favicon.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Path(`/favicon.svg`) && (Method(`GET`) || Method(`HEAD`))"
+      traefik.http.routers.yagp-favicon.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-favicon.tls: "true"
+      traefik.http.routers.yagp-favicon.priority: "20"
+      traefik.http.routers.yagp-favicon.service: yagp
       # Keep registration limits separate from the persistent stream.
       traefik.http.routers.yagp-grpc-register.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/v1/grpc/RegisterNode`)"
       traefik.http.routers.yagp-grpc-register.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
