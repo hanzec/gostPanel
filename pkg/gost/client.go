@@ -264,30 +264,30 @@ func (c *Client) resource(path string) (json.RawMessage, error) {
 	return gResp.Data, nil
 }
 
-// CreateService 创建服务 (幂等)
-func (c *Client) CreateService(svc *ServiceConfig) error {
+// EnsureService creates the service if absent and reports whether it was created.
+func (c *Client) EnsureService(svc *ServiceConfig) (bool, error) {
 	path := fmt.Sprintf("/config/services/%s", svc.Name)
 	existing, err := c.resource(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(existing) > 0 {
 		logger.Debugf("服务 %s 已存在，跳过创建", svc.Name)
-		return nil
+		return false, nil
 	}
 
 	resp, err := c.doRequest("POST", "/config/services", svc)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("创建服务失败: %s", string(body))
+		return false, fmt.Errorf("创建服务失败: %s", string(body))
 	}
 
-	return nil
+	return true, nil
 }
 
 // DeleteService 删除服务 (幂等)

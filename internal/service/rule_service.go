@@ -280,11 +280,11 @@ func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 
 	// 根据规则类型处理
 	if rule.Type == model.RuleTypeTunnel {
-		if err = s.startTunnelRule(rule, client, serviceName); err != nil {
+		if err = s.startTunnelRule(rule, node, client, serviceName); err != nil {
 			return err
 		}
 	} else {
-		if err = s.startForwardRule(rule, client, serviceName); err != nil {
+		if err = s.buildAndStartService(client, node, rule, serviceName, ""); err != nil {
 			return err
 		}
 	}
@@ -302,14 +302,8 @@ func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 	return nil
 }
 
-// startForwardRule 启动端口转发规则（直连目标）
-func (s *RuleService) startForwardRule(rule *model.GostRule, client *gost.Client, serviceName string) error {
-	// 端口转发没有 Chain ID
-	return s.buildAndStartService(client, rule, serviceName, "")
-}
-
 // startTunnelRule 启动隧道转发规则（通过隧道链路）
-func (s *RuleService) startTunnelRule(rule *model.GostRule, client *gost.Client, serviceName string) error {
+func (s *RuleService) startTunnelRule(rule *model.GostRule, node *model.GostNode, client *gost.Client, serviceName string) error {
 	if rule.TunnelID == nil {
 		return errors.ErrTunnelRequired
 	}
@@ -332,7 +326,7 @@ func (s *RuleService) startTunnelRule(rule *model.GostRule, client *gost.Client,
 	}
 
 	// 使用通用逻辑启动服务，传入 Chain ID
-	return s.buildAndStartService(client, rule, serviceName, tunnel.ChainID)
+	return s.buildAndStartService(client, node, rule, serviceName, tunnel.ChainID)
 }
 
 // Stop 停止规则
@@ -437,7 +431,7 @@ func (s *RuleService) setupRuleObserver(client *gost.Client, rule *model.GostRul
 }
 
 // buildAndStartService 构建并启动 Gost 服务 (处理通用逻辑)
-func (s *RuleService) buildAndStartService(client *gost.Client, rule *model.GostRule, serviceName string, chainID string) error {
+func (s *RuleService) buildAndStartService(client *gost.Client, node *model.GostNode, rule *model.GostRule, serviceName string, chainID string) error {
 	targets := rule.Targets
 	strategy := rule.Strategy
 	if strategy == "" || len(targets) == 1 {
@@ -461,8 +455,11 @@ func (s *RuleService) buildAndStartService(client *gost.Client, rule *model.Gost
 		return err
 	}
 
-	if err := client.CreateService(svc); err != nil {
+	if err := createServiceWithTrafficQuota(s.nodeRepo, client, *node, svc); err != nil {
 		_ = s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusError)
+		if stderrors.Is(err, errors.ErrNodeTrafficQuotaUnavailable) {
+			return err
+		}
 		return errors.ErrRuleStartFailed
 	}
 

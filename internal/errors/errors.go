@@ -40,7 +40,8 @@ var (
 	// ErrNodeHasObservers 节点下存在流量监控
 	ErrNodeHasObservers = New(10005, "节点下存在流量监控，无法删除", http.StatusBadRequest)
 	// ErrNodeOffline 节点已离线
-	ErrNodeOffline = New(10006, "节点已离线", http.StatusBadRequest)
+	ErrNodeOffline                 = New(10006, "节点已离线", http.StatusBadRequest)
+	ErrNodeTrafficQuotaUnavailable = New(10007, "节点流量配额未能生效，请检查 yagp-daemon 和 nftables", http.StatusServiceUnavailable)
 )
 
 // ==================== 规则相关错误 (101xx) ====================
@@ -152,7 +153,7 @@ var (
 	// ErrBackupDirCreateFailed 创建备份目录失败
 	ErrBackupDirCreateFailed = New(10412, "创建备份目录失败", http.StatusInternalServerError)
 	// ErrBackupFailed 备份失败
-	ErrBackupFailed = New(10413, "备份失败", http.StatusInternalServerError)
+	ErrBackupFailed      = New(10413, "备份失败", http.StatusInternalServerError)
 	ErrBackupUnsupported = New(10416, "面板仅支持 SQLite 备份。MySQL 请使用数据库服务备份。", http.StatusNotImplemented)
 
 	// ErrObserverCreateFailed 创建观察器失败

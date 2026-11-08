@@ -27,8 +27,37 @@ func (r *NodeRepository) Create(node *model.GostNode) error {
 }
 
 // Update 更新节点元数据，不覆盖并发完成的注册或健康检查。
-func (r *NodeRepository) Update(node *model.GostNode) error {
-	return r.DB.Model(node).Select("Name", "Port", "Remark").Updates(node).Error
+func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string) error {
+	fields := []string{"Name", "Port", "Remark"}
+	limitChanged := trafficLimitBytes != nil && node.TrafficLimitBytes != *trafficLimitBytes
+	periodChanged := trafficResetPeriod != nil && node.TrafficResetPeriod != *trafficResetPeriod
+	if limitChanged {
+		node.TrafficLimitBytes = *trafficLimitBytes
+		fields = append(fields, "TrafficLimitBytes")
+	}
+	if periodChanged {
+		node.TrafficResetPeriod = *trafficResetPeriod
+		fields = append(fields, "TrafficResetPeriod")
+	}
+	if limitChanged || (periodChanged && (node.TrafficLimitBytes > 0 || node.TrafficQuotaState != "")) {
+		node.TrafficQuotaState = model.TrafficQuotaPending
+		fields = append(fields, "TrafficQuotaState")
+	}
+	return r.DB.Model(node).Select(fields).Updates(node).Error
+}
+
+// UpdateTrafficQuota stores the daemon snapshot for the policy that was applied.
+func (r *NodeRepository) UpdateTrafficQuota(node model.GostNode, window int64, used uint64, state string) error {
+	if node.TrafficQuotaWindowStart == window && node.TrafficQuotaUsedBytes == used && node.TrafficQuotaState == state {
+		return nil
+	}
+	return r.DB.Model(&model.GostNode{}).
+		Where("id = ? AND traffic_limit_bytes = ? AND traffic_reset_period = ?", node.ID, node.TrafficLimitBytes, node.TrafficResetPeriod).
+		Updates(map[string]any{
+			"traffic_quota_window_start": window,
+			"traffic_quota_used_bytes":   used,
+			"traffic_quota_state":        state,
+		}).Error
 }
 
 func (r *NodeRepository) SetRegistrationToken(ctx context.Context, id uint, hash string, expiresAt time.Time) error {

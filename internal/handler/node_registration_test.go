@@ -101,7 +101,7 @@ func TestNodeRegistration(t *testing.T) {
 	}
 	// Saving metadata read before registration must not restore the consumed token.
 	node.Remark = "updated metadata"
-	if err := repository.NewNodeRepository(db).Update(&node); err != nil {
+	if err := repository.NewNodeRepository(db).Update(&node, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	assertRejected(token, certPEM, codes.Unauthenticated)

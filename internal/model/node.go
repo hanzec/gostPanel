@@ -15,6 +15,17 @@ const (
 	NodeStatusError   NodeStatus = "error"   // 错误
 )
 
+const (
+	TrafficResetNone        = "none"
+	TrafficQuotaActive      = "active"
+	TrafficQuotaBlocked     = "blocked"
+	TrafficQuotaPending     = "pending"
+	TrafficQuotaUnsupported = "unsupported"
+	TrafficQuotaWindowUnset = -1
+)
+
+var trafficQuotaLocation = time.FixedZone("UTC+8", 8*60*60)
+
 type NodeUpgradePolicy struct {
 	AutoUpgradeGost   bool `gorm:"not null;default:false" json:"auto_upgrade_gost"`
 	AutoUpgradeDaemon bool `gorm:"not null;default:false" json:"auto_upgrade_daemon"`
@@ -42,6 +53,12 @@ type GostNode struct {
 	InputBytes  int64 `gorm:"default:0" json:"input_bytes"`
 	OutputBytes int64 `gorm:"default:0" json:"output_bytes"`
 
+	TrafficLimitBytes       int64  `gorm:"not null;default:0" json:"traffic_limit_bytes"`
+	TrafficResetPeriod      string `gorm:"size:10;not null;default:none" json:"traffic_reset_period"`
+	TrafficQuotaUsedBytes   uint64 `gorm:"not null;default:0" json:"traffic_quota_used_bytes"`
+	TrafficQuotaState       string `gorm:"size:16;not null;default:''" json:"traffic_quota_state"`
+	TrafficQuotaWindowStart int64  `gorm:"not null;default:-1" json:"-"`
+
 	LastCheckAt *time.Time     `json:"last_check_at"`           // 最后检查时间
 	Remark      string         `gorm:"type:text" json:"remark"` // 备注
 	CreatedAt   time.Time      `json:"created_at"`
@@ -59,4 +76,20 @@ type GostNode struct {
 // TableName 指定表名
 func (GostNode) TableName() string {
 	return "nodes"
+}
+
+// TrafficQuotaWindow returns the period start in Unix seconds, or zero for a lifetime quota.
+func TrafficQuotaWindow(period string, now time.Time) int64 {
+	now = now.In(trafficQuotaLocation)
+	year, month, day := now.Date()
+	switch period {
+	case "daily":
+	case "weekly":
+		day -= (int(now.Weekday()) + 6) % 7
+	case "monthly":
+		day = 1
+	default:
+		return 0
+	}
+	return time.Date(year, month, day, 0, 0, 0, 0, trafficQuotaLocation).Unix()
 }

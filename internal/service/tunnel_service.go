@@ -263,9 +263,11 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	if err = s.allowlist.prepareRelay(exitClient, relaySvc); err != nil {
 		return err
 	}
-
-	if err = exitClient.CreateService(relaySvc); err != nil {
+	if err = createServiceWithTrafficQuota(s.nodeRepo, exitClient, *exitNode, relaySvc); err != nil {
 		_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusError)
+		if stderrors.Is(err, errors.ErrNodeTrafficQuotaUnavailable) {
+			return err
+		}
 		return errors.ErrTunnelRelayCreateFailed
 	}
 	if relaySvc.Admission != "" {

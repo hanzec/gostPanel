@@ -53,10 +53,20 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 
 	// 创建节点
 	node := &model.GostNode{
-		Name:   req.Name,
-		Port:   req.Port,
-		Remark: req.Remark,
-		Status: model.NodeStatusOffline,
+		Name:               req.Name,
+		Port:               req.Port,
+		Remark:             req.Remark,
+		Status:             model.NodeStatusOffline,
+		TrafficResetPeriod: model.TrafficResetNone,
+	}
+	if req.TrafficLimitBytes != nil {
+		node.TrafficLimitBytes = *req.TrafficLimitBytes
+	}
+	if req.TrafficResetPeriod != nil {
+		node.TrafficResetPeriod = *req.TrafficResetPeriod
+	}
+	if node.TrafficLimitBytes > 0 {
+		node.TrafficQuotaState = model.TrafficQuotaPending
 	}
 
 	if err = s.nodeRepo.Create(node); err != nil {
@@ -103,7 +113,7 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 	node.Port = req.Port
 	node.Remark = req.Remark
 
-	if err = s.nodeRepo.Update(node); err != nil {
+	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod); err != nil {
 		return nil, err
 	}
 

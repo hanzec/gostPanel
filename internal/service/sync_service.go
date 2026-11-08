@@ -111,7 +111,7 @@ func (s *RuleSyncService) syncNodeRules(node model.GostNode, allowlist model.Gos
 	client := utils.GetGostClient(&node)
 
 	// 获取节点真实运行配置
-	gostCfg, err := client.GetConfig()
+	gostCfg, err := s.getNodeConfig(client, node)
 	if err != nil {
 		logger.Debugf("[Sync] 获取节点 %d (%s) 配置失败: %v", node.ID, node.Name, err)
 		return
@@ -148,6 +148,29 @@ func (s *RuleSyncService) syncNodeRules(node model.GostNode, allowlist model.Gos
 		}
 	}
 	s.syncTunnels(client, node.ID, tunnels, gostCfg.Chains, exitAddresses)
+}
+
+func (s *RuleSyncService) getNodeConfig(client *gost.Client, node model.GostNode) (*gost.GostConfig, error) {
+	if node.TrafficLimitBytes == 0 && node.TrafficQuotaState == "" {
+		return client.GetConfig()
+	}
+	unlock := lockTrafficQuota(node.ID)
+	defer unlock()
+	if node.TrafficLimitBytes == 0 {
+		// Unblock even if the Gost admin API is temporarily down.
+		if err := syncTrafficQuota(s.nodeRepo, client, node, nil, time.Now()); err != nil {
+			logger.Debugf("[Sync] 清除节点 %d 的流量配额失败: %v", node.ID, err)
+		}
+		return client.GetConfig()
+	}
+	current, err := client.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	if err := syncTrafficQuota(s.nodeRepo, client, node, current.Services, time.Now()); err != nil {
+		logger.Debugf("[Sync] 同步节点 %d 的流量配额失败: %v", node.ID, err)
+	}
+	return current, nil
 }
 
 func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels []model.GostTunnel, chains []gost.ChainConfig, exitAddresses map[uint]string) {
