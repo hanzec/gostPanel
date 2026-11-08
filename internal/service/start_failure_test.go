@@ -24,7 +24,7 @@ func TestRuleStartHandlesNodeObserverAndProvisioningFailures(t *testing.T) {
 	node := startServiceTestNode(t, remote)
 	saveServiceFixtures(t, db, &node)
 	rules := NewRuleService(db)
-	rule, err := rules.Create(&dto.CreateRuleReq{NodeID: &node.ID, Name: "forward", Type: "forward", Protocol: "tcp", ListenPort: 8080}, testAdmin, testIP, testAgent)
+	rule, err := rules.Create(&dto.CreateRuleReq{NodeID: &node.ID, Name: "forward", Type: "forward", Protocol: "tcp", ListenPort: 8080, Targets: []string{"target.test:80"}}, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
 	start := func(want error) {
 		t.Helper()

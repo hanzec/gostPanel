@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page">
-    <PageHeader eyebrow="RELAY TUNNELS" title="隧道管理" description="在入口与出口节点之间建立 Relay 链路，管理隧道协议和运行状态。">
+    <PageHeader eyebrow="RELAY TUNNELS" title="隧道管理" description="连接已创建的源端入口和目的端入口，统一管理两端的转发配置。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
@@ -56,7 +56,7 @@
       <div v-else-if="!tunnelList.length && !loadError" class="inventory-state">
         <el-icon class="inventory-state-icon" aria-hidden="true"><Connection /></el-icon>
         <p>{{ filtered ? '没有匹配的隧道' : '尚未建立隧道' }}</p>
-        <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '选择两个节点并配置 Relay 端口，即可建立转发路径。' }}</span>
+        <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '先在入口管理创建两个端点，再在这里建立转发路径。' }}</span>
         <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
         <el-button v-else type="primary" @click="openDialog()">添加隧道</el-button>
       </div>
@@ -83,15 +83,21 @@
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">转发路径</span>
                 <div class="tunnel-route">
-                  <span><span class="tunnel-route-label">入口</span>{{ tunnel.entry_node?.name || '节点 #' + tunnel.entry_node_id }}</span>
+                  <span>
+                    <span class="tunnel-route-label">源端 · {{ tunnel.entry_node?.name || '节点 #' + tunnel.entry_node_id }}</span>
+                    {{ tunnel.entry_rule?.name || tunnel.entry_node?.name || '节点 #' + tunnel.entry_node_id }}
+                  </span>
                   <el-icon class="tunnel-route-arrow" aria-hidden="true"><Right /></el-icon>
-                  <span><span class="tunnel-route-label">出口</span>{{ tunnel.exit_node?.name || '节点 #' + tunnel.exit_node_id }}</span>
+                  <span>
+                    <span class="tunnel-route-label">目的端 · {{ tunnel.exit_node?.name || '节点 #' + tunnel.exit_node_id }}</span>
+                    {{ tunnel.exit_rule?.name || tunnel.exit_node?.name || '节点 #' + tunnel.exit_node_id }}
+                  </span>
                 </div>
               </td>
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">Relay</span>
                 <strong class="ops-mono">{{ tunnel.protocol?.toUpperCase() || '—' }}</strong>
-                <span class="inventory-secondary ops-mono ops-muted">:{{ tunnel.relay_port }}</span>
+                <span class="inventory-secondary ops-mono ops-muted">{{ tunnel.exit_rule ? listenEndpoint(tunnel.exit_rule) : ':' + (tunnel.relay_port || '—') }}</span>
               </td>
               <td class="inventory-status" role="cell">
                 <span class="ops-status" :class="'is-' + (tunnelStates[tunnel.status]?.tone || 'muted')">
@@ -113,7 +119,7 @@
                     </el-button>
                     <template #dropdown>
                       <el-dropdown-menu>
-                        <el-dropdown-item command="edit">编辑隧道</el-dropdown-item>
+                        <el-dropdown-item command="edit" :disabled="tunnel.status === 'running'">编辑隧道</el-dropdown-item>
                         <el-dropdown-item command="copy">复制隧道</el-dropdown-item>
                         <el-dropdown-item command="delete" divided class="inventory-danger">删除隧道</el-dropdown-item>
                       </el-dropdown-menu>
@@ -149,47 +155,52 @@
       :title="isEdit ? '编辑隧道' : '添加隧道'"
       :close-on-click-modal="false"
     >
-      <p v-if="isEdit" class="tunnel-dialog-hint ops-muted">入口和出口在创建时确定，可以在这里调整名称、协议和 Relay 端口。</p>
-      <div v-else-if="nodeOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
-        <span>无法加载节点选项。</span>
-        <el-button :loading="nodeOptionsLoading" @click="fetchNodes">重新加载节点</el-button>
+      <p v-if="legacyEdit" class="tunnel-dialog-hint ops-muted">此隧道直接关联节点，可调整协议和 Relay 端口。</p>
+      <div v-else-if="entryOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
+        <span>无法加载入口选项。</span>
+        <el-button :loading="entryOptionsLoading" @click="fetchEntrances">重新加载入口</el-button>
       </div>
-      <p v-else-if="!nodeOptionsLoading && nodeList.length < 2" class="tunnel-dialog-hint ops-muted">
-        建立隧道至少需要两个节点。<RouterLink to="/nodes" class="tunnel-link" @click="dialogVisible = false">前往节点管理</RouterLink>
+      <p v-else class="tunnel-dialog-hint ops-muted">
+        <template v-if="isEdit">端点变更将在启动时应用。</template>
+        <template v-else-if="!entryOptionsLoading && (!sourceOptions.length || !destinationOptions.length)">源端或目的端缺少可用入口。</template>
+        <template v-else>选定两端后，面板将配置源端与目的端并启动隧道。</template>
+        <RouterLink to="/rules" class="tunnel-link" @click="dialogVisible = false">前往入口管理</RouterLink>
       </p>
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" @submit.prevent="handleSubmit">
         <div class="inventory-form-grid">
           <el-form-item label="隧道名称" prop="name" class="inventory-form-wide">
             <el-input v-model="form.name" placeholder="例如 生产环境中继" />
           </el-form-item>
-          <el-form-item label="入口节点" prop="entry_node_id">
-            <el-select v-model="form.entry_node_id" placeholder="选择入口节点" :loading="nodeOptionsLoading" :disabled="isEdit">
+          <el-form-item v-if="!legacyEdit" label="源端入口" prop="entry_rule_id">
+            <el-select v-model="form.entry_rule_id" placeholder="选择源端入口" :loading="entryOptionsLoading" filterable aria-describedby="source-entry-help">
               <el-option
-                v-for="node in nodeList"
-                :key="node.id"
-                :label="node.name"
-                :value="node.id"
-                :disabled="node.id === form.exit_node_id"
+                v-for="rule in sourceOptions"
+                :key="rule.id"
+                :label="entranceLabel(rule)"
+                :value="rule.id"
+                :disabled="rule.node_id === exitEntrance?.node_id"
               />
             </el-select>
+            <span id="source-entry-help" class="tunnel-form-hint ops-muted">源端需要固定目标地址或 Clash 规则集。独立转发中的入口须先停止。</span>
           </el-form-item>
-          <el-form-item label="出口节点" prop="exit_node_id">
-            <el-select v-model="form.exit_node_id" placeholder="选择出口节点" :loading="nodeOptionsLoading" :disabled="isEdit">
+          <el-form-item v-if="!legacyEdit" label="目的端入口" prop="exit_rule_id">
+            <el-select v-model="form.exit_rule_id" placeholder="选择目的端入口" :loading="entryOptionsLoading" filterable aria-describedby="destination-entry-help">
               <el-option
-                v-for="node in nodeList"
-                :key="node.id"
-                :label="node.name"
-                :value="node.id"
-                :disabled="node.id === form.entry_node_id"
+                v-for="rule in destinationOptions"
+                :key="rule.id"
+                :label="entranceLabel(rule)"
+                :value="rule.id"
+                :disabled="rule.node_id === entryEntrance?.node_id"
               />
             </el-select>
+            <span id="destination-entry-help" class="tunnel-form-hint ops-muted">目的端须在另一节点、目标留空且监听可达。其协议和端口用于 Relay。</span>
           </el-form-item>
-          <el-form-item label="协议" prop="protocol">
+          <el-form-item v-if="legacyEdit" label="协议" prop="protocol">
             <el-select v-model="form.protocol">
               <el-option v-for="protocol in protocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
             </el-select>
           </el-form-item>
-          <el-form-item label="Relay 端口" prop="relay_port">
+          <el-form-item v-if="legacyEdit" label="Relay 端口" prop="relay_port">
             <el-input-number v-model="form.relay_port" :min="1" :max="65535" controls-position="right" />
             <span class="tunnel-form-hint ops-muted">Relay 服务在出口节点监听。</span>
           </el-form-item>
@@ -200,7 +211,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加隧道' }}</el-button>
+        <el-button type="primary" :loading="submitLoading" :disabled="!legacyEdit && (entryOptionsLoading || entryOptionsError)" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加并启动' }}</el-button>
       </template>
     </PanelDialog>
   </div>
@@ -216,6 +227,7 @@ import MetricStrip from '@/components/MetricStrip.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { getTunnelList, createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
 import { getNodeList } from '@/api/node'
+import { getRuleList } from '@/api/rule'
 
 const tunnelStates = {
   running: { label: '运行中', icon: VideoPlay, tone: 'success' },
@@ -227,6 +239,9 @@ const protocols = ['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic']
 const nodeList = ref([])
 const nodeOptionsLoading = ref(false)
 const nodeOptionsError = ref(false)
+const entryList = ref([])
+const entryOptionsLoading = ref(false)
+const entryOptionsError = ref(false)
 const tunnelList = ref([])
 const loading = ref(true)
 const loadError = ref(false)
@@ -250,15 +265,51 @@ const activeTunnelId = ref(null)
 const dialogVisible = ref(false)
 const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
+const legacyEdit = ref(false)
 const submitLoading = ref(false)
 const formRef = ref(null)
-const form = reactive({ name: '', entry_node_id: '', exit_node_id: '', protocol: 'tcp', relay_port: 8443, remark: '' })
+const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', relay_port: null, remark: '' })
+const listenEndpoint = ({ listen_ip: ip, listen_port: port }) => (ip?.includes(':') ? '[' + ip + ']' : ip || '*') + ':' + port
+const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
+const entryEntrance = computed(() => entryList.value.find(rule => rule.id === form.entry_rule_id))
+const exitEntrance = computed(() => entryList.value.find(rule => rule.id === form.exit_rule_id))
+const availableEntrances = computed(() => entryList.value.filter(rule => rule.linked_tunnel_id
+  ? rule.linked_tunnel_id === editId.value
+  : !rule.tunnel_id && rule.status !== 'running'))
+const sourceOptions = computed(() => availableEntrances.value.filter(rule => rule.targets?.length || rule.use_clash_ruleset))
+const destinationOptions = computed(() => availableEntrances.value.filter(rule => !rule.targets?.length && !rule.use_clash_ruleset &&
+  !['0.0.0.0', '::', '::1'].includes(rule.listen_ip) && !rule.listen_ip?.startsWith('127.')))
+const validateEndpointNodes = (_rule, _value, callback) => callback(entryEntrance.value?.node_id &&
+  entryEntrance.value.node_id === exitEntrance.value?.node_id ? new Error('源端和目的端须位于不同节点') : undefined)
 const formRules = {
   name: [{ required: true, message: '请输入隧道名称', trigger: 'blur' }],
-  entry_node_id: [{ required: true, message: '请选择入口节点', trigger: 'change' }],
-  exit_node_id: [{ required: true, message: '请选择出口节点', trigger: 'change' }],
+  entry_rule_id: [{ required: true, message: '请选择源端入口', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
+  exit_rule_id: [{ required: true, message: '请选择目的端入口', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
   protocol: [{ required: true, message: '请选择协议', trigger: 'change' }],
   relay_port: [{ required: true, message: '请输入 Relay 端口', trigger: 'blur' }]
+}
+
+const fetchEntrances = async () => {
+  if (entryOptionsLoading.value) return
+  entryOptionsLoading.value = true
+  try {
+    const rows = []
+    const size = 1000
+    for (let page = 1; ; page++) {
+      const { data } = await getRuleList({ page, pageSize: size })
+      const batch = data.list || []
+      rows.push(...batch)
+      if (rows.length >= data.total || batch.length < size) break
+    }
+    entryList.value = rows
+    if (form.entry_rule_id && !sourceOptions.value.some(rule => rule.id === form.entry_rule_id)) form.entry_rule_id = null
+    if (form.exit_rule_id && !destinationOptions.value.some(rule => rule.id === form.exit_rule_id)) form.exit_rule_id = null
+    entryOptionsError.value = false
+  } catch {
+    entryOptionsError.value = true
+  } finally {
+    entryOptionsLoading.value = false
+  }
 }
 
 const fetchNodes = async () => {
@@ -309,23 +360,18 @@ const clearFilters = () => {
 
 const openDialog = (row = null) => {
   editId.value = row?.id ?? null
-  Object.assign(form, row ? {
-    name: row.name,
-    entry_node_id: row.entry_node_id,
-    exit_node_id: row.exit_node_id,
-    protocol: row.protocol || 'tcp',
-    relay_port: row.relay_port || 8443,
-    remark: row.remark || ''
-  } : {
-    name: '',
-    entry_node_id: '',
-    exit_node_id: '',
-    protocol: 'tcp',
-    relay_port: 8443,
-    remark: ''
+  legacyEdit.value = !!row && !row.entry_rule_id
+  Object.assign(form, {
+    name: row?.name || '',
+    entry_rule_id: row?.entry_rule_id ?? null,
+    exit_rule_id: row?.exit_rule_id ?? null,
+    protocol: row?.protocol || 'tcp',
+    relay_port: row?.relay_port ?? null,
+    remark: row?.remark || ''
   })
   formRef.value?.clearValidate()
   dialogVisible.value = true
+  if (!legacyEdit.value) fetchEntrances()
 }
 
 const handleSubmit = async () => {
@@ -335,17 +381,23 @@ const handleSubmit = async () => {
 
   submitLoading.value = true
   try {
+    const { name, remark, entry_rule_id, exit_rule_id, protocol, relay_port } = form
+    const payload = legacyEdit.value ? { name, remark, protocol, relay_port } : { name, remark, entry_rule_id, exit_rule_id }
     if (isEdit.value) {
-      await updateTunnel(editId.value, form)
+      await updateTunnel(editId.value, payload)
       ElMessage.success('隧道已更新')
     } else {
-      await createTunnel(form)
-      ElMessage.success('隧道已添加')
+      await createTunnel(payload)
+      ElMessage.success('隧道已添加并启动')
     }
     dialogVisible.value = false
     fetchData()
   } catch (error) {
     console.error('保存隧道失败:', error)
+    if (!isEdit.value) {
+      fetchData()
+      fetchEntrances()
+    }
   } finally {
     submitLoading.value = false
   }
@@ -353,7 +405,7 @@ const handleSubmit = async () => {
 
 const handleDelete = async (row) => {
   try {
-    await confirmPanelAction('确定要删除隧道「' + row.name + '」吗？规则占用中的隧道无法删除。', '删除隧道', {
+    await confirmPanelAction('确定要删除隧道「' + row.name + '」吗？关联的入口配置仍可在入口管理中查看。', '删除隧道', {
       confirmButtonText: '删除隧道',
       confirmButtonClass: 'el-button--danger',
       cancelButtonText: '取消',
@@ -386,13 +438,12 @@ const toggleTunnel = async (row) => {
 }
 
 const handleTunnelAction = (action, row) => {
-  if (action === 'edit') openDialog(row)
+  if (action === 'edit' && row.status !== 'running') openDialog(row)
   if (action === 'delete') handleDelete(row)
   if (action === 'copy') {
-    openDialog(row)
-    editId.value = null
+    openDialog()
     form.name = row.name.slice(0, 95) + '-copy'
-    form.relay_port = row.relay_port < 65535 ? row.relay_port + 1 : 8443
+    form.remark = row.remark || ''
   }
 }
 

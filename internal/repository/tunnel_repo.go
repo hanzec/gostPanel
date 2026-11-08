@@ -25,7 +25,7 @@ func (r *TunnelRepository) Create(tunnel *model.GostTunnel) error {
 
 // Update 只更新隧道可编辑的配置。
 func (r *TunnelRepository) Update(tunnel *model.GostTunnel) error {
-	return r.DB.Model(tunnel).Select("name", "protocol", "relay_port", "remark", "updated_at").Updates(tunnel).Error
+	return r.DB.Model(tunnel).Select("name", "entry_node_id", "exit_node_id", "entry_rule_id", "exit_rule_id", "protocol", "relay_port", "remark", "updated_at").Updates(tunnel).Error
 }
 
 // Delete 删除隧道
@@ -36,11 +36,18 @@ func (r *TunnelRepository) Delete(id uint) error {
 // FindByID 根据 ID 查询隧道（包含关联节点）
 func (r *TunnelRepository) FindByID(id uint) (*model.GostTunnel, error) {
 	var tunnel model.GostTunnel
-	err := r.DB.Preload("EntryNode").Preload("ExitNode").First(&tunnel, id).Error
+	err := r.DB.Preload("EntryNode").Preload("ExitNode").Preload("EntryRule").Preload("ExitRule").First(&tunnel, id).Error
 	if err != nil {
 		return nil, err
 	}
 	return &tunnel, nil
+}
+
+// FindByEntranceID looks up the tunnel reserving either role of an entrance.
+func (r *TunnelRepository) FindByEntranceID(ruleID uint) (*model.GostTunnel, error) {
+	var tunnel model.GostTunnel
+	err := r.DB.Where("entry_rule_id = ? OR exit_rule_id = ?", ruleID, ruleID).First(&tunnel).Error
+	return &tunnel, err
 }
 
 // List 查询隧道列表
@@ -59,7 +66,7 @@ func (r *TunnelRepository) List(opt *QueryOption) ([]model.GostTunnel, int64, er
 	}
 
 	// 预加载节点和关联规则
-	db = db.Preload("EntryNode").Preload("ExitNode")
+	db = db.Preload("EntryNode").Preload("ExitNode").Preload("EntryRule").Preload("ExitRule")
 
 	// 默认按创建时间倒序
 	if opt == nil || len(opt.Orders) == 0 {
@@ -91,14 +98,14 @@ func (r *TunnelRepository) CountAll() (int64, error) {
 // FindByNodeID 查找节点相关的隧道
 func (r *TunnelRepository) FindByNodeID(nodeID uint) ([]model.GostTunnel, error) {
 	var tunnels []model.GostTunnel
-	err := r.DB.Where("entry_node_id = ? OR exit_node_id = ?", nodeID, nodeID).Find(&tunnels).Error
+	err := r.DB.Where("entry_node_id = ? OR exit_node_id = ?", nodeID, nodeID).Preload("ExitRule").Find(&tunnels).Error
 	return tunnels, err
 }
 
-// StopByNodeID 停止与该节点相关的所有隧道
+// StopByNodeID clears legacy status; endpoint tunnels keep their applied config while control is offline.
 func (r *TunnelRepository) StopByNodeID(nodeID uint) error {
 	return r.DB.Model(&model.GostTunnel{}).
-		Where("(entry_node_id = ? OR exit_node_id = ?) AND status = ?", nodeID, nodeID, model.TunnelStatusRunning).
+		Where("(entry_node_id = ? OR exit_node_id = ?) AND status = ? AND entry_rule_id IS NULL", nodeID, nodeID, model.TunnelStatusRunning).
 		Update("status", model.TunnelStatusStopped).Error
 }
 

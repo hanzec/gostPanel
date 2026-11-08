@@ -38,10 +38,7 @@ type ObserverCounters struct {
 	Connections int64 `gorm:"not null;default:0"`
 }
 
-// GostRule 转发规则模型
-// 入口选择：NodeID 或 TunnelID 二选一
-// - 端口转发 (forward)：选择 NodeID，直接在该节点上创建转发服务
-// - 隧道转发 (tunnel)：选择 TunnelID，在隧道的入口节点上创建转发服务，使用隧道的 Chain
+// GostRule 是可以独立运行或由隧道选用的节点入口。旧的隧道规则仍使用 TunnelID。
 type GostRule struct {
 	ID         uint         `gorm:"primaryKey" json:"id"`
 	NodeID     *uint        `gorm:"index" json:"node_id"`                         // 入口节点 ID（端口转发时使用）
@@ -52,11 +49,12 @@ type GostRule struct {
 	ListenIP   string       `gorm:"size:45;not null;default:''" json:"listen_ip"` // 监听 IP，空字符串表示所有接口
 	ListenPort int          `gorm:"not null" json:"listen_port"`                  // 监听端口
 
-	Targets   []string   `gorm:"type:json;serializer:json" json:"targets"` // 多目标列表 (host:port)
-	Strategy  string     `gorm:"size:20;default:round" json:"strategy"`    // 负载均衡策略 (round, random, fifo)
-	EnableTLS bool       `gorm:"default:false" json:"enable_tls"`          // 是否启用 TLS
-	Status    RuleStatus `gorm:"size:20;default:stopped" json:"status"`    // 状态
-	ServiceID string     `gorm:"size:100" json:"service_id"`               // Gost 服务 ID
+	Targets         []string   `gorm:"type:json;serializer:json" json:"targets"` // 多目标列表 (host:port)
+	UseClashRuleset bool       `gorm:"not null;default:false" json:"use_clash_ruleset"`
+	Strategy        string     `gorm:"size:20;default:round" json:"strategy"` // 负载均衡策略 (round, random, fifo)
+	EnableTLS       bool       `gorm:"default:false" json:"enable_tls"`       // 是否启用 TLS
+	Status          RuleStatus `gorm:"size:20;default:stopped" json:"status"` // 状态
+	ServiceID       string     `gorm:"size:100" json:"service_id"`            // Gost 服务 ID
 
 	// 流量监控配置
 	ObserverID string `gorm:"size:100" json:"observer_id"` // 观察器 ID
@@ -77,6 +75,9 @@ type GostRule struct {
 	Node *GostNode `gorm:"foreignKey:NodeID" json:"node,omitempty"`
 	// 关联 - 隧道
 	Tunnel *GostTunnel `gorm:"foreignKey:TunnelID" json:"tunnel,omitempty"`
+	// 隧道选用该入口后，由查询结果填充绑定信息。
+	LinkedTunnelID *uint  `gorm:"-" json:"linked_tunnel_id,omitempty"`
+	TunnelRole     string `gorm:"-" json:"tunnel_role,omitempty"`
 }
 
 // TableName 指定表名

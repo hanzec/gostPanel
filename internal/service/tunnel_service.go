@@ -41,6 +41,12 @@ func NewTunnelService(db *gorm.DB) *TunnelService {
 
 // Create 创建隧道
 func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent string) (*model.GostTunnel, error) {
+	if req.EntryRuleID != 0 || req.ExitRuleID != 0 {
+		if req.EntryNodeID != 0 || req.ExitNodeID != 0 || req.Protocol != "" || req.RelayPort != 0 {
+			return nil, errors.ErrTunnelEndpointsRequired
+		}
+		return s.createEndpointTunnel(req, username, ip, userAgent)
+	}
 	// 检查入口和出口是否相同
 	if req.EntryNodeID == req.ExitNodeID {
 		return nil, errors.ErrTunnelNodeSame
@@ -107,11 +113,25 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 	if tunnel.Status == model.TunnelStatusRunning {
 		return nil, errors.ErrTunnelRunning
 	}
+	if tunnel.EntryRuleID != nil || req.EntryRuleID != 0 || req.ExitRuleID != 0 {
+		if tunnel.EntryRuleID == nil || req.Protocol != "" || req.RelayPort != 0 {
+			return nil, errors.ErrTunnelEndpointsRequired
+		}
+		if tunnel.Status == model.TunnelStatusError {
+			if err := s.stopEndpointTunnel(tunnel); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
+			return nil, err
+		}
+	} else {
+		tunnel.Protocol = req.Protocol
+		tunnel.RelayPort = req.RelayPort
+	}
 
 	// 更新隧道（不能修改入口/出口节点）
 	tunnel.Name = req.Name
-	tunnel.Protocol = req.Protocol
-	tunnel.RelayPort = req.RelayPort
 	tunnel.Remark = req.Remark
 
 	if err = s.tunnelRepo.Update(tunnel); err != nil {
@@ -151,8 +171,11 @@ func (s *TunnelService) Delete(id uint, username, ip, userAgent string) error {
 	}
 
 	// 如果隧道正在运行，先停止
-	if tunnel.Status == model.TunnelStatusRunning {
+	if tunnel.Status == model.TunnelStatusRunning || (tunnel.EntryRuleID != nil && tunnel.Status == model.TunnelStatusError) {
 		if err = s.Stop(id, username, ip, userAgent); err != nil {
+			if tunnel.EntryRuleID != nil {
+				return err
+			}
 			logger.Warnf("停止隧道失败: %v", err)
 		}
 	}
@@ -226,6 +249,13 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	if tunnel.Status == model.TunnelStatusRunning {
 		return nil
 	}
+	if tunnel.EntryRuleID != nil {
+		if err := s.startEndpointTunnel(tunnel); err != nil {
+			return err
+		}
+		s.recordTunnelAction(tunnel, model.ActionStart, "启动", username, ip, userAgent)
+		return nil
+	}
 
 	// 获取入口和出口节点
 	entryNode, err := s.nodeRepo.FindByID(tunnel.EntryNodeID)
@@ -296,26 +326,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	chainName := tunnelChainName(tunnel.ID)
 	relayAddr := net.JoinHostPort(strings.Trim(exitHost, "[]"), strconv.Itoa(tunnel.RelayPort))
 
-	chain := &gost.ChainConfig{
-		Name: chainName,
-		Hops: []*gost.HopConfig{
-			{
-				Name: "hop-0",
-				Nodes: []*gost.NodeConfig{
-					{
-						Name: "exit-relay",
-						Addr: relayAddr,
-						Connector: &gost.ConnectorConfig{
-							Type: "relay", // 与出口节点的 relay handler 匹配
-						},
-						Dialer: &gost.DialerConfig{
-							Type: tunnel.Protocol, // 使用隧道配置的协议
-						},
-					},
-				},
-			},
-		},
-	}
+	chain := newTunnelChain(chainName, relayAddr, tunnel.Protocol, nil)
 
 	if err = entryClient.CreateChain(chain); err != nil {
 		// 回滚：删除出口节点的 Relay 服务
@@ -349,12 +360,30 @@ func tunnelChainName(id uint) string {
 	return fmt.Sprintf("tunnel-%d-chain", id)
 }
 
+func newTunnelChain(name, address, protocol string, auth *gost.AuthConfig) *gost.ChainConfig {
+	return &gost.ChainConfig{Name: name, Hops: []*gost.HopConfig{{Name: "hop-0", Nodes: []*gost.NodeConfig{{
+		Name: "exit-relay", Addr: address,
+		Connector: &gost.ConnectorConfig{Type: "relay", Auth: auth},
+		Dialer:    &gost.DialerConfig{Type: protocol},
+	}}}}}
+}
+
 // Stop 停止隧道
 // 删除入口节点的 Chain 和出口节点的 Relay 服务
 func (s *TunnelService) Stop(id uint, username, ip, userAgent string) error {
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		return err
+	}
+	if tunnel.EntryRuleID != nil {
+		if tunnel.Status == model.TunnelStatusStopped {
+			return nil
+		}
+		if err := s.stopEndpointTunnel(tunnel); err != nil {
+			return err
+		}
+		s.recordTunnelAction(tunnel, model.ActionStop, "停止", username, ip, userAgent)
+		return nil
 	}
 
 	// 未运行则跳过
@@ -371,6 +400,9 @@ func (s *TunnelService) Stop(id uint, username, ip, userAgent string) error {
 		entryClient := utils.GetGostClient(entryNode)
 		if err = entryClient.DeleteChain(tunnel.ChainID); err != nil {
 			logger.Warnf("删除隧道 Chain 失败: %v", err)
+		}
+		if err = entryClient.DeleteChain(clashTunnelChainName(id)); err != nil {
+			logger.Warnf("删除隧道 Clash 分流链失败: %v", err)
 		}
 		_ = entryClient.SaveConfig()
 	}

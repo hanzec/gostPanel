@@ -107,7 +107,7 @@ describe('console routing and Authentik gate', () => {
 
   it('loads every navigation route and redirects unknown URLs to the overview', async () => {
     for (const [path, title] of [
-      ['/nodes', '节点管理'], ['/rules', '规则管理'], ['/tunnels', '隧道管理'],
+      ['/nodes', '节点管理'], ['/rules', '入口管理'], ['/tunnels', '隧道管理'],
       ['/logs', '操作日志'], ['/system', '系统设置']
     ]) {
       await router.push(path)
