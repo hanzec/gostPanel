@@ -132,6 +132,8 @@ Compose 按真实客户端 IP 分别限制注册和建连请求。`RegisterNode`
 
 Traefik 为直连客户端生成 `X-Real-IP`。如果前面还有反向代理，须让前置代理用实际客户端 IP 覆盖 `X-Real-IP`，并仅将该代理加入 Traefik 入口的 `forwardedHeaders.trustedIPs`，保持 `forwardedHeaders.insecure` 关闭。二进制直连部署需在自己的入口配置注册和建连限速。面板在验证 `Connect` 节点凭据时最多等待 3 秒，认证通过后的双向流不受该超时限制。[Traefik 限速配置](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
 
+已认证的流按节点分别限制两类上报。流量上报平均每秒 100 次、突发 500 次，IP 更新平均每秒 1 次、突发 5 次。节点重连时沿用原配额，超限的上报返回 `ResourceExhausted`。命令和回包不计入上报配额。面板和节点均限制单条 gRPC 消息为 5 MiB，包含流帧的封装开销。
+
 在 Traefik 的静态配置中，将 HTTPS 入口的请求读取和响应写入超时设为 `0s`。读取超时默认是 60 秒，双向流的请求体会持续打开。[Traefik 入口超时配置](https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#configuration-options)
 
 ```yaml

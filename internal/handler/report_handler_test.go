@@ -185,7 +185,7 @@ func trafficEvent(id uint, input, output, connections uint64) *observer.Event {
 	}
 }
 
-func startTestReportServer(t *testing.T, db *gorm.DB) nodegrpc.V1Client {
+func startTestReportServer(t *testing.T, db *gorm.DB, options ...grpc.ServerOption) nodegrpc.V1Client {
 	t.Helper()
 	fixture := httptest.NewTLSServer(nil)
 	fixture.Close()
@@ -195,7 +195,7 @@ func startTestReportServer(t *testing.T, db *gorm.DB) nodegrpc.V1Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(fixture.TLS)))
+	server := grpc.NewServer(append(options, grpc.Creds(credentials.NewTLS(fixture.TLS)))...)
 	nodegrpc.RegisterV1Server(server, NewReportHandler(db, false))
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
