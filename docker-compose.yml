@@ -1,7 +1,7 @@
 services:
   yagp:
     build: .
-    image: ${YAGP_IMAGE:-yagp:local}
+    image: ghcr.io/hanzec/yagp:latest
     container_name: yagp
     networks:
       - proxy

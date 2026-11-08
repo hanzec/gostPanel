@@ -18,7 +18,7 @@ npm --prefix web run build
 go test ./...
 ```
 
-使用 `make build` 构建完整面板，或用 `docker compose up -d --build` 从源码启动容器。
+使用 `make build` 构建完整面板，或用 `docker compose up -d --build --pull never` 从源码启动容器。
 
 ## 实现原则
 
