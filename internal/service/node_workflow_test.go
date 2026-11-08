@@ -20,7 +20,7 @@ func TestNodeEnrollmentAndDeletion(t *testing.T) {
 	db := newServiceTestDB(t)
 	s := NewNodeService(db)
 	limit, reset := int64(12345), "daily"
-	request := &dto.CreateNodeReq{Name: "edge", Port: 39000, Remark: "registered in test", TrafficLimitBytes: &limit, TrafficResetPeriod: &reset}
+	request := &dto.CreateNodeReq{Name: "edge", Remark: "registered in test", TrafficLimitBytes: &limit, TrafficResetPeriod: &reset}
 	node, err := s.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
 	if node.Status != model.NodeStatusOffline || node.TrafficLimitBytes != limit || node.TrafficResetPeriod != reset || node.TrafficQuotaState != model.TrafficQuotaPending {
@@ -28,7 +28,7 @@ func TestNodeEnrollmentAndDeletion(t *testing.T) {
 	}
 	_, err = s.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrNodeNameExists)
-	other, err := s.Create(&dto.CreateNodeReq{Name: "other", Port: 39000}, testAdmin, testIP, testAgent)
+	other, err := s.Create(&dto.CreateNodeReq{Name: "other"}, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
 	_, err = s.Update(other.ID, &dto.UpdateNodeReq{Name: node.Name}, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrNodeNameExists)
@@ -42,13 +42,13 @@ func TestNodeEnrollmentAndDeletion(t *testing.T) {
 	if !strings.HasPrefix(token.Token, fmt.Sprintf("%d.", node.ID)) || time.Until(token.ExpiresAt) < 14*time.Minute {
 		t.Fatalf("issued token ID or expiration was invalid: %v", token.ExpiresAt)
 	}
-	registered, err := s.Register(ctx, node.ID, token.Token, "test-certificate", "", "2001:db8::8")
+	registered, err := s.Register(ctx, node.ID, token.Token, "", "2001:db8::8")
 	requireServiceError(t, err, nil)
-	if registered.ID != node.ID || registered.Port != node.Port || registered.Address != "2001:db8::8" ||
-		registered.Username != fmt.Sprintf("node-%d", node.ID) || registered.Password == "" || registered.TLSCertificatePEM != "test-certificate" {
+	if registered.ID != node.ID || registered.Address != "2001:db8::8" ||
+		registered.Username != fmt.Sprintf("node-%d", node.ID) || registered.Password == "" {
 		t.Fatal("registration returned unexpected identity, certificate or address")
 	}
-	_, err = s.Register(ctx, node.ID, token.Token, "other-certificate", "192.0.2.99", "")
+	_, err = s.Register(ctx, node.ID, token.Token, "192.0.2.99", "")
 	requireServiceError(t, err, gorm.ErrRecordNotFound)
 	requireServiceError(t, s.UpdateIPs(ctx, registered, "192.0.2.8", ""), nil)
 	results, count, err := s.List(&dto.NodeListReq{Status: "offline", Keyword: "192.0.2.8"})

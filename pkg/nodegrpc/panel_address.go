@@ -37,6 +37,10 @@ func (a PanelAddress) NewClientConn(options ...grpc.DialOption) (*grpc.ClientCon
 			func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoke grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 				return invoke(ctx, PanelProxyPath+"/"+path.Base(method), req, reply, cc, opts...)
 			},
+		), grpc.WithChainStreamInterceptor(
+			func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, stream grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+				return stream(ctx, desc, cc, PanelProxyPath+"/"+path.Base(method), opts...)
+			},
 		))
 	}
 	return grpc.NewClient(a.target, options...)

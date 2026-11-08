@@ -13,9 +13,6 @@ import (
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -26,11 +23,10 @@ type Client struct {
 
 // Config 客户端配置
 type Config struct {
-	Address        string
-	CertificatePEM string
-	Username       string
-	Password       string
-	Timeout        time.Duration
+	NodeID   uint
+	Username string
+	Password string
+	Timeout  time.Duration
 }
 
 // NewClient 创建 Gost 客户端
@@ -370,14 +366,13 @@ func (c *Client) DeleteChain(name string) error {
 
 // ObserverAddress 获取节点本机供 Gost 使用的 Observer 地址。
 func (c *Client) ObserverAddress() (string, error) {
-	conn, err := c.connect()
+	client, err := c.connect()
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
 	defer cancel()
-	reply, err := nodegrpc.NewV1Client(conn).GetObserverEndpoint(ctx, &emptypb.Empty{})
+	reply, err := client.GetObserverEndpoint(ctx, &emptypb.Empty{})
 	if err != nil {
 		return "", err
 	}
@@ -386,19 +381,6 @@ func (c *Client) ObserverAddress() (string, error) {
 
 func (c *Client) ObserverToken() string {
 	return nodegrpc.ObserverToken(c.config.Username, c.config.Password)
-}
-
-func (c *Client) connect() (*grpc.ClientConn, error) {
-	if c.config.CertificatePEM == "" || c.config.Username == "" || c.config.Password == "" {
-		return nil, status.Error(codes.FailedPrecondition, "节点尚未通过令牌注册")
-	}
-	transport, err := nodegrpc.NodeClientTLS(c.config.CertificatePEM)
-	if err != nil {
-		return nil, err
-	}
-	return grpc.NewClient(c.config.Address, grpc.WithTransportCredentials(transport),
-		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(c.config.Username, c.config.Password)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(5<<20)))
 }
 
 // doRequest 将 Gost 管理命令交给节点的 gRPC 桥接进程。
@@ -412,14 +394,13 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 		request.Body = data
 	}
 
-	conn, err := c.connect()
+	client, err := c.connect()
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
 	defer cancel()
-	reply, err := nodegrpc.NewV1Client(conn).Execute(ctx, request)
+	reply, err := client.Execute(ctx, request)
 	if err != nil {
 		return nil, err
 	}

@@ -169,10 +169,7 @@ func (n *upgradeWorkflowNode) setStatus(state *nodegrpc.NodeUpgradeStatus, err e
 	n.state, n.statusErr = state, err
 }
 
-func (n *upgradeWorkflowNode) GetUpgradeStatus(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (n *upgradeWorkflowNode) GetUpgradeStatus(context.Context, *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.state, n.statusErr

@@ -147,7 +147,7 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	}
 	defer server.Stop()
 	info, ok := server.GetServiceInfo()["yagp.v1"]
-	if !ok || len(info.Methods) != 14 {
+	if !ok || len(info.Methods) != 15 {
 		t.Fatalf("registered report API = %+v", info)
 	}
 	trust, err := nodegrpc.ClientTLS(cfg.CertFile)
@@ -219,9 +219,17 @@ func TestStartReportsAllowsOnlyTheConfiguredProxy(t *testing.T) {
 			defer conn.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
-			_, err = nodegrpc.NewV1Client(conn).RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{})
+			client := nodegrpc.NewV1Client(conn)
+			_, err = client.RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{})
 			if status.Code(err) != tt.want {
 				t.Fatalf("registration from 127.0.0.1 = %v, want %v", err, tt.want)
+			}
+			stream, err := client.Connect(ctx)
+			if err == nil {
+				_, err = stream.Recv()
+			}
+			if status.Code(err) != tt.want {
+				t.Fatalf("stream from 127.0.0.1 = %v, want %v", err, tt.want)
 			}
 		})
 	}

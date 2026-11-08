@@ -28,7 +28,7 @@ func (r *NodeRepository) Create(node *model.GostNode) error {
 
 // Update 更新节点元数据，不覆盖并发完成的注册或健康检查。
 func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string) error {
-	fields := []string{"Name", "Port", "Remark"}
+	fields := []string{"Name", "Remark"}
 	limitChanged := trafficLimitBytes != nil && node.TrafficLimitBytes != *trafficLimitBytes
 	periodChanged := trafficResetPeriod != nil && node.TrafficResetPeriod != *trafficResetPeriod
 	if limitChanged {
@@ -72,29 +72,22 @@ func (r *NodeRepository) SetRegistrationToken(ctx context.Context, id uint, hash
 }
 
 func (r *NodeRepository) ConsumeRegistrationToken(ctx context.Context, node *model.GostNode, hash string) error {
-	// The first statement inside the transaction writes, avoiding a read-to-write lock upgrade on SQLite.
-	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Do not interpolate the newly issued password into GORM's SQL trace.
-		result := tx.Session(&gorm.Session{Logger: logger.Discard}).Model(&model.GostNode{}).
-			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
-			Updates(map[string]any{
-				"registration_token_hash": "",
-				"registration_expires_at": nil,
-				"username":                node.Username,
-				"password":                node.Password,
-				"tls_certificate_pem":     node.TLSCertificatePEM,
-				"address":                 node.Address,
-				"ipv4":                    node.IPv4,
-				"ipv6":                    node.IPv6,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return gorm.ErrRecordNotFound
-		}
-		return tx.Select("port").First(node).Error
-	})
+	// Do not interpolate the newly issued password into GORM's SQL trace.
+	result := r.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Model(&model.GostNode{}).
+		Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
+		Updates(map[string]any{
+			"registration_token_hash": "",
+			"registration_expires_at": nil,
+			"username":                node.Username,
+			"password":                node.Password,
+			"address":                 node.Address,
+			"ipv4":                    node.IPv4,
+			"ipv6":                    node.IPv6,
+		})
+	if result.Error == nil && result.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
 }
 
 func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string) error {

@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -17,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"yagp/pkg/gost"
+	"yagp/internal/buildinfo"
 	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
@@ -25,6 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -46,7 +46,6 @@ func TestTunnelChainUpdatesAllowed(t *testing.T) {
 
 func TestNodeBridgeControlAndReport(t *testing.T) {
 	const username, password = "node", "test-password"
-	var current *gost.ObserverConfig
 	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != username || pass != password {
@@ -54,51 +53,39 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		switch r.Method + " " + r.URL.Path {
-		case "GET /api/config":
-			_, _ = w.Write([]byte(`{"services":[]}`))
-		case "GET /api/config/observers/observer-global":
-			_ = json.NewEncoder(w).Encode(map[string]any{"data": current})
-		case "POST /api/config/observers":
-			if current != nil {
-				t.Error("existing observer was recreated")
-			}
-			current = &gost.ObserverConfig{}
-			if err := json.NewDecoder(r.Body).Decode(current); err != nil {
-				t.Error(err)
-			}
-		default:
+		if r.Method != "GET" || r.URL.Path != "/api/config" {
 			t.Errorf("unexpected local request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
+		_, _ = w.Write([]byte(`{"services":[]}`))
 	}))
 	t.Cleanup(admin.Close)
 	panelCertFile, panelKeyFile, _ := testTLSFiles(t, x509.Certificate{IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)}})
-	nodeCertFile, nodeKeyFile, nodeCert := testTLSFiles(t, x509.Certificate{DNSNames: []string{nodegrpc.NodeCertificateName}})
-	_, _, differentNodeCert := testTLSFiles(t, x509.Certificate{DNSNames: []string{nodegrpc.NodeCertificateName}})
 	serverTLS, err := credentials.NewServerTLSFromFile(panelCertFile, panelKeyFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorder := &reportRecorder{username: username, password: password, reports: make(chan *nodegrpc.ReportRequest, 1)}
+	recorder := &reportRecorder{
+		username: username, password: password, reports: make(chan *nodegrpc.ReportRequest, 2),
+		sessions: make(chan *nodegrpc.Session, 2),
+	}
 	panel := grpc.NewServer(grpc.Creds(serverTLS))
 	nodegrpc.RegisterV1Server(panel, recorder)
 	panelListener := listenLocal(t)
 	go func() { _ = panel.Serve(panelListener) }()
 	t.Cleanup(panel.Stop)
 
-	controlListener, observerListener := listenLocal(t), listenLocal(t)
-	controlAddress, observerAddress := controlListener.Addr().String(), observerListener.Addr().String()
-	_ = controlListener.Close()
+	observerListener := listenLocal(t)
+	observerAddress := observerListener.Addr().String()
 	_ = observerListener.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, Config{
-			NodeID: 42, Username: username, Password: password,
-			ControlListen: controlAddress, ObserverListen: observerAddress,
+			NodeID: 42, Username: username, Password: password, ObserverListen: observerAddress,
 			AdminAddress: strings.TrimPrefix(admin.URL, "http://"), ReportAddress: panelListener.Addr().String(),
-			ReportCAFile: panelCertFile, TLSCertFile: nodeCertFile, TLSKeyFile: nodeKeyFile,
+			ReportCAFile: panelCertFile,
 		})
 	}()
 	t.Cleanup(func() {
@@ -107,94 +94,63 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	clientTLS, err := nodegrpc.NodeClientTLS(nodeCert)
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlConn, err := grpc.NewClient(controlAddress, grpc.WithTransportCredentials(clientTLS))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = controlConn.Close() })
-	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
-	defer stop()
-	command := &nodegrpc.CommandRequest{Method: "GET", Path: "/config"}
-	controlClient := nodegrpc.NewV1Client(controlConn)
-	if _, err = controlClient.Execute(timeout, command, grpc.WaitForReady(true)); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated control request: %v", err)
-	}
-	if _, err = controlClient.RegisterNode(timeout, &nodegrpc.RegisterNodeRequest{}); status.Code(err) != codes.Unimplemented {
-		t.Fatalf("panel registration RPC on node control listener: %v", err)
-	}
-	if _, err = controlClient.RestartGostService(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated restart request: %v", err)
-	}
-	if _, err = controlClient.GetObserverEndpoint(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated observer endpoint request: %v", err)
-	}
-	if _, err = controlClient.StartUpgrade(timeout, &nodegrpc.NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated upgrade request: %v", err)
-	}
-	if _, err = controlClient.ApplyNftConfig(timeout, &nodegrpc.NftConfig{Config: `{"nftables":[]}`}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated nftables request: %v", err)
-	}
-	if _, err = controlClient.SyncTrafficQuota(timeout, &nodegrpc.TrafficQuotaRequest{WindowStart: -1}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated quota removal request: %v", err)
-	}
-	configWithoutCertificate := &gost.Config{Address: controlAddress, Username: username, Password: password}
-	if err = gost.NewClient(configWithoutCertificate).HealthCheck(); status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("node without a registration certificate: %v", err)
-	}
-	wrongCertificate := *configWithoutCertificate
-	wrongCertificate.CertificatePEM = differentNodeCert
-	if err = gost.NewClient(&wrongCertificate).HealthCheck(); status.Code(err) != codes.Unavailable {
-		t.Fatalf("node with a different certificate: %v", err)
-	}
-	client := gost.NewClient(&gost.Config{Address: controlAddress, CertificatePEM: nodeCert, Username: username, Password: password})
-	if err = client.HealthCheck(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = client.SyncTrafficQuota(timeout, 0, 0, -1, nil, nil); status.Code(err) != codes.Unimplemented {
-		t.Fatalf("quota request without a node config file: %v", err)
-	}
-	address, err := client.ObserverAddress()
-	if err != nil || address != observerAddress {
-		t.Fatalf("observer address: %q, %v", address, err)
-	}
-	config := &gost.ObserverConfig{
-		Name: "observer-global", Plugin: &gost.PluginConfig{Type: "grpc", Addr: address, Token: client.ObserverToken()},
-	}
-	if err = client.SetObserver(config); err != nil {
-		t.Fatal(err)
-	}
-	if err = client.SetObserver(config); err != nil {
-		t.Fatal(err)
-	}
-
 	observerConn, err := grpc.NewClient(observerAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = observerConn.Close() })
+	timeout, stop := context.WithTimeout(t.Context(), 8*time.Second)
+	defer stop()
+	if ready, err := healthpb.NewHealthClient(observerConn).Check(timeout,
+		&healthpb.HealthCheckRequest{Service: daemonHealthService + buildinfo.Version}, grpc.WaitForReady(true)); err != nil ||
+		ready.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("observer readiness = %v, %v", ready, err)
+	}
+
+	command := &nodegrpc.CommandRequest{Method: "GET", Path: "/config"}
+	if _, err = nodegrpc.NewV1Client(observerConn).Execute(timeout, command); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("local observer exposed management RPC: %v", err)
+	}
 	observation := &observer.ObserveRequest{Events: []*observer.Event{{
 		Kind: "service", Service: "rule-5", Type: "stats", Stats: &observer.Stats{InputBytes: 800, OutputBytes: 300},
 	}}}
-	clientObserve := observer.NewObserverClient(observerConn)
-	if _, err = clientObserve.Observe(timeout, observation); status.Code(err) != codes.Unauthenticated {
+	localObserver := observer.NewObserverClient(observerConn)
+	if _, err = localObserver.Observe(timeout, observation); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated local observation: %v", err)
 	}
-	withToken := metadata.AppendToOutgoingContext(timeout, "token", client.ObserverToken())
-	reply, err := clientObserve.Observe(withToken, observation)
-	if err != nil || !reply.GetOk() {
-		t.Fatalf("observe: %v, %v", reply, err)
-	}
-	select {
-	case report := <-recorder.reports:
-		if report.GetNodeId() != 42 || report.GetObservation().GetEvents()[0].GetStats().GetInputBytes() != 800 {
-			t.Fatalf("unexpected report: %v", report)
+	withToken := metadata.AppendToOutgoingContext(timeout, "token", nodegrpc.ObserverToken(username, password))
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		var session *nodegrpc.Session
+		select {
+		case session = <-recorder.sessions:
+		case <-timeout.Done():
+			t.Fatalf("connection %d did not reach panel: %v", attempt, timeout.Err())
 		}
-	default:
-		t.Fatal("no report reached the panel")
+		panelClient := nodegrpc.NewV1Client(session)
+		reply, err := panelClient.Execute(timeout, command)
+		if err != nil || reply.GetStatusCode() != http.StatusOK || string(reply.GetBody()) != `{"services":[]}` {
+			t.Fatalf("command on connection %d: %v, %v", attempt, reply, err)
+		}
+		if endpoint, err := panelClient.GetObserverEndpoint(timeout, &emptypb.Empty{}); err != nil || endpoint.GetAddress() != observerAddress {
+			t.Fatalf("observer address: %v, %v", endpoint, err)
+		}
+		if _, err := panelClient.RegisterNode(timeout, &nodegrpc.RegisterNodeRequest{}); status.Code(err) != codes.Unimplemented {
+			t.Fatalf("panel registration RPC in reverse direction: %v", err)
+		}
+		result, err := localObserver.Observe(withToken, observation)
+		if err != nil || !result.GetOk() {
+			t.Fatalf("observe on connection %d: %v, %v", attempt, result, err)
+		}
+		select {
+		case report := <-recorder.reports:
+			if report.GetNodeId() != 42 || report.GetObservation().GetEvents()[0].GetStats().GetInputBytes() != 800 {
+				t.Fatalf("unexpected report: %v", report)
+			}
+		default:
+			t.Fatal("no report reached the panel")
+		}
+		session.Close()
 	}
 }
 
@@ -202,14 +158,33 @@ type reportRecorder struct {
 	nodegrpc.UnimplementedV1Server
 	username, password string
 	reports            chan *nodegrpc.ReportRequest
+	sessions           chan *nodegrpc.Session
 }
 
-func (s *reportRecorder) Report(ctx context.Context, report *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {
-	if !nodegrpc.MatchCredentials(ctx, s.username, s.password) {
-		return nil, status.Error(codes.Unauthenticated, "invalid report credentials")
+func (s *reportRecorder) Connect(stream nodegrpc.V1_ConnectServer) error {
+	if !nodegrpc.MatchCredentials(stream.Context(), s.username, s.password) {
+		return status.Error(codes.Unauthenticated, "invalid node credentials")
 	}
+	ids := metadata.ValueFromIncomingContext(stream.Context(), nodegrpc.NodeIDMetadata)
+	if len(ids) != 1 || ids[0] != "42" {
+		return status.Error(codes.Unauthenticated, "invalid node ID")
+	}
+	if err := stream.SendHeader(metadata.Pairs(nodegrpc.ReadyMetadata, "1")); err != nil {
+		return err
+	}
+	session := nodegrpc.NewSession(stream, nodegrpc.NewDispatcher(s,
+		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName))
+	s.sessions <- session
+	return session.Run()
+}
+
+func (s *reportRecorder) Report(_ context.Context, report *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {
 	s.reports <- report
 	return &observer.ObserveReply{Ok: true}, nil
+}
+
+func (*reportRecorder) UpdateNodeIPs(context.Context, *nodegrpc.NodeIPsRequest) (*emptypb.Empty, error) {
+	return &emptypb.Empty{}, nil
 }
 
 func listenLocal(t *testing.T) net.Listener {

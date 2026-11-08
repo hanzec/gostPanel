@@ -31,9 +31,6 @@ type trafficQuotaState struct {
 }
 
 func (s *controlServer) SyncTrafficQuota(ctx context.Context, request *nodegrpc.TrafficQuotaRequest) (*nodegrpc.TrafficQuotaReply, error) {
-	if err := s.authenticate(ctx); err != nil {
-		return nil, err
-	}
 	used, err := syncTrafficQuota(ctx, s.config, trafficQuotaState{
 		LimitBytes: request.GetLimitBytes(), UsedBytes: request.GetUsedBytes(), WindowStart: request.GetWindowStart(),
 		TCPPorts: request.GetTcpPorts(), UDPPorts: request.GetUdpPorts(),

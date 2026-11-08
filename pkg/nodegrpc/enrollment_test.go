@@ -2,21 +2,12 @@ package nodegrpc
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
-	"fmt"
-	"math/big"
-	"net"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc/metadata"
 )
@@ -43,50 +34,6 @@ func TestParseRegistrationTokenID(t *testing.T) {
 				t.Fatalf("parsed ID = %d, %v, want %d", id, err, test.id)
 			}
 		})
-	}
-}
-
-func TestNodeCertificateEnrollmentValidation(t *testing.T) {
-	now := time.Now()
-	for _, test := range []struct {
-		name   string
-		change func(*x509.Certificate)
-		forged bool
-	}{
-		{name: "self-signed leaf"},
-		{name: "authority", change: func(cert *x509.Certificate) { cert.IsCA = true }},
-		{name: "missing basic constraints", change: func(cert *x509.Certificate) { cert.BasicConstraintsValid = false }},
-		{name: "wrong DNS name", change: func(cert *x509.Certificate) { cert.DNSNames = []string{"other-node"} }},
-		{name: "expired", change: func(cert *x509.Certificate) {
-			cert.NotBefore, cert.NotAfter = now.Add(-2*time.Hour), now.Add(-time.Hour)
-		}},
-		{name: "client only", change: func(cert *x509.Certificate) {
-			cert.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
-		}},
-		{name: "forged self-signature", forged: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, cert := testNodeCertificate(t, test.change, test.forged)
-			if err := ValidateNodeCertificate("\n" + cert + "\n"); (err != nil) != (test.change != nil || test.forged) {
-				t.Fatalf("certificate validation returned %v", err)
-			}
-		})
-	}
-	_, leaf := testNodeCertificate(t, nil, false)
-	for _, malformed := range []string{
-		"not PEM",
-		leaf + leaf,
-		"preamble " + leaf,
-		leaf + " trailing text",
-		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Headers: map[string]string{"X-Test": "header"}, Bytes: []byte("not DER")})),
-		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("not DER")})),
-	} {
-		if err := ValidateNodeCertificate(malformed); err == nil {
-			t.Fatal("enrollment accepted malformed certificate input")
-		}
-		if _, err := NodeClientTLS(malformed); err == nil {
-			t.Fatal("node client accepted malformed certificate input")
-		}
 	}
 }
 
@@ -130,13 +77,15 @@ func TestCredentialAndObserverAuthentication(t *testing.T) {
 }
 
 func TestClientTLSLoadsExplicitRoots(t *testing.T) {
-	_, cert := testNodeCertificate(t, nil, false)
+	server := httptest.NewTLSServer(nil)
+	cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	server.Close()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "panel-ca.pem")
 	if _, err := ClientTLS(path); err == nil {
 		t.Fatal("missing explicit CA was accepted")
 	}
-	if err := os.WriteFile(path, []byte(cert), 0600); err != nil {
+	if err := os.WriteFile(path, cert, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if creds, err := ClientTLS(path); err != nil || creds.Info().SecurityProtocol != "tls" {
@@ -145,35 +94,4 @@ func TestClientTLSLoadsExplicitRoots(t *testing.T) {
 	if creds, err := ClientTLS(""); err != nil || creds.Info().SecurityProtocol != "tls" {
 		t.Fatalf("client with system roots = %v, %v", creds, err)
 	}
-}
-
-func testNodeCertificate(t *testing.T, change func(*x509.Certificate), forged bool) (tls.Certificate, string) {
-	t.Helper()
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert := x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: NodeCertificateName},
-		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour),
-		DNSNames: []string{NodeCertificateName}, IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
-		BasicConstraintsValid: true, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	if change != nil {
-		change(&cert)
-	}
-	issuer := cert
-	var signer = privateKey
-	if forged {
-		_, signer, err = ed25519.GenerateKey(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	der, err := x509.CreateCertificate(rand.Reader, &cert, &issuer, publicKey, signer)
-	if err != nil {
-		t.Fatal(fmt.Errorf("create fixture certificate: %w", err))
-	}
-	encoded := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: privateKey}, strings.TrimSpace(string(encoded))
 }

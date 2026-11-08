@@ -3,7 +3,6 @@ package nodebridge
 import (
 	"context"
 	"crypto/x509"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -21,17 +20,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const controlTestUser, controlTestPassword = "node", "control-test-password"
-
-func controlTestContext() context.Context {
-	token := base64.StdEncoding.EncodeToString([]byte(controlTestUser + ":" + controlTestPassword))
-	return metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Basic "+token))
-}
 
 func TestControlCommandScope(t *testing.T) {
 	for _, test := range []struct {
@@ -94,7 +87,7 @@ func TestControlExecuteProxy(t *testing.T) {
 	control := controlServer{config: Config{
 		Username: controlTestUser, Password: controlTestPassword, AdminAddress: strings.TrimPrefix(admin.URL, "http://"),
 	}, client: admin.Client()}
-	ctx := controlTestContext()
+	ctx := t.Context()
 	reply, err := control.Execute(ctx, &nodegrpc.CommandRequest{Method: "POST", Path: "/config/services", Body: []byte(payload)})
 	if err != nil || reply.GetStatusCode() != http.StatusCreated || string(reply.GetBody()) != "created" {
 		t.Fatalf("proxy result = %v, %v", reply, err)
@@ -123,13 +116,12 @@ func TestControlExecuteProxy(t *testing.T) {
 }
 
 func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
-	cert, key, _ := testTLSFiles(t, x509.Certificate{DNSNames: []string{nodegrpc.NodeCertificateName}})
+	missingCA := filepath.Join(t.TempDir(), "missing.pem")
 	listener := listenLocal(t)
 	occupied := listener.Addr().String()
 	valid := Config{
 		NodeID: 42, Username: controlTestUser, Password: controlTestPassword,
 		AdminAddress: "127.0.0.1:1", ReportAddress: occupied, ObserverListen: "127.0.0.1:0",
-		ControlListen: "127.0.0.1:0", TLSCertFile: cert, TLSKeyFile: key,
 	}
 	for _, test := range []struct {
 		name, want string
@@ -138,9 +130,7 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 		{"credentials", "node ID and credentials", func(cfg *Config) { cfg.Username = "node:invalid" }},
 		{"admin address", "loopback", func(cfg *Config) { cfg.AdminAddress = "192.0.2.1:80" }},
 		{"report address", "HOST:PORT", func(cfg *Config) { cfg.ReportAddress = ":1" }},
-		{"node certificate", "load node TLS certificate", func(cfg *Config) { cfg.TLSCertFile = key }},
-		{"panel CA", "create panel report client", func(cfg *Config) { cfg.ReportCAFile = key }},
-		{"occupied control", "listen for node control", func(cfg *Config) { cfg.ControlListen = occupied }},
+		{"panel CA", "create panel report client", func(cfg *Config) { cfg.ReportCAFile = missingCA }},
 		{"occupied observer", "listen for local Gost observer", func(cfg *Config) { cfg.ObserverListen = occupied }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -170,14 +160,11 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestNftConfigurationRPC(t *testing.T) {
-	ctx := controlTestContext()
+	ctx := t.Context()
 	dir := t.TempDir()
 	control := controlServer{config: Config{
 		NodeID: 42, Username: controlTestUser, Password: controlTestPassword, NftConfigFile: filepath.Join(dir, "nft.json"),
 	}}
-	if _, err := control.GetNftConfig(context.Background(), &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated config request returned %v", err)
-	}
 	if result, err := control.GetNftConfig(ctx, &emptypb.Empty{}); err != nil || result.GetConfig() != "" {
 		t.Fatalf("missing config = %v, %v", result, err)
 	}

@@ -2,16 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -76,10 +70,6 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 	if err != nil {
 		return 0, fmt.Errorf("load panel CA: %w", err)
 	}
-	cert, key, err := newNodeCertificate()
-	if err != nil {
-		return 0, fmt.Errorf("create node TLS key pair: %w", err)
-	}
 	conn, err := panelAddress.NewClientConn(grpc.WithTransportCredentials(transport))
 	if err != nil {
 		return 0, err
@@ -89,23 +79,21 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 	rpcCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	reply, err := nodegrpc.NewV1Client(conn).RegisterNode(rpcCtx, &nodegrpc.RegisterNodeRequest{
-		Token: token, NodeCertificatePem: string(cert),
-		Ipv4: ipv4, Ipv6: ipv6,
+		Token: token,
+		Ipv4:  ipv4, Ipv6: ipv6,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("register with panel: %w", err)
 	}
 	if reply.GetNodeId() != expectedID || reply.GetUsername() == "" || strings.Contains(reply.GetUsername(), ":") ||
-		reply.GetPassword() == "" || reply.GetControlPort() == 0 || reply.GetControlPort() > 65535 {
+		reply.GetPassword() == "" {
 		return 0, errors.New("panel returned invalid node enrollment data")
 	}
 	config := nodebridge.Config{
 		NodeID: reply.GetNodeId(), Username: reply.GetUsername(), Password: reply.GetPassword(),
-		ControlListen: ":" + strconv.FormatUint(uint64(reply.GetControlPort()), 10),
 		ReportAddress: address, ReportCAFile: caFile,
-		TLSCertFile: filepath.Join(basePath, "node.crt"), TLSKeyFile: filepath.Join(basePath, "node.key"),
 	}
-	if err = writeEnrollment(output, config, cert, key); err != nil {
+	if err = writeEnrollment(output, config); err != nil {
 		return 0, fmt.Errorf("registration succeeded, but local configuration failed: %w", err)
 	}
 	return config.NodeID, nil
@@ -124,42 +112,8 @@ func panelCAFile(stateDir string) (string, error) {
 	return "", nil
 }
 
-func newNodeCertificate() ([]byte, []byte, error) {
-	publicKey, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, nil, err
-	}
-	now := time.Now()
-	certificate := &x509.Certificate{
-		SerialNumber: serial.Add(serial, big.NewInt(1)),
-		Subject:      pkix.Name{CommonName: nodegrpc.NodeCertificateName}, DNSNames: []string{nodegrpc.NodeCertificateName},
-		NotBefore: now.Add(-5 * time.Minute), NotAfter: now.AddDate(10, 0, 0),
-		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	certDER, err := x509.CreateCertificate(rand.Reader, certificate, certificate, publicKey, key)
-	if err != nil {
-		return nil, nil, err
-	}
-	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		return nil, nil, err
-	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}),
-		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), nil
-}
-
-func writeEnrollment(output string, config nodebridge.Config, cert, key []byte) error {
-	// Keep all three ports bound until configuration has been written so their assignments are distinct.
-	control, err := net.Listen("tcp", config.ControlListen)
-	if err != nil {
-		return fmt.Errorf("listen on node control port: %w", err)
-	}
-	defer control.Close()
+func writeEnrollment(output string, config nodebridge.Config) error {
+	// Hold the local listeners until both distinct port assignments have been written.
 	admin, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("select local Gost API port: %w", err)
@@ -182,7 +136,7 @@ func writeEnrollment(output string, config nodebridge.Config, cert, key []byte) 
 	if err != nil {
 		return err
 	}
-	for name, data := range map[string][]byte{"node.yaml": nodeYAML, "gost.yaml": gostYAML, "node.crt": cert, "node.key": key} {
+	for name, data := range map[string][]byte{"node.yaml": nodeYAML, "gost.yaml": gostYAML} {
 		if err = writeNewFile(filepath.Join(output, name), data, 0600); err != nil {
 			return err
 		}

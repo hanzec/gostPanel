@@ -77,6 +77,28 @@ func TestEnrollmentCommandReadsTokenFromStdin(t *testing.T) {
 	}
 }
 
+func TestReadConfigKeepsExistingNodeCredentials(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node.yaml")
+	stored := `node_id: 42
+username: node-42
+password: existing-credential
+control_listen: :39000
+tls_cert_file: /etc/yagp-daemon/42/node.crt
+tls_key_file: /etc/yagp-daemon/42/node.key
+admin_address: 127.0.0.1:12345
+observer_listen: 127.0.0.1:12346
+report_address: panel.example.com:443/api/v1/grpc
+`
+	if err := os.WriteFile(path, []byte(stored), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := readConfig(path)
+	if err != nil || cfg.NodeID != 42 || cfg.Username != "node-42" || cfg.Password != "existing-credential" ||
+		cfg.ObserverListen != "127.0.0.1:12346" || cfg.ReportAddress != "panel.example.com:443/api/v1/grpc" {
+		t.Fatalf("reading existing node configuration failed: %v", err)
+	}
+}
+
 func TestInstallGostBinaryPreservesInstalledVersionOnReadFailure(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "gost")
 	if err := installGostBinary(target, strings.NewReader("working binary")); err != nil {

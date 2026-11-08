@@ -165,16 +165,16 @@ func TestNodeHTTPInventoryLifecycle(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
 	f.registerNodes()
 	f.registerSettings()
-	const create = `{"name":"edge alpha","port":39110,"traffic_limit_bytes":4096,"traffic_reset_period":"daily"}`
+	const create = `{"name":"edge alpha","traffic_limit_bytes":4096,"traffic_reset_period":"daily"}`
 	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", create, 200))
 	path := fmt.Sprintf("/nodes/%d", node.ID)
 	if node.ID == 0 || node.TrafficLimitBytes != 4096 || node.TrafficResetPeriod != "daily" {
 		t.Fatalf("created node: %+v", node)
 	}
 	f.request(t, "POST", "/nodes", create, 400)
-	f.request(t, "POST", "/nodes", `{"name":"invalid quota","port":39112,"traffic_limit_bytes":-1}`, 400)
-	updated := handlerData[model.GostNode](t, f.request(t, "PUT", path, `{"name":"edge beta","port":39111,"remark":"primary"}`, 200))
-	if updated.Name != "edge beta" || updated.Port != 39111 || updated.TrafficLimitBytes != 4096 || updated.TrafficResetPeriod != "daily" {
+	f.request(t, "POST", "/nodes", `{"name":"invalid quota","traffic_limit_bytes":-1}`, 400)
+	updated := handlerData[model.GostNode](t, f.request(t, "PUT", path, `{"name":"edge beta","remark":"primary"}`, 200))
+	if updated.Name != "edge beta" || updated.TrafficLimitBytes != 4096 || updated.TrafficResetPeriod != "daily" {
 		t.Fatalf("updating metadata discarded quota or new settings: %+v", updated)
 	}
 	list := handlerData[handlerPage[model.GostNode]](t, f.request(t, "GET", "/nodes?keyword=beta&pageSize=1&status=offline", "", 200))

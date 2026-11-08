@@ -30,12 +30,11 @@ func (c *Client) GostLogs(ctx context.Context) (*nodegrpc.GostLogsReply, error) 
 }
 
 func callNode[T any](ctx context.Context, c *Client, timeout time.Duration, call func(context.Context, nodegrpc.V1Client) (*T, error)) (*T, error) {
-	conn, err := c.connect()
+	client, err := c.connect()
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return call(ctx, nodegrpc.NewV1Client(conn))
+	return call(ctx, client)
 }

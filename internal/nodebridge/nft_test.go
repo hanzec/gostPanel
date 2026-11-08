@@ -39,7 +39,7 @@ func TestNftConfigApplyAndRestore(t *testing.T) {
 	if runtime.GOOS != "linux" || os.Getenv("YAGP_TEST_NFT") != "1" {
 		t.Skip("set YAGP_TEST_NFT=1 in a disposable Linux network namespace with nft installed")
 	}
-	ctx, cancel := context.WithTimeout(controlTestContext(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	id := uint64(time.Now().UnixNano())
 	table := fmt.Sprintf("yagp_node_%d", id)

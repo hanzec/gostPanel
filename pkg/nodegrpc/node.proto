@@ -83,21 +83,36 @@ message ReportRequest {
 }
 
 message RegisterNodeRequest {
+  reserved 2;
+  reserved "node_certificate_pem";
+
   string token = 1;
-  string node_certificate_pem = 2;
   string ipv4 = 3;
   string ipv6 = 4;
 }
 
 message RegisterNodeReply {
+  reserved 4;
+  reserved "control_port";
+
   uint64 node_id = 1;
   string username = 2;
   string password = 3;
-  uint32 control_port = 4;
 }
 
 message NodeIPsRequest {
   uint64 node_id = 1;
   string ipv4 = 2;
   string ipv6 = 3;
+}
+
+message StreamFrame {
+  // The sender allocates an ID for each call. Its reply repeats that ID.
+  uint64 id = 1;
+  // The full gRPC method name is present only on a call.
+  string method = 2;
+  bytes payload = 3;
+  int32 code = 4;
+  string error = 5;
+  int64 timeout_millis = 6;
 }

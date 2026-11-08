@@ -12,8 +12,6 @@ import (
 	"yagp/pkg/nodegrpc"
 
 	"github.com/glebarez/sqlite"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"gorm.io/gorm"
 )
@@ -67,7 +65,7 @@ func TestAutomaticNodeUpgradeUsesStoredComponentPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !stored.UpgradePolicy.AutoUpgradeGost || stored.UpgradePolicy.AutoUpgradeDaemon ||
-		stored.Password != nodes[0].Password || stored.TLSCertificatePEM != nodes[0].TLSCertificatePEM {
+		stored.Username != nodes[0].Username || stored.Password != nodes[0].Password {
 		t.Fatal("updating one automatic upgrade setting changed the other setting or the node credentials")
 	}
 	service.runAutomatic(ctx)
@@ -91,19 +89,13 @@ type nodeUpgradeFixture struct {
 	started      chan string
 }
 
-func (n *nodeUpgradeFixture) GetUpgradeStatus(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (n *nodeUpgradeFixture) GetUpgradeStatus(context.Context, *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return &nodegrpc.NodeUpgradeStatus{Supported: true, State: "idle", GostVersion: n.gost, DaemonVersion: n.daemon}, nil
 }
 
-func (n *nodeUpgradeFixture) StartUpgrade(ctx context.Context, req *nodegrpc.NodeUpgradeRequest) (*nodegrpc.NodeUpgradeStatus, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (n *nodeUpgradeFixture) StartUpgrade(_ context.Context, req *nodegrpc.NodeUpgradeRequest) (*nodegrpc.NodeUpgradeStatus, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if req.GetComponent() == "gost" {

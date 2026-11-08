@@ -10,6 +10,7 @@ import (
 
 	"yagp/internal/model"
 	"yagp/internal/service"
+	"yagp/pkg/gost"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
@@ -41,9 +42,6 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired registration token")
 	}
-	if err := nodegrpc.ValidateNodeCertificate(request.GetNodeCertificatePem()); err != nil {
-		return nil, status.Error(codes.InvalidArgument, "invalid node certificate")
-	}
 	ipv4, ipv6, err := h.registrationIPs(ctx, request)
 	if err != nil {
 		return nil, err
@@ -51,7 +49,7 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 	if ipv4 == "" && ipv6 == "" {
 		return nil, status.Error(codes.FailedPrecondition, "could not detect a node IP address")
 	}
-	node, err := h.nodes.Register(ctx, uint(id), request.GetToken(), request.GetNodeCertificatePem(), ipv4, ipv6)
+	node, err := h.nodes.Register(ctx, uint(id), request.GetToken(), ipv4, ipv6)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired registration token")
 	}
@@ -59,16 +57,50 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 		logger.Errorf("注册节点 %d 失败: %v", id, err)
 		return nil, status.Error(codes.Internal, "could not register node")
 	}
-	return &nodegrpc.RegisterNodeReply{
-		NodeId:      uint64(node.ID),
-		Username:    node.Username,
-		Password:    node.Password,
-		ControlPort: uint32(node.Port),
-	}, nil
+	gost.DisconnectNode(node.ID)
+	return &nodegrpc.RegisterNodeReply{NodeId: uint64(node.ID), Username: node.Username, Password: node.Password}, nil
 }
 
-func (h *ReportHandler) UpdateNodeIPs(ctx context.Context, request *nodegrpc.NodeIPsRequest) (*emptypb.Empty, error) {
-	node, err := h.authenticateNode(ctx, request.GetNodeId())
+func (h *ReportHandler) Connect(stream nodegrpc.V1_ConnectServer) error {
+	ctx := stream.Context()
+	ids := metadata.ValueFromIncomingContext(ctx, nodegrpc.NodeIDMetadata)
+	if len(ids) != 1 {
+		return status.Error(codes.Unauthenticated, "missing node identity")
+	}
+	id, err := strconv.ParseUint(ids[0], 10, 64)
+	if err != nil || id == 0 {
+		return status.Error(codes.Unauthenticated, "invalid node identity")
+	}
+	node, err := h.authenticateNode(ctx, id)
+	if err != nil {
+		return err
+	}
+	methods := nodegrpc.NewDispatcher(&streamReports{ReportHandler: h, id: id},
+		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName, nodegrpc.V1_GetNftTemplate_FullMethodName)
+	session := nodegrpc.NewSession(stream, methods)
+	defer session.Close()
+	unregister := gost.RegisterNodeStream(node.ID, node.Username, node.Password, session)
+	defer unregister()
+	if err := stream.SendHeader(metadata.Pairs(nodegrpc.ReadyMetadata, "1")); err != nil {
+		return err
+	}
+	return session.Run()
+}
+
+type streamReports struct {
+	*ReportHandler
+	id uint64
+}
+
+func (h *streamReports) nodeForRequest(ctx context.Context, id uint64) (*model.GostNode, error) {
+	if id != h.id {
+		return nil, status.Error(codes.Unauthenticated, "invalid node identity")
+	}
+	return h.authenticateNode(ctx, id)
+}
+
+func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.NodeIPsRequest) (*emptypb.Empty, error) {
+	node, err := h.nodeForRequest(ctx, request.GetNodeId())
 	if err != nil {
 		return nil, err
 	}
@@ -142,8 +174,8 @@ func isNodeIP(ip netip.Addr) bool {
 	return ip.Zone() == "" && (ip.IsGlobalUnicast() || ip.IsLoopback())
 }
 
-func (h *ReportHandler) Report(ctx context.Context, request *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {
-	node, err := h.authenticateNode(ctx, request.GetNodeId())
+func (h *streamReports) Report(ctx context.Context, request *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {
+	node, err := h.nodeForRequest(ctx, request.GetNodeId())
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +198,7 @@ func (h *ReportHandler) authenticateNode(ctx context.Context, id uint64) (*model
 	var node model.GostNode
 	err := h.db.WithContext(ctx).First(&node, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) ||
-		(err == nil && (node.TLSCertificatePEM == "" || !nodegrpc.MatchCredentials(ctx, node.Username, node.Password))) {
+		(err == nil && (node.Username == "" || node.Password == "" || !nodegrpc.MatchCredentials(ctx, node.Username, node.Password))) {
 		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
 	}
 	if err != nil {

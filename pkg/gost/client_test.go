@@ -2,26 +2,17 @@ package gost
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
-	"math/big"
-	"net"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
+	"yagp/internal/streamtest"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -39,57 +30,32 @@ func controlFixture(t *testing.T) (*Client, chan<- controlCall) {
 	if err := logger.Init(&logger.Config{Level: "error"}); err != nil {
 		t.Fatal(err)
 	}
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert := &x509.Certificate{
-		SerialNumber: big.NewInt(1), DNSNames: []string{nodegrpc.NodeCertificateName},
-		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour),
-	}
-	der, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lis, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
 	pending := make(chan controlCall, 10)
-	server := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(&tls.Config{
-			Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: private}},
-		})),
-		grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, _ grpc.UnaryHandler) (any, error) {
-			if !nodegrpc.MatchCredentials(ctx, "gost-test", "fixture-password") {
-				return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-			}
-			select {
-			case call := <-pending:
-				got := req.(proto.Message)
-				if info.FullMethod != call.method || !sameControlRequest(got, call.request) {
-					t.Errorf("request %s %v, want %s %v", info.FullMethod, got, call.method, call.request)
-					return nil, status.Error(codes.InvalidArgument, "unexpected request")
-				}
-				return call.response, call.err
-			default:
-				t.Errorf("unexpected request %s %v", info.FullMethod, req)
+	session := streamtest.Open(t, func(_ context.Context, method string, body []byte) ([]byte, error) {
+		select {
+		case call := <-pending:
+			got := call.request.ProtoReflect().New().Interface()
+			if err := proto.Unmarshal(body, got); err != nil || method != call.method || !sameControlRequest(got, call.request) {
+				t.Errorf("request %s %v, want %s %v", method, got, call.method, call.request)
 				return nil, status.Error(codes.InvalidArgument, "unexpected request")
 			}
-		}),
-	)
-	nodegrpc.RegisterV1Server(server, nodegrpc.UnimplementedV1Server{})
-	go func() { _ = server.Serve(lis) }()
+			if call.err != nil {
+				return nil, call.err
+			}
+			return proto.Marshal(call.response)
+		default:
+			t.Errorf("unexpected request %s", method)
+			return nil, status.Error(codes.InvalidArgument, "unexpected request")
+		}
+	})
+	config := &Config{NodeID: 1, Username: "gost-test", Password: "fixture-password"}
+	t.Cleanup(RegisterNodeStream(config.NodeID, config.Username, config.Password, session))
 	t.Cleanup(func() {
-		server.Stop()
 		if len(pending) != 0 {
 			t.Errorf("%d expected node calls were not made", len(pending))
 		}
 	})
-	return NewClient(&Config{
-		Address: lis.Addr().String(), Username: "gost-test", Password: "fixture-password",
-		CertificatePEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
-	}), pending
+	return NewClient(config), pending
 }
 
 func sameControlRequest(got, want proto.Message) bool {
@@ -209,9 +175,9 @@ func TestGostConfigAndForwardingBuilders(t *testing.T) {
 			t.Fatalf("unregistered node: %v", err)
 		}
 	}
-	invalid := NewClient(&Config{Username: "a", Password: "b", CertificatePEM: "invalid PEM"})
-	if err := invalid.HealthCheck(); err == nil {
-		t.Fatal("invalid pinned certificate accepted")
+	offline := NewClient(&Config{NodeID: 99, Username: "a", Password: "b"})
+	if err := offline.HealthCheck(); status.Code(err) != codes.Unavailable {
+		t.Fatalf("offline node: %v", err)
 	}
 	targets := []string{"127.0.0.1:80", "[::1]:81"}
 	for protocol, build := range map[string]func(string, int, []string, string) *ServiceConfig{
@@ -275,5 +241,33 @@ func TestGostTypedControlCalls(t *testing.T) {
 	}
 	if _, err := unregistered.StartUpgrade(ctx, "gost", "v3.3.3"); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("unregistered upgrade = %v", err)
+	}
+}
+
+func TestNodeStreamReplacementKeepsTheCurrentConnection(t *testing.T) {
+	const id = 42
+	previous := streamtest.Open(t, nil)
+	removePrevious := RegisterNodeStream(id, "node", "previous", previous)
+	defer removePrevious()
+	current := streamtest.Open(t, func(context.Context, string, []byte) ([]byte, error) {
+		return proto.Marshal(&nodegrpc.CommandReply{StatusCode: http.StatusOK})
+	})
+	defer RegisterNodeStream(id, "node", "current", current)()
+	select {
+	case <-previous.Done():
+	default:
+		t.Fatal("replaced stream remained open")
+	}
+	removePrevious()
+	if err := NewClient(&Config{NodeID: id, Username: "node", Password: "previous"}).HealthCheck(); status.Code(err) != codes.Unavailable {
+		t.Fatalf("stale credentials: %v", err)
+	}
+	client := NewClient(&Config{NodeID: id, Username: "node", Password: "current"})
+	if err := client.HealthCheck(); err != nil {
+		t.Fatalf("stale cleanup removed the current connection: %v", err)
+	}
+	DisconnectNode(id)
+	if err := client.HealthCheck(); status.Code(err) != codes.Unavailable {
+		t.Fatalf("disconnected node: %v", err)
 	}
 }

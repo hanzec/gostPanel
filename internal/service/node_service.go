@@ -54,7 +54,6 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 	// 创建节点
 	node := &model.GostNode{
 		Name:               req.Name,
-		Port:               req.Port,
 		Remark:             req.Remark,
 		Status:             model.NodeStatusOffline,
 		TrafficResetPeriod: model.TrafficResetNone,
@@ -110,7 +109,6 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 
 	// 更新节点
 	node.Name = req.Name
-	node.Port = req.Port
 	node.Remark = req.Remark
 
 	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod); err != nil {
@@ -149,7 +147,7 @@ func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, usern
 	return issued, nil
 }
 
-func (s *NodeService) Register(ctx context.Context, id uint, token, certPEM, ipv4, ipv6 string) (*model.GostNode, error) {
+func (s *NodeService) Register(ctx context.Context, id uint, token, ipv4, ipv6 string) (*model.GostNode, error) {
 	password, err := newNodeSecret()
 	if err != nil {
 		return nil, err
@@ -159,13 +157,12 @@ func (s *NodeService) Register(ctx context.Context, id uint, token, certPEM, ipv
 		address = ipv6
 	}
 	node := &model.GostNode{
-		ID:                id,
-		Address:           address,
-		Username:          fmt.Sprintf("node-%d", id),
-		Password:          password,
-		TLSCertificatePEM: certPEM,
-		IPv4:              ipv4,
-		IPv6:              ipv6,
+		ID:       id,
+		Address:  address,
+		Username: fmt.Sprintf("node-%d", id),
+		Password: password,
+		IPv4:     ipv4,
+		IPv6:     ipv6,
 	}
 	if err := s.nodeRepo.ConsumeRegistrationToken(ctx, node, registrationTokenHash(token)); err != nil {
 		return nil, err
@@ -216,6 +213,7 @@ func (s *NodeService) Delete(id uint, username, ip, userAgent string) error {
 	if err = s.nodeRepo.Delete(id); err != nil {
 		return err
 	}
+	gost.DisconnectNode(id)
 
 	// 记录操作日志
 	s.logService.Record(

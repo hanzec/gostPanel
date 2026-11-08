@@ -160,7 +160,7 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 	if cfg.ProxyIP == "" && address.Proxied() {
 		return nil, fmt.Errorf("report.address 使用 %s 时必须配置 report.proxy_ip", nodegrpc.PanelProxyPath)
 	}
-	option, err := reportTransport(cfg)
+	options, err := reportTransport(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	server := grpc.NewServer(option)
+	server := grpc.NewServer(append(options, grpc.MaxRecvMsgSize(5<<20))...)
 	nodegrpc.RegisterV1Server(server, handler.NewReportHandler(db, cfg.ProxyIP != ""))
 	go func() {
 		logger.Infof("gRPC 流量上报服务监听 %s", listener.Addr())
@@ -179,13 +179,13 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 	return server, nil
 }
 
-func reportTransport(cfg config.ReportConfig) (grpc.ServerOption, error) {
+func reportTransport(cfg config.ReportConfig) ([]grpc.ServerOption, error) {
 	if cfg.ProxyIP == "" {
 		tlsCredentials, err := credentials.NewServerTLSFromFile(cfg.CertFile, cfg.KeyFile)
 		if err != nil {
 			return nil, err
 		}
-		return grpc.Creds(tlsCredentials), nil
+		return []grpc.ServerOption{grpc.Creds(tlsCredentials)}, nil
 	}
 
 	proxyIP, err := netip.ParseAddr(cfg.ProxyIP)
@@ -194,14 +194,28 @@ func reportTransport(cfg config.ReportConfig) (grpc.ServerOption, error) {
 		return nil, fmt.Errorf("report.proxy_ip 必须是代理的固定 IP 地址")
 	}
 	// The proxy terminates TLS and is the only peer allowed on this h2c listener.
-	return grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+	trusted := func(ctx context.Context) bool {
 		if p, ok := peer.FromContext(ctx); ok {
 			if addr, ok := p.Addr.(*net.TCPAddr); ok && addr.AddrPort().Addr().Unmap() == proxyIP {
-				return next(ctx, req)
+				return true
 			}
 		}
-		return nil, status.Error(codes.PermissionDenied, "untrusted report proxy")
-	}), nil
+		return false
+	}
+	return []grpc.ServerOption{
+		grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+			if !trusted(ctx) {
+				return nil, status.Error(codes.PermissionDenied, "untrusted report proxy")
+			}
+			return next(ctx, req)
+		}),
+		grpc.StreamInterceptor(func(srv any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, next grpc.StreamHandler) error {
+			if !trusted(stream.Context()) {
+				return status.Error(codes.PermissionDenied, "untrusted report proxy")
+			}
+			return next(srv, stream)
+		}),
+	}, nil
 }
 
 // initDatabase 初始化数据库

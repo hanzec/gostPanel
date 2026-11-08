@@ -2,14 +2,9 @@ package handler
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
-	"math/big"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -54,7 +49,6 @@ func TestNodeRegistration(t *testing.T) {
 	nodes := service.NewNodeService(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	certPEM := testNodeCertificate(t)
 	issue := func() string {
 		t.Helper()
 		issued, err := nodes.IssueRegistrationToken(ctx, node.ID, "admin", "127.0.0.1", "test")
@@ -66,9 +60,9 @@ func TestNodeRegistration(t *testing.T) {
 		}
 		return issued.Token
 	}
-	assertRejected := func(token, certificate string, code codes.Code) {
+	assertRejected := func(token string, code codes.Code) {
 		t.Helper()
-		_, err := client.RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{Token: token, NodeCertificatePem: certificate})
+		_, err := client.RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{Token: token})
 		if status.Code(err) != code {
 			t.Fatalf("register = %v, want %v", err, code)
 		}
@@ -78,11 +72,10 @@ func TestNodeRegistration(t *testing.T) {
 	if err := db.Model(&node).Update("registration_expires_at", time.Now().UTC().Add(-time.Minute)).Error; err != nil {
 		t.Fatal(err)
 	}
-	assertRejected(expired, certPEM, codes.Unauthenticated)
+	assertRejected(expired, codes.Unauthenticated)
 	replaced := issue()
 	token := issue()
-	assertRejected(replaced, certPEM, codes.Unauthenticated)
-	assertRejected(token, "invalid certificate", codes.InvalidArgument)
+	assertRejected(replaced, codes.Unauthenticated)
 	if err := db.First(&node).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -91,30 +84,30 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatal("pending registration stores the token hash and no password")
 	}
 
-	request := &nodegrpc.RegisterNodeRequest{Token: token, NodeCertificatePem: certPEM}
+	request := &nodegrpc.RegisterNodeRequest{Token: token}
 	reply, err := client.RegisterNode(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reply.GetNodeId() != uint64(node.ID) || reply.GetControlPort() != uint32(node.Port) || reply.GetUsername() == "" || reply.GetPassword() == "" {
-		t.Fatal("registration did not return the node identity, port and credentials")
+	if reply.GetNodeId() != uint64(node.ID) || reply.GetUsername() == "" || reply.GetPassword() == "" {
+		t.Fatal("registration did not return the node identity and credentials")
 	}
 	// Saving metadata read before registration must not restore the consumed token.
 	node.Remark = "updated metadata"
 	if err := repository.NewNodeRepository(db).Update(&node, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	assertRejected(token, certPEM, codes.Unauthenticated)
+	assertRejected(token, codes.Unauthenticated)
 	var enrolled model.GostNode
 	if err := db.First(&enrolled, node.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if enrolled.Remark != node.Remark || enrolled.RegistrationTokenHash != "" || enrolled.RegistrationExpiresAt != nil || enrolled.TLSCertificatePEM != certPEM ||
+	if enrolled.Remark != node.Remark || enrolled.RegistrationTokenHash != "" || enrolled.RegistrationExpiresAt != nil ||
 		enrolled.Username != reply.GetUsername() || enrolled.Password != reply.GetPassword() {
 		t.Fatal("stored registration state does not match the successful reply")
 	}
 	if enrolled.Address != "127.0.0.1" || enrolled.IPv4 != "127.0.0.1" || enrolled.IPv6 != "" {
-		t.Fatal("registration did not store the direct peer address for automatic control")
+		t.Fatal("registration did not store the direct peer address")
 	}
 	data, err := json.Marshal(enrolled)
 	if err != nil {
@@ -132,7 +125,8 @@ func TestNodeRegistration(t *testing.T) {
 	}
 	initialAuth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(reply.GetUsername(), reply.GetPassword()))
 	report := &nodegrpc.ReportRequest{NodeId: reply.GetNodeId(), Observation: &observer.ObserveRequest{}}
-	if _, err := client.Report(ctx, report, initialAuth); err != nil {
+	firstStream := startTestReportStream(t, ctx, client, enrolled, nil)
+	if _, err := firstStream.Report(ctx, report); err != nil {
 		t.Fatalf("report using issued credentials: %v", err)
 	}
 
@@ -167,12 +161,16 @@ func TestNodeRegistration(t *testing.T) {
 	if enrolled.IPv4 != "" || enrolled.IPv6 != "2001:db8::7" || enrolled.Address != enrolled.IPv6 {
 		t.Fatal("re-registration did not replace the address with the normalized IPv6")
 	}
-	assertRejected(request.Token, certPEM, codes.Unauthenticated)
-	if _, err := client.Report(ctx, report, initialAuth); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("report using rotated credentials = %v", err)
+	assertRejected(request.Token, codes.Unauthenticated)
+	if _, err := firstStream.Report(ctx, report); err == nil {
+		t.Fatal("previous session survived credential rotation")
+	}
+	if _, err := connectTestReportStream(ctx, client, reply.GetNodeId(), initialAuth); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("stream using rotated credentials = %v", err)
 	}
 	newAuth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(first.reply.GetUsername(), first.reply.GetPassword()))
-	if _, err := client.Report(ctx, report, newAuth); err != nil {
+	currentStream := startTestReportStream(t, ctx, client, enrolled, nil)
+	if _, err := currentStream.Report(ctx, report); err != nil {
 		t.Fatalf("report using refreshed credentials: %v", err)
 	}
 	allowlist := service.NewGostAllowlistService(db)
@@ -180,14 +178,14 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	ipUpdate := &nodegrpc.NodeIPsRequest{NodeId: uint64(node.ID), Ipv6: "2001:db8::8"}
-	if _, err := client.UpdateNodeIPs(ctx, ipUpdate); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("IP update without credentials = %v", err)
+	if _, err := connectTestReportStream(ctx, client, reply.GetNodeId()); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("stream without credentials = %v", err)
 	}
-	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, initialAuth); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("IP update using rotated credentials = %v", err)
+	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("IP update outside the stream = %v", err)
 	}
 	ipUpdate.Ipv4 = "2001:db8::9"
-	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); status.Code(err) != codes.InvalidArgument {
+	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("IP update with wrong address family = %v", err)
 	}
 	assertIPs := func(address, ipv4, ipv6 string, allowed []string) {
@@ -205,21 +203,21 @@ func TestNodeRegistration(t *testing.T) {
 	}
 	assertIPs("2001:db8::7", "", "2001:db8::7", []string{"2001:db8::7"})
 	ipUpdate.Ipv4 = ""
-	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); err != nil {
+	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); err != nil {
 		t.Fatalf("IP update using current credentials: %v", err)
 	}
 	assertIPs("2001:db8::8", "", "2001:db8::8", []string{"2001:db8::8"})
 	ipUpdate.Ipv4, ipUpdate.Ipv6 = "198.51.100.9", ""
-	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); err != nil {
+	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); err != nil {
 		t.Fatalf("IP update with IPv4 only: %v", err)
 	}
 	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::8", []string{"198.51.100.9", "2001:db8::8"})
 	ipUpdate.Ipv4, ipUpdate.Ipv6 = "", "2001:db8::a"
-	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); err != nil {
+	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); err != nil {
 		t.Fatalf("IP update with IPv6 only: %v", err)
 	}
 	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::a", []string{"198.51.100.9", "2001:db8::a"})
-	if enrolled.Password != first.reply.GetPassword() || enrolled.TLSCertificatePEM != certPEM || enrolled.RegistrationTokenHash != "" {
+	if enrolled.Password != first.reply.GetPassword() || enrolled.RegistrationTokenHash != "" {
 		t.Fatal("updating IPs changed the enrollment state")
 	}
 	requestTemplate := &nodegrpc.NftTemplateRequest{NodeId: reply.GetNodeId()}
@@ -231,34 +229,8 @@ func TestNodeRegistration(t *testing.T) {
 		!strings.Contains(template.GetConfig(), nodegrpc.NftTableName(reply.GetNodeId())) {
 		t.Fatalf("node did not receive its nftables JSON template: %v", err)
 	}
-	if err := db.Model(&enrolled).Update("tls_certificate_pem", "").Error; err != nil {
-		t.Fatal(err)
+	streamTemplate, err := currentStream.GetNftTemplate(ctx, requestTemplate)
+	if err != nil || streamTemplate.GetConfig() != template.GetConfig() {
+		t.Fatalf("stream nft template request = %v, %v", streamTemplate, err)
 	}
-	if _, err := client.Report(ctx, report, newAuth); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("report with credentials but no registration certificate = %v", err)
-	}
-	if _, err := client.GetNftTemplate(ctx, requestTemplate, newAuth); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("nft template request with credentials but no registration certificate = %v", err)
-	}
-}
-
-func testNodeCertificate(t *testing.T) string {
-	t.Helper()
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(time.Hour),
-		DNSNames:              []string{nodegrpc.NodeCertificateName},
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, cert, cert, publicKey, privateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }

@@ -90,8 +90,8 @@ func TestServiceDoesNotAuditRejectedDatabaseWrites(t *testing.T) {
 		}
 	}
 	nodes, rules, tunnels := NewNodeService(db), NewRuleService(db), NewTunnelService(db)
-	_, createNode := nodes.Create(&dto.CreateNodeReq{Name: "new node", Port: 39000}, testAdmin, testIP, testAgent)
-	_, updateNode := nodes.Update(node.ID, &dto.UpdateNodeReq{Name: "renamed", Port: 39000}, testAdmin, testIP, testAgent)
+	_, createNode := nodes.Create(&dto.CreateNodeReq{Name: "new node"}, testAdmin, testIP, testAgent)
+	_, updateNode := nodes.Update(node.ID, &dto.UpdateNodeReq{Name: "renamed"}, testAdmin, testIP, testAgent)
 	_, issueToken := nodes.IssueRegistrationToken(context.Background(), node.ID, testAdmin, testIP, testAgent)
 	_, createRule := rules.Create(&dto.CreateRuleReq{Name: "new rule", Type: "forward", NodeID: &node.ID, ListenPort: 8081}, testAdmin, testIP, testAgent)
 	_, updateRule := rules.Update(rule.ID, &dto.UpdateRuleReq{Name: "renamed", ListenPort: 8081}, testAdmin, testIP, testAgent)

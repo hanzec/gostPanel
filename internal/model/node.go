@@ -35,8 +35,8 @@ type NodeUpgradePolicy struct {
 type GostNode struct {
 	ID       uint       `gorm:"primaryKey" json:"id"`
 	Name     string     `gorm:"size:100;not null" json:"name"`         // 节点名称
-	Address  string     `gorm:"size:255;not null" json:"address"`      // 面板连接地址，优先使用 IPv4
-	Port     int        `gorm:"not null" json:"port"`                  // 端口
+	Address  string     `gorm:"size:255;not null" json:"address"`      // 转发地址，优先使用 IPv4
+	Port     int        `gorm:"not null" json:"-"`                     // 保留已部署数据库中的非空列
 	Username string     `gorm:"size:50" json:"username"`               // API 认证用户名
 	Password string     `gorm:"size:255" json:"-"`                     // API 认证密码
 	Status   NodeStatus `gorm:"size:20;default:offline" json:"status"` // 状态
@@ -45,7 +45,6 @@ type GostNode struct {
 
 	RegistrationTokenHash string            `gorm:"size:64" json:"-"`
 	RegistrationExpiresAt *time.Time        `json:"-"`
-	TLSCertificatePEM     string            `gorm:"type:text" json:"-"`
 	UpgradePolicy         NodeUpgradePolicy `gorm:"embedded" json:"-"`
 
 	// 流量统计

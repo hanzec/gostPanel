@@ -2,31 +2,24 @@ package service
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
-	"math/big"
-	"net"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
 
 	"yagp/internal/model"
 	"yagp/internal/repository"
+	"yagp/internal/streamtest"
+	"yagp/pkg/gost"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
 	"github.com/glebarez/sqlite"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 )
@@ -122,10 +115,7 @@ type tunnelSyncNode struct {
 	saves   int
 }
 
-func (s *tunnelSyncNode) Execute(ctx context.Context, request *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (s *tunnelSyncNode) Execute(_ context.Context, request *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	response := &nodegrpc.CommandReply{StatusCode: http.StatusOK}
@@ -153,33 +143,17 @@ func (s *tunnelSyncNode) Execute(ctx context.Context, request *nodegrpc.CommandR
 	return response, nil
 }
 
+var fixtureNodeID atomic.Uint64
+
 func startServiceTestNode(t *testing.T, server nodegrpc.V1Server) model.GostNode {
 	t.Helper()
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
+	node := model.GostNode{
+		ID: uint(fixtureNodeID.Add(1)), Name: "entry", Address: "127.0.0.1", Status: model.NodeStatusOnline,
+		Username: "entry", Password: "fixture-password",
 	}
-	now := time.Now()
-	cert := &x509.Certificate{
-		SerialNumber: big.NewInt(1), NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
-		DNSNames: []string{nodegrpc.NodeCertificateName},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, cert, cert, public, private)
-	if err != nil {
-		t.Fatal(err)
-	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
-		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: private}},
-	})))
-	nodegrpc.RegisterV1Server(grpcServer, server)
-	go func() { _ = grpcServer.Serve(listener) }()
-	t.Cleanup(grpcServer.Stop)
-	return model.GostNode{
-		Name: "entry", Address: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port, Status: model.NodeStatusOnline,
-		Username: "entry", Password: "fixture-password", TLSCertificatePEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
-	}
+	session := streamtest.Open(t, nodegrpc.NewDispatcher(server,
+		nodegrpc.V1_Execute_FullMethodName, nodegrpc.V1_GetObserverEndpoint_FullMethodName, nodegrpc.V1_SyncTrafficQuota_FullMethodName,
+		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName))
+	t.Cleanup(gost.RegisterNodeStream(node.ID, node.Username, node.Password, session))
+	return node
 }

@@ -18,12 +18,12 @@ vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
 
 const GIB = 1024 ** 3
 const primary = {
-  id: 7, name: '边缘节点', port: 39001, remark: '入口', status: 'online',
+  id: 7, name: '边缘节点', remark: '入口', status: 'online',
   address: '2001:db8::7', ipv4: '192.0.2.7', ipv6: '2001:db8::7', last_check_at: '2026-11-08T02:00:00Z',
   total_bytes: 1536, input_bytes: 512, output_bytes: 1024,
   traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily', traffic_quota_state: 'blocked', traffic_quota_used_bytes: GIB
 }
-const newNode = { id: 9, name: '新节点', port: 39000, status: 'offline' }
+const newNode = { id: 9, name: '新节点', status: 'offline' }
 const list = (nodes, total = nodes.length) => response({ list: nodes, total })
 const token = (value = 'secret', lifetime = 60_000) => response({ token: value, expires_at: new Date(Date.now() + lifetime).toISOString() })
 const editForm = (view, title) => dialog(view, title).get('form.el-form')
@@ -90,23 +90,23 @@ describe('node inventory', () => {
     api.getNodeList.mockResolvedValue(list([
       primary,
       { id: 8, name: '待注册', status: 'offline', traffic_quota_state: 'pending' },
-      { id: 9, name: '未限流', status: 'error', address: '192.0.2.9', port: 443 },
-      { id: 10, name: '旧守护程序', status: 'unknown', address: '[2001:db8::10]', port: 1, traffic_limit_bytes: GIB, traffic_quota_state: 'unsupported' },
+      { id: 9, name: '未限流', status: 'error', address: '192.0.2.9' },
+      { id: 10, name: '旧守护程序', status: 'unknown', address: '2001:db8::10', traffic_limit_bytes: GIB, traffic_quota_state: 'unsupported' },
       { id: 11, name: '待同步', traffic_limit_bytes: GIB },
       { id: 12, name: '生效中', traffic_limit_bytes: GIB, traffic_quota_state: 'active' }
     ], 22))
     const view = open()
     await flushPromises()
     const rows = view.findAll('tbody tr').map(row => row.text())
-    expect(rows[0]).toContain('[2001:db8::7]:39001')
+    expect(rows[0]).toContain('2001:db8::7')
     expect(rows[0]).toContain('1.5 KiB')
     expect(rows[0]).toContain('已达上限')
     expect(rows[0]).toContain('本期用量')
     expect(rows[1]).toContain('待获取地址')
     expect(rows[1]).toContain('解除限制待同步')
-    expect(rows[2]).toContain('192.0.2.9:443')
+    expect(rows[2]).toContain('192.0.2.9')
     expect(rows[2]).toContain('未设上限')
-    expect(rows[3]).toContain('[2001:db8::10]:1')
+    expect(rows[3]).toContain('2001:db8::10')
     expect(rows[3]).toContain('需要支持流量配额的 yagp-daemon')
     expect(rows[4]).toContain('待同步')
     expect(rows[5]).toContain('额度用量')
@@ -180,7 +180,7 @@ describe('node registration and quota settings', () => {
     await nextTick()
     await click(dialog(view, '添加节点'), '添加节点')
     expect(api.createNode).toHaveBeenCalledWith({
-      name: newNode.name, port: 39000, remark: '', traffic_limit_bytes: GIB / 2, traffic_reset_period: 'weekly'
+      name: newNode.name, remark: '', traffic_limit_bytes: GIB / 2, traffic_reset_period: 'weekly'
     })
     expect(api.issueNodeRegistrationToken).toHaveBeenCalledWith(newNode.id)
     expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain('https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh')
@@ -198,7 +198,7 @@ describe('node registration and quota settings', () => {
     await click(view, '编辑节点')
     expect(editForm(view, '编辑节点').get(quotaInput).element.value).toBe('1.0000000009')
     await click(dialog(view, '编辑节点'), '保存更改')
-    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, port: primary.port, remark: primary.remark })
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, remark: primary.remark })
     expect(messages.success).toHaveBeenCalledWith('节点已更新')
 
     await click(view, '编辑节点')
@@ -207,13 +207,13 @@ describe('node registration and quota settings', () => {
     await form.get(quotaInput).setValue('')
     await click(dialog(view, '编辑节点'), '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
-      name: primary.name, port: primary.port, remark: primary.remark, traffic_limit_bytes: 0, traffic_reset_period: 'monthly'
+      name: primary.name, remark: primary.remark, traffic_limit_bytes: 0, traffic_reset_period: 'monthly'
     })
     await click(view, '复制节点')
     expect(editForm(view, '添加节点').get('[placeholder="例如 华东入口"]').element.value).toBe(primary.name + '-copy')
     await click(dialog(view, '添加节点'), '添加节点')
     expect(api.createNode).toHaveBeenCalledWith({
-      name: primary.name + '-copy', port: primary.port, remark: primary.remark,
+      name: primary.name + '-copy', remark: primary.remark,
       traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily'
     })
     expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
@@ -305,7 +305,7 @@ describe('node registration and quota settings', () => {
     expect(logger).toHaveBeenCalledWith('保存节点失败:', failure)
     expect(form.get('[placeholder="例如 华东入口"]').element.value).toBe('更名节点')
     await click(edit, '保存更改')
-    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: '更名节点', port: primary.port, remark: primary.remark })
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: '更名节点', remark: primary.remark })
     expect(view.find('[aria-label="编辑节点"]').exists()).toBe(false)
     await click(view, '添加节点')
     await click(dialog(view, '添加节点'), '取消')

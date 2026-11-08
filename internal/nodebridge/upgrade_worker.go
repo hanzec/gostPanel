@@ -11,12 +11,14 @@ import (
 	"path/filepath"
 	"time"
 	"yagp/internal/buildinfo"
-	"yagp/pkg/nodegrpc"
 	"yagp/pkg/upgrade"
 
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
+
+const daemonHealthService = "yagp-daemon/"
 
 // RunUpgrade performs an upgrade in the independent worker service.
 func RunUpgrade(ctx context.Context, cfg Config, configPath, component, tag string) error {
@@ -177,39 +179,30 @@ func WaitForGost(ctx context.Context, cfg Config) error {
 }
 
 func waitForDaemon(ctx context.Context, cfg Config, tag string) error {
-	host, port, err := net.SplitHostPort(cfg.ControlListen)
-	if err != nil {
-		return err
+	if !IsLoopbackAddress(cfg.ObserverListen) {
+		return errors.New("Gost observer address must be loopback")
 	}
-	switch host {
-	case "", "0.0.0.0":
-		host = "127.0.0.1"
-	case "::":
-		host = "::1"
+	if tag == "" {
+		// A rollback can restore an older daemon that has the Observer listener but no health service.
+		return waitForReady(ctx, "yagp-daemon observer", 25*time.Second, func(ctx context.Context) bool {
+			var dialer net.Dialer
+			conn, err := dialer.DialContext(ctx, "tcp", cfg.ObserverListen)
+			if err != nil {
+				return false
+			}
+			_ = conn.Close()
+			return true
+		})
 	}
-	cert, err := os.ReadFile(cfg.TLSCertFile)
-	if err != nil {
-		return err
-	}
-	tls, err := nodegrpc.NodeClientTLS(string(cert))
-	if err != nil {
-		return err
-	}
-	conn, err := grpc.NewClient(net.JoinHostPort(host, port), grpc.WithTransportCredentials(tls),
-		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)))
+	conn, err := grpc.NewClient(cfg.ObserverListen, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	client := nodegrpc.NewV1Client(conn)
-	return waitForReady(ctx, "yagp-daemon control API", 25*time.Second, func(ctx context.Context) bool {
-		if tag != "" {
-			state, err := client.GetUpgradeStatus(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-			return err == nil && state.GetSupported() && state.GetDaemonVersion() == tag
-		}
-		// A rollback can restore a daemon released before the upgrade RPC existed.
-		_, err := client.GetObserverEndpoint(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-		return err == nil
+	client := healthpb.NewHealthClient(conn)
+	return waitForReady(ctx, "yagp-daemon observer", 25*time.Second, func(ctx context.Context) bool {
+		state, err := client.Check(ctx, &healthpb.HealthCheckRequest{Service: daemonHealthService + tag}, grpc.WaitForReady(true))
+		return err == nil && state.GetStatus() == healthpb.HealthCheckResponse_SERVING
 	})
 }
 

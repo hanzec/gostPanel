@@ -290,7 +290,7 @@ func requireServiceError(t *testing.T, got, want error) {
 	}
 }
 
-// lifecycleNode serves Gost resource responses across the real authenticated TLS client.
+// lifecycleNode serves Gost resource responses over a real gRPC stream.
 type lifecycleNode struct {
 	nodegrpc.UnimplementedV1Server
 	t           *testing.T
@@ -301,10 +301,7 @@ type lifecycleNode struct {
 	observerErr error
 }
 
-func (n *lifecycleNode) Execute(ctx context.Context, req *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (n *lifecycleNode) Execute(_ context.Context, req *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	method, path := req.GetMethod(), req.GetPath()
@@ -351,10 +348,7 @@ func (n *lifecycleNode) Execute(ctx context.Context, req *nodegrpc.CommandReques
 	}
 }
 
-func (n *lifecycleNode) GetObserverEndpoint(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.ObserverEndpoint, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (n *lifecycleNode) GetObserverEndpoint(context.Context, *emptypb.Empty) (*nodegrpc.ObserverEndpoint, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.observerErr != nil {

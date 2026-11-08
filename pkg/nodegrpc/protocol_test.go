@@ -3,8 +3,10 @@ package nodegrpc
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"net"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +87,8 @@ func TestV1WireRoundTrip(t *testing.T) {
 			&NodeUpgradeStatus{Supported: true, Component: "gost", TargetVersion: "v3.3.3", State: "queued"}),
 		exchange(V1_Report_FullMethodName, V1Client.Report, forwardedReport, &observer.ObserveReply{Ok: true}),
 		exchange(V1_RegisterNode_FullMethodName, V1Client.RegisterNode,
-			&RegisterNodeRequest{Token: "42.fixture", NodeCertificatePem: "fixture cert", Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"},
-			&RegisterNodeReply{NodeId: 42, Username: username, Password: password, ControlPort: 8443}),
+			&RegisterNodeRequest{Token: "42.fixture", Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"},
+			&RegisterNodeReply{NodeId: 42, Username: username, Password: password}),
 		exchange(V1_GetNftTemplate_FullMethodName, V1Client.GetNftTemplate,
 			&NftTemplateRequest{NodeId: 42}, config),
 		exchange(V1_UpdateNodeIPs_FullMethodName, V1Client.UpdateNodeIPs,
@@ -96,11 +98,12 @@ func TestV1WireRoundTrip(t *testing.T) {
 	for _, call := range calls {
 		byMethod[call.method] = call
 	}
-	cert, pem := testNodeCertificate(t, nil, false)
-	control, err := NodeClientTLS(pem)
-	if err != nil {
-		t.Fatal(err)
-	}
+	https := httptest.NewTLSServer(nil)
+	cert := https.TLS.Certificates[0]
+	roots := x509.NewCertPool()
+	roots.AddCert(https.Certificate())
+	https.Close()
+	control := credentials.NewTLS(&tls.Config{RootCAs: roots, ServerName: "127.0.0.1"})
 	auth := grpc.WithPerRPCCredentials(PasswordCredentials(username, password))
 	active := protocolListener(t, cert, grpc.UnaryInterceptor(func(ctx context.Context, request any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if !MatchCredentials(ctx, username, password) {
@@ -146,14 +149,10 @@ func TestV1WireRoundTrip(t *testing.T) {
 	if _, err := NewV1Client(unauthenticated).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated endpoint returned %v", err)
 	}
-	_, foreignPEM := testNodeCertificate(t, nil, false)
-	foreignRoot, err := NodeClientTLS(foreignPEM)
-	if err != nil {
-		t.Fatal(err)
-	}
+	foreignRoot := credentials.NewTLS(&tls.Config{RootCAs: x509.NewCertPool(), ServerName: "127.0.0.1"})
 	untrusted := protocolConn(t, active, foreignRoot, auth)
 	if _, err := NewV1Client(untrusted).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unavailable {
-		t.Fatalf("certificate pin mismatch returned %v", err)
+		t.Fatalf("untrusted certificate returned %v", err)
 	}
 }
 

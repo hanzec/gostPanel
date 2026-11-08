@@ -8,8 +8,10 @@ import (
 	"net"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
+
 	"yagp/internal/model"
 	"yagp/pkg/nodegrpc"
 
@@ -18,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 )
@@ -36,8 +39,8 @@ func TestReportRecordsTrafficForTheEntryNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodes := []model.GostNode{
-		{Name: "entry", Address: "localhost", Port: 39000, Username: "entry", Password: "entry-password", TLSCertificatePEM: testNodeCertificate(t)},
-		{Name: "exit", Address: "localhost", Port: 39001, Username: "exit", Password: "exit-password", TLSCertificatePEM: testNodeCertificate(t)},
+		{Name: "entry", Address: "localhost", Username: "entry", Password: "entry-password"},
+		{Name: "exit", Address: "localhost", Username: "exit", Password: "exit-password"},
 	}
 	if err := db.Create(&nodes).Error; err != nil {
 		t.Fatal(err)
@@ -63,14 +66,14 @@ func TestReportRecordsTrafficForTheEntryNode(t *testing.T) {
 			trafficEvent(rules[0].ID, 12, 5, 2),
 		}},
 	}
-	if _, err := client.Report(ctx, request); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("report without credentials = %v", err)
+	if _, err := client.Report(ctx, request); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("report outside the stream = %v", err)
 	}
-	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(nodes[0].Username, nodes[0].Password))
+	reports := startTestReportStream(t, ctx, client, nodes[0], nil)
 	submit := func(event *observer.Event) {
 		t.Helper()
 		request.Observation.Events = []*observer.Event{event}
-		if reply, err := client.Report(ctx, request, auth); err != nil || !reply.GetOk() {
+		if reply, err := reports.Report(ctx, request); err != nil || !reply.GetOk() {
 			t.Fatalf("report = %v, %v", reply, err)
 		}
 	}
@@ -86,7 +89,7 @@ func TestReportRecordsTrafficForTheEntryNode(t *testing.T) {
 	request.Observation.Events = []*observer.Event{
 		trafficEvent(rules[0].ID, 6, 5, 2), trafficEvent(rules[1].ID, 12, 5, 2),
 	}
-	if _, err := client.Report(ctx, request, auth); status.Code(err) != codes.PermissionDenied {
+	if _, err := reports.Report(ctx, request); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("report for another node's rule = %v", err)
 	}
 
@@ -104,6 +107,40 @@ func TestReportRecordsTrafficForTheEntryNode(t *testing.T) {
 	}
 	if nodes[0].TotalBytes != 67 || nodes[1].TotalBytes != 0 {
 		t.Fatalf("node counters = %d, %d", nodes[0].TotalBytes, nodes[1].TotalBytes)
+	}
+}
+
+func TestReportStreamAuthenticatesOneNodeIdentity(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	node := model.GostNode{Name: "registered", Username: "node", Password: "secret"}
+	if err := f.db.Create(&node).Error; err != nil {
+		t.Fatal(err)
+	}
+	client := startTestReportServer(t, f.db)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	id := uint64(node.ID)
+	validID := strconv.FormatUint(id, 10)
+	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
+	for _, ids := range [][]string{nil, {"bad-id"}, {"0"}, {validID, validID}} {
+		md := metadata.MD{nodegrpc.NodeIDMetadata: ids}
+		stream, err := client.Connect(metadata.NewOutgoingContext(ctx, md), auth)
+		if err == nil {
+			_, err = stream.Recv()
+		}
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("Connect with node IDs %v = %v", ids, err)
+		}
+	}
+	reports := startTestReportStream(t, ctx, client, node, nil)
+	if _, err := reports.Report(ctx, &nodegrpc.ReportRequest{NodeId: id + 1}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("traffic report for another node = %v", err)
+	}
+	if _, err := reports.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: id + 1}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("nft template request for another node = %v", err)
+	}
+	if _, err := reports.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: id}); err != nil {
+		t.Fatalf("valid request after rejected requests = %v", err)
 	}
 }
 
@@ -134,4 +171,36 @@ func startTestReportServer(t *testing.T, db *gorm.DB) nodegrpc.V1Client {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return nodegrpc.NewV1Client(conn)
+}
+
+func connectTestReportStream(ctx context.Context, client nodegrpc.V1Client, id uint64, options ...grpc.CallOption) (nodegrpc.V1_ConnectClient, error) {
+	ctx = metadata.AppendToOutgoingContext(ctx, nodegrpc.NodeIDMetadata, strconv.FormatUint(id, 10))
+	stream, err := client.Connect(ctx, options...)
+	if err != nil {
+		return nil, err
+	}
+	header, err := stream.Header()
+	if err != nil {
+		return nil, err
+	}
+	if len(header.Get(nodegrpc.ReadyMetadata)) != 1 {
+		_, err = stream.Recv()
+		return nil, err
+	}
+	return stream, nil
+}
+
+func startTestReportStream(t *testing.T, ctx context.Context, client nodegrpc.V1Client, node model.GostNode, commands nodegrpc.StreamHandler) nodegrpc.V1Client {
+	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	t.Cleanup(cancel)
+	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
+	stream, err := connectTestReportStream(ctx, client, uint64(node.ID), auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := nodegrpc.NewSession(stream, commands)
+	t.Cleanup(session.Close)
+	go func() { _ = session.Run() }()
+	return nodegrpc.NewV1Client(session)
 }
