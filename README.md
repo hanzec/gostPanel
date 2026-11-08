@@ -65,10 +65,10 @@ AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
 按下文配置 [Authentik 正向认证](#authentik-正向认证) 和 [节点注册与上报](#启用节点注册和流量上报)，再从当前目录拉取并启动 Compose 中指定的 [GHCR 镜像](https://github.com/hanzec/yagp/pkgs/container/yagp)：
 
 ```bash
-docker compose up -d --no-build --pull always
+docker compose up -d
 ```
 
-镜像支持 Linux amd64 和 arm64。要固定版本，可在 `docker-compose.yml` 中将 `latest` 改为指定标签。从源码构建时，执行 `docker compose up -d --build --pull never`；如需 Go 模块代理，可先执行 `docker compose build --build-arg GOPROXY=<代理地址>`，再用 `docker compose up -d --no-build --pull never` 启动本地构建的镜像。
+镜像支持 Linux amd64 和 arm64。要固定版本，可在 `docker-compose.yml` 中将 `latest` 改为指定标签。
 
 Compose 将当前目录的 `config/`、`data/` 和 `logs/` 分别绑定到容器中的 `/app/config`、`/app/data` 和 `/app/logs`。`config/` 只读，数据库和日志可写。从其他目录使用 `-f` 指定 Compose 文件时，确保 `PWD` 环境变量指向所需目录，并在其中准备 `config/config.yaml`（PowerShell 可用 `$env:PWD = (Get-Location).Path`）。如果未设置 `PWD`，则使用 Compose 项目目录。
 
