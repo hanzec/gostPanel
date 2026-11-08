@@ -40,6 +40,8 @@ func run(ctx context.Context, args []string) error {
 			return printNftTemplate(ctx, parseConfigFlag(args[0], args[1:]))
 		case "upgrade-component":
 			return upgradeComponent(ctx, args[1:])
+		case "--upgrade-installed":
+			return upgradeInstalled(ctx, args[1:])
 		}
 	}
 	configFile := parseConfigFlag("yagp-daemon", args)

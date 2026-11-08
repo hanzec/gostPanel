@@ -11,18 +11,17 @@ usage() {
     cat <<'EOF'
 用法:
   install_node.sh --panel-address HOST:PORT --token TOKEN
+  install_node.sh upgrade --node-id ID
   install_node.sh uninstall --node-id ID
 EOF
 }
 
+action=install
+case "${1:-}" in
+    upgrade|uninstall) action=$1; shift ;;
+esac
 [[ "${1:-}" != "--help" ]] || { usage; exit 0; }
 [[ $EUID -eq 0 ]] || die "请使用 root 用户运行此脚本"
-
-action=install
-if [[ "${1:-}" == uninstall ]]; then
-    action=uninstall
-    shift
-fi
 
 node_id=
 panel_address=
@@ -30,7 +29,7 @@ token=
 while (($#)); do
     [[ $# -ge 2 ]] || die "缺少参数值: $1"
     case "$action:$1" in
-        uninstall:--node-id) node_id=$2 ;;
+        upgrade:--node-id|uninstall:--node-id) node_id=$2 ;;
         install:--panel-address) panel_address=$2 ;;
         install:--token) token=$2 ;;
         *) usage; die "未知参数: $1" ;;
@@ -48,11 +47,14 @@ else
     die "节点安装需要 systemd 或 OpenRC"
 fi
 
-if [[ "$action" == uninstall ]]; then
+if [[ "$action" != install ]]; then
     [[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "请填写面板中的节点 ID"
     base_path="$state_dir/$node_id"
-    gost_unit="yagp-gost-$node_id"
     bridge_unit="yagp-daemon-$node_id"
+fi
+
+if [[ "$action" == uninstall ]]; then
+    gost_unit="yagp-gost-$node_id"
     if [[ "$manager" == systemd ]]; then
         systemctl disable --now "$bridge_unit" "$gost_unit" || true
         rm -f -- "/etc/systemd/system/$bridge_unit.service" "/etc/systemd/system/$gost_unit.service"
@@ -73,7 +75,13 @@ if [[ "$action" == uninstall ]]; then
     exit 0
 fi
 
-[[ -n "$panel_address" && -n "$token" ]] || { usage; exit 1; }
+if [[ "$action" == upgrade ]]; then
+    [[ "$manager" == systemd ]] || die "在线升级功能需要 systemd 节点"
+    [[ -f "$base_path/node.yaml" && -x "$base_path/yagp-daemon" ]] || die "未找到已安装的节点 $node_id"
+    [[ $(systemctl show --property=LoadState --value "$bridge_unit.service") == loaded ]] || die "未找到服务 $bridge_unit.service"
+else
+    [[ -n "$panel_address" && -n "$token" ]] || { usage; exit 1; }
+fi
 
 case "$(uname -m)" in
     x86_64) arch=amd64 ;;
@@ -93,7 +101,7 @@ tmp_dir=$(mktemp -d -- "$state_dir/.install.XXXXXXXX")
 stage="$tmp_dir/node"
 cleanup() {
     local result=$?
-    if (( result != 0 )) && [[ -n "$node_id" ]]; then
+    if (( result != 0 )) && [[ "$action" == install && -n "$node_id" ]]; then
         printf '节点已完成注册，token 已失效\n' >&2
         if [[ -d "$stage" ]]; then
             printf '注册文件已保留在 %s\n' "$stage" >&2
@@ -107,7 +115,7 @@ cleanup() {
     rm -rf -- "$tmp_dir"
 }
 trap cleanup EXIT
-mkdir -p -- "$tmp_dir/bridge" "$stage"
+mkdir -p -- "$tmp_dir/bridge"
 
 bridge_bin="${YAGP_DAEMON_BIN:-}"
 if [[ -z "$bridge_bin" ]]; then
@@ -122,6 +130,19 @@ if [[ -z "$bridge_bin" ]]; then
 fi
 [[ -f "$bridge_bin" ]] || die "找不到适用于 $manager 的 yagp-daemon 程序: $bridge_bin"
 
+if [[ "$action" == upgrade ]]; then
+    candidate="$tmp_dir/yagp-daemon"
+    install -m 0700 -- "$bridge_bin" "$candidate"
+    upgrade_unit="yagp-upgrade-$node_id.service"
+    if ! systemd-run --wait --collect --unit="$upgrade_unit" --property=Type=exec \
+        --working-directory="$base_path" -- "$candidate" --upgrade-installed -c "$base_path/node.yaml" --node-id "$node_id"; then
+        die "升级失败，请查看日志: journalctl -u $upgrade_unit"
+    fi
+    printf '节点 %s 的 yagp-daemon 已就绪，可在面板管理后续升级。\n' "$node_id"
+    exit 0
+fi
+
+mkdir -- "$stage"
 install -m 0700 -- "$bridge_bin" "$stage/yagp-daemon"
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
     install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$stage/LICENSE"

@@ -158,7 +158,14 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TL
 
 在线升级适用于 systemd 节点。面板和节点需要能通过 HTTPS 访问 GitHub。节点校验发布包的 SHA-256，再替换对应的二进制并重启服务。配置、凭据、证书和节点 ID 都会保留。Gost 重启会中断该实例正在转发的连接，新版服务启动检查失败时会尝试恢复旧版。
 
-如果现有节点尚不支持在线升级，先保留实例目录，停止 `yagp-daemon-<ID>` 服务，将新版 systemd 二进制放到 `/etc/yagp-daemon/<ID>/yagp-daemon`，再启动原服务一次。配置和证书可继续使用。
+如果已安装的 systemd 节点尚不支持在线升级，在节点主机上以 root 执行以下命令，将 `42` 换成面板中的节点 ID。脚本默认使用最新发布包，只替换 `yagp-daemon`，沿用原配置、凭据和证书，无需注册令牌。升级后可从面板管理后续更新。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh \
+  | bash -s -- upgrade --node-id 42
+```
+
+`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 且系统 D-Bus 可用的 systemd 实例。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 指定版本时，请选择 `0.1.77` 或更新版本。
 
 如果节点仍使用改名前的 `yagp-node-<ID>` 服务，迁移时先停止该服务和 `yagp-gost-<ID>`，并取消旧守护服务的开机启动。将 `/etc/yagp-node/<ID>` 移到 `/etc/yagp-daemon/<ID>`，放入新版 `yagp-daemon`。systemd 选用包内的 `yagp-daemon-systemd-linux-<架构>`，OpenRC 选用 `yagp-daemon-linux-<架构>`。更新 `node.yaml` 的 `tls_cert_file` 和 `tls_key_file`，如 `report_ca_file` 指向已移动的文件，也一并更新。原 ID、凭据和证书可继续使用。
 

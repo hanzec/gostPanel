@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+	"yagp/internal/buildinfo"
 	"yagp/pkg/nodegrpc"
 	"yagp/pkg/upgrade"
 
@@ -18,6 +20,22 @@ import (
 
 // RunUpgrade performs an upgrade in the independent worker service.
 func RunUpgrade(ctx context.Context, cfg Config, configPath, component, tag string) error {
+	return runUpgrade(ctx, cfg, configPath, component, tag, func(dest io.Writer) error {
+		downloadCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		return upgrade.NewClient().Download(downloadCtx, component, tag, "systemd", dest)
+	})
+}
+
+// UpgradeInstalledDaemon uses the installer-provided executable and the same transaction as remote upgrades.
+func UpgradeInstalledDaemon(ctx context.Context, cfg Config, configPath string, binary io.Reader) error {
+	return runUpgrade(ctx, cfg, configPath, "daemon", buildinfo.Version, func(dest io.Writer) error {
+		_, err := io.Copy(dest, binary)
+		return err
+	})
+}
+
+func runUpgrade(ctx context.Context, cfg Config, configPath, component, tag string, writeBinary func(io.Writer) error) error {
 	if !upgrade.ValidateTag(component, tag) || cfg.NodeID == 0 {
 		return errors.New("invalid node, upgrade component or release tag")
 	}
@@ -29,7 +47,7 @@ func RunUpgrade(ctx context.Context, cfg Config, configPath, component, tag stri
 	if err := writeUpgradeStatus(dir, status); err != nil {
 		return fmt.Errorf("record upgrade start: %w", err)
 	}
-	err := installUpgrade(ctx, cfg, dir, component, tag)
+	err := installUpgrade(ctx, cfg, dir, component, tag, writeBinary)
 	status.State = "succeeded"
 	if err != nil {
 		status.State, status.Message = "failed", err.Error()
@@ -37,7 +55,7 @@ func RunUpgrade(ctx context.Context, cfg Config, configPath, component, tag stri
 	return errors.Join(err, writeUpgradeStatus(dir, status))
 }
 
-func installUpgrade(ctx context.Context, cfg Config, dir, component, tag string) error {
+func installUpgrade(ctx context.Context, cfg Config, dir, component, tag string, writeBinary func(io.Writer) error) error {
 	binary := "yagp-daemon"
 	if component == "gost" {
 		binary = "gost"
@@ -71,7 +89,7 @@ func installUpgrade(ctx context.Context, cfg Config, dir, component, tag string)
 		}
 	}()
 	candidate := filepath.Join(stage, binary)
-	if err = stageUpgrade(ctx, candidate, component, tag); err != nil {
+	if err = stageUpgrade(ctx, candidate, component, tag, writeBinary); err != nil {
 		return err
 	}
 	backup := filepath.Join(stage, "previous")
@@ -82,7 +100,7 @@ func installUpgrade(ctx context.Context, cfg Config, dir, component, tag string)
 		return fmt.Errorf("replace installed executable: %w", err)
 	}
 	unit := fmt.Sprintf("yagp-%s-%d.service", component, cfg.NodeID)
-	if err = restartAndCheckUpgrade(ctx, cfg, unit, component); err == nil {
+	if err = restartAndCheckUpgrade(ctx, cfg, unit, component, tag); err == nil {
 		return nil
 	}
 	if restoreErr := os.Rename(backup, target); restoreErr != nil {
@@ -93,20 +111,18 @@ func installUpgrade(ctx context.Context, cfg Config, dir, component, tag string)
 	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
 	_ = upgradeCommand(rollbackCtx, "systemctl", "reset-failed", unit)
-	if rollbackErr := restartAndCheckUpgrade(rollbackCtx, cfg, unit, component); rollbackErr != nil {
+	if rollbackErr := restartAndCheckUpgrade(rollbackCtx, cfg, unit, component, ""); rollbackErr != nil {
 		return errors.Join(err, fmt.Errorf("restart previous version: %w", rollbackErr))
 	}
 	return fmt.Errorf("upgrade failed and previous version was restored: %w", err)
 }
 
-func stageUpgrade(ctx context.Context, path, component, tag string) error {
+func stageUpgrade(ctx context.Context, path, component, tag string, writeBinary func(io.Writer) error) error {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0700)
 	if err != nil {
 		return err
 	}
-	downloadCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	err = upgrade.NewClient().Download(downloadCtx, component, tag, "systemd", file)
+	err = writeBinary(file)
 	if err = errors.Join(err, file.Sync(), file.Close()); err != nil {
 		return fmt.Errorf("stage upgrade executable: %w", err)
 	}
@@ -120,7 +136,7 @@ func stageUpgrade(ctx context.Context, path, component, tag string) error {
 	return nil
 }
 
-func restartAndCheckUpgrade(ctx context.Context, cfg Config, unit, component string) error {
+func restartAndCheckUpgrade(ctx context.Context, cfg Config, unit, component, tag string) error {
 	restartCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := upgradeCommand(restartCtx, "systemctl", "restart", unit); err != nil {
@@ -129,7 +145,7 @@ func restartAndCheckUpgrade(ctx context.Context, cfg Config, unit, component str
 	if component == "gost" {
 		return WaitForGost(ctx, cfg)
 	}
-	return waitForDaemon(ctx, cfg)
+	return waitForDaemon(ctx, cfg, tag)
 }
 
 // WaitForGost checks the same authenticated admin endpoint used by the bridge.
@@ -160,7 +176,7 @@ func WaitForGost(ctx context.Context, cfg Config) error {
 	})
 }
 
-func waitForDaemon(ctx context.Context, cfg Config) error {
+func waitForDaemon(ctx context.Context, cfg Config, tag string) error {
 	host, port, err := net.SplitHostPort(cfg.ControlListen)
 	if err != nil {
 		return err
@@ -187,6 +203,11 @@ func waitForDaemon(ctx context.Context, cfg Config) error {
 	defer conn.Close()
 	client := nodegrpc.NewNodeClient(conn)
 	return waitForReady(ctx, "yagp-daemon control API", 25*time.Second, func(ctx context.Context) bool {
+		if tag != "" {
+			state, err := client.GetUpgradeStatus(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
+			return err == nil && state.GetSupported() && state.GetDaemonVersion() == tag
+		}
+		// A rollback can restore a daemon released before the upgrade RPC existed.
 		_, err := client.GetObserverEndpoint(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
 		return err == nil
 	})
