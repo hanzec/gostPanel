@@ -18,7 +18,8 @@ import (
 func TestNodeEnrollmentAndDeletion(t *testing.T) {
 	ctx := context.Background()
 	db := newServiceTestDB(t)
-	s := NewNodeService(db)
+	fingerprint := strings.Repeat("f1", 32)
+	s := NewNodeService(db, fingerprint)
 	limit, reset := int64(12345), "daily"
 	request := &dto.CreateNodeReq{Name: "edge", Remark: "registered in test", TrafficLimitBytes: &limit, TrafficResetPeriod: &reset}
 	node, err := s.Create(request, testAdmin, testIP, testAgent)
@@ -39,9 +40,11 @@ func TestNodeEnrollmentAndDeletion(t *testing.T) {
 
 	token, err := s.IssueRegistrationToken(ctx, node.ID, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
-	if !strings.HasPrefix(token.Token, fmt.Sprintf("%d.", node.ID)) || time.Until(token.ExpiresAt) < 14*time.Minute {
-		t.Fatalf("issued token ID or expiration was invalid: %v", token.ExpiresAt)
+	if !strings.HasPrefix(token.Token, fmt.Sprintf("%d.", node.ID)) || !strings.HasSuffix(token.Token, "."+fingerprint) || time.Until(token.ExpiresAt) < 14*time.Minute {
+		t.Fatalf("issued token ID, fingerprint or expiration was invalid: %v", token.ExpiresAt)
 	}
+	_, err = s.Register(ctx, node.ID, strings.TrimSuffix(token.Token, "."+fingerprint), "", "2001:db8::8")
+	requireServiceError(t, err, gorm.ErrRecordNotFound)
 	registered, err := s.Register(ctx, node.ID, token.Token, "", "2001:db8::8")
 	requireServiceError(t, err, nil)
 	if registered.ID != node.ID || registered.Address != "2001:db8::8" ||
@@ -89,7 +92,7 @@ func TestUnreachableNodeStopsItsRulesAndRelatedTunnels(t *testing.T) {
 	relayed := model.GostRule{Name: "through tunnel", Type: model.RuleTypeTunnel, TunnelID: &tunnel.ID, ListenPort: 8081, Status: model.RuleStatusRunning}
 	saveServiceFixtures(t, db, &direct, &relayed)
 
-	nodeService := NewNodeService(db)
+	nodeService := NewNodeService(db, "")
 	got, err := nodeService.GetConfig(node.ID)
 	requireServiceError(t, err, nil)
 	if len(got.Services) != 0 {

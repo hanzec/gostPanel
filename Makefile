@@ -40,7 +40,7 @@ build-web:
 # 构建后端（包含嵌入的前端）
 build-server:
 	@echo "Building server..."
-	go build -ldflags="$(LDFLAGS)" -o yagp cmd/server/main.go
+	go build -ldflags="$(LDFLAGS)" -o yagp ./cmd/server
 	@echo "Server build complete"
 
 build-node:
@@ -52,16 +52,16 @@ build-node-systemd:
 # 运行（构建前端并启动后端）
 run: build-web
 	@echo "Starting server..."
-	go run -ldflags="$(LDFLAGS)" cmd/server/main.go
+	go run -ldflags="$(LDFLAGS)" ./cmd/server
 
 # 构建多平台发布版本
 release: build-web
 	@echo "Building release binaries..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-linux-amd64 cmd/server/main.go
-	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-linux-arm64 cmd/server/main.go
-	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-amd64 cmd/server/main.go
-	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-arm64 cmd/server/main.go
-	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-windows-amd64.exe cmd/server/main.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-linux-amd64 ./cmd/server
+	GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-linux-arm64 ./cmd/server
+	GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-amd64 ./cmd/server
+	GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-darwin-arm64 ./cmd/server
+	GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-windows-amd64.exe ./cmd/server
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-daemon-linux-amd64 ./cmd/yagp-daemon
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-daemon-linux-arm64 ./cmd/yagp-daemon
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags libsystemd -ldflags="$(LDFLAGS)" -o yagp-daemon-systemd-linux-amd64 ./cmd/yagp-daemon

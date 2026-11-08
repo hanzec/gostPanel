@@ -26,7 +26,7 @@ import (
 func TestRouterRejectsMalformedTrustedProxy(t *testing.T) {
 	if _, err := NewRouter(nil, config.AuthentikConfig{
 		TrustedProxies: []string{"not-a-proxy"}, AdminGroup: "yagp-admins",
-	}, nil); err == nil {
+	}, nil, ""); err == nil {
 		t.Fatal("router started with an invalid trusted proxy")
 	}
 }
@@ -51,10 +51,11 @@ func TestAdminRouteBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	fingerprint := strings.Repeat("ab", 32)
 	routes, err := NewRouter(db, config.AuthentikConfig{
 		TrustedProxies: []string{"192.0.2.20"},
 		AdminGroup:     "yagp-admins",
-	}, service.NewNodeUpgradeService(db))
+	}, service.NewNodeUpgradeService(db), fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,9 +132,9 @@ func TestAdminRouteBoundary(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &reply); err != nil {
 				t.Fatal(err)
 			}
-			id, err := nodegrpc.ParseRegistrationTokenID(reply.Data.Token)
-			if err != nil || id != 1 || reply.Data.ExpiresAt.IsZero() || rec.Header().Get("Cache-Control") != "private, no-store" {
-				t.Fatal("admin did not receive an uncached token and expiry for node 1")
+			id, pin, err := nodegrpc.ParseRegistrationToken(reply.Data.Token)
+			if err != nil || id != 1 || pin != fingerprint || reply.Data.ExpiresAt.IsZero() || rec.Header().Get("Cache-Control") != "private, no-store" {
+				t.Fatal("admin did not receive an uncached token, certificate fingerprint, and expiry for node 1")
 			}
 		}
 	}

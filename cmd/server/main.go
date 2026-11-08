@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"net"
-	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,10 +24,7 @@ import (
 	"github.com/glebarez/sqlite"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -88,25 +85,25 @@ func main() {
 		logger.Fatalf("初始化系统配置失败: %v", err)
 	}
 
-	engine := gin.New()
-	if err = engine.SetTrustedProxies(cfg.Authentik.TrustedProxies); err != nil {
-		logger.Fatalf("反向代理配置无效: %v", err)
-	}
-
-	nodeUpgrade := service.NewNodeUpgradeService(db)
-	r, err := router.NewRouter(db, cfg.Authentik, nodeUpgrade)
-	if err != nil {
-		logger.Fatalf("Authentik 配置无效: %v", err)
-	}
-	r.Setup(engine)
-
-	reportServer, err := startReports(cfg.Report, db)
+	reportServer, reportFingerprint, err := startReports(cfg.Report, db)
 	if err != nil {
 		logger.Fatalf("启动流量上报服务失败: %v", err)
 	}
 	if reportServer != nil {
 		defer reportServer.Stop()
 	}
+
+	engine := gin.New()
+	if err = engine.SetTrustedProxies(cfg.Authentik.TrustedProxies); err != nil {
+		logger.Fatalf("反向代理配置无效: %v", err)
+	}
+
+	nodeUpgrade := service.NewNodeUpgradeService(db)
+	r, err := router.NewRouter(db, cfg.Authentik, nodeUpgrade, reportFingerprint)
+	if err != nil {
+		logger.Fatalf("Authentik 配置无效: %v", err)
+	}
+	r.Setup(engine)
 
 	// 启动服务器
 	go func() {
@@ -146,79 +143,61 @@ func main() {
 	backupService.Stop()
 }
 
-func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
+func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, string, error) {
 	if cfg.Listen == "" {
-		return nil, nil
+		return nil, "", nil
 	}
 	address, err := nodegrpc.ParsePanelAddress(cfg.Address)
 	if err != nil {
-		return nil, fmt.Errorf("report.address: %w", err)
+		return nil, "", fmt.Errorf("report.address: %w", err)
 	}
 	if cfg.ProxyIP != "" && !address.Proxied() {
-		return nil, fmt.Errorf("配置 report.proxy_ip 后，report.address 必须以 %s 结尾", nodegrpc.PanelProxyPath)
+		return nil, "", fmt.Errorf("配置 report.proxy_ip 后，report.address 必须以 %s 结尾", nodegrpc.PanelProxyPath)
 	}
-	if cfg.ProxyIP == "" && address.Proxied() {
-		return nil, fmt.Errorf("report.address 使用 %s 时必须配置 report.proxy_ip", nodegrpc.PanelProxyPath)
-	}
-	options, err := reportTransport(cfg)
+	options, fingerprint, err := reportTransport(cfg, address)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	server := grpc.NewServer(append(options,
 		grpc.MaxRecvMsgSize(nodegrpc.MaxStreamFrameBytes),
 		grpc.MaxSendMsgSize(nodegrpc.MaxStreamFrameBytes),
 	)...)
-	nodegrpc.RegisterV1Server(server, handler.NewReportHandler(db, cfg.ProxyIP != ""))
+	ipSource := handler.ReportIPFromPeer
+	switch {
+	case cfg.ProxyIP != "":
+		ipSource = handler.ReportIPFromTrustedProxy
+	case address.Proxied():
+		ipSource = handler.ReportIPFromNodeOnly
+	}
+	nodegrpc.RegisterV1Server(server, handler.NewReportHandler(db, ipSource))
 	go func() {
 		logger.Infof("gRPC 流量上报服务监听 %s", listener.Addr())
 		if err := server.Serve(listener); err != nil {
 			logger.Fatalf("流量上报服务失败: %v", err)
 		}
 	}()
-	return server, nil
+	return server, fingerprint, nil
 }
 
-func reportTransport(cfg config.ReportConfig) ([]grpc.ServerOption, error) {
-	if cfg.ProxyIP == "" {
-		tlsCredentials, err := credentials.NewServerTLSFromFile(cfg.CertFile, cfg.KeyFile)
-		if err != nil {
-			return nil, err
-		}
-		return []grpc.ServerOption{grpc.Creds(tlsCredentials)}, nil
+func reportTransport(cfg config.ReportConfig, address nodegrpc.PanelAddress) ([]grpc.ServerOption, string, error) {
+	if address.Proxied() {
+		options, err := reportProxyOptions(cfg.ProxyIP)
+		return options, "", err
 	}
-
-	proxyIP, err := netip.ParseAddr(cfg.ProxyIP)
-	proxyIP = proxyIP.Unmap()
-	if err != nil || proxyIP.Zone() != "" || !(proxyIP.IsGlobalUnicast() || proxyIP.IsLoopback()) {
-		return nil, fmt.Errorf("report.proxy_ip 必须是代理的固定 IP 地址")
+	certificate, err := loadReportCertificate(cfg, address)
+	if err != nil {
+		return nil, "", err
 	}
-	// The proxy terminates TLS and is the only peer allowed on this h2c listener.
-	trusted := func(ctx context.Context) bool {
-		if p, ok := peer.FromContext(ctx); ok {
-			if addr, ok := p.Addr.(*net.TCPAddr); ok && addr.AddrPort().Addr().Unmap() == proxyIP {
-				return true
-			}
-		}
-		return false
+	fingerprint := ""
+	if cfg.CertFile == "" && cfg.KeyFile == "" {
+		fingerprint = reportCertificateFingerprint(certificate)
 	}
-	return []grpc.ServerOption{
-		grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
-			if !trusted(ctx) {
-				return nil, status.Error(codes.PermissionDenied, "untrusted report proxy")
-			}
-			return next(ctx, req)
-		}),
-		grpc.StreamInterceptor(func(srv any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, next grpc.StreamHandler) error {
-			if !trusted(stream.Context()) {
-				return status.Error(codes.PermissionDenied, "untrusted report proxy")
-			}
-			return next(srv, stream)
-		}),
-	}, nil
+	transport := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{certificate}})
+	return []grpc.ServerOption{grpc.Creds(transport)}, fingerprint, nil
 }
 
 // initDatabase 初始化数据库

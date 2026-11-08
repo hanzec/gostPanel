@@ -16,7 +16,7 @@ func TestServicePropagatesDatabaseReadFailures(t *testing.T) {
 	t.Run("missing nodes table", func(t *testing.T) {
 		db := newServiceTestDB(t)
 		requireServiceError(t, db.Migrator().DropTable(&model.GostNode{}), nil)
-		s := NewNodeService(db)
+		s := NewNodeService(db, "")
 		_, createErr := s.Create(&dto.CreateNodeReq{Name: "node"}, testAdmin, testIP, testAgent)
 		_, getErr := s.GetByID(1)
 		_, updateErr := s.Update(1, &dto.UpdateNodeReq{Name: "renamed"}, testAdmin, testIP, testAgent)
@@ -89,7 +89,7 @@ func TestServiceDoesNotAuditRejectedDatabaseWrites(t *testing.T) {
 			requireServiceError(t, db.Exec(sql).Error, nil)
 		}
 	}
-	nodes, rules, tunnels := NewNodeService(db), NewRuleService(db), NewTunnelService(db)
+	nodes, rules, tunnels := NewNodeService(db, ""), NewRuleService(db), NewTunnelService(db)
 	_, createNode := nodes.Create(&dto.CreateNodeReq{Name: "new node"}, testAdmin, testIP, testAgent)
 	_, updateNode := nodes.Update(node.ID, &dto.UpdateNodeReq{Name: "renamed"}, testAdmin, testIP, testAgent)
 	_, issueToken := nodes.IssueRegistrationToken(context.Background(), node.ID, testAdmin, testIP, testAgent)

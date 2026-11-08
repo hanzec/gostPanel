@@ -14,21 +14,23 @@ import (
 
 // Router 路由配置
 type Router struct {
-	db          *gorm.DB
-	adminAuth   gin.HandlerFunc
-	nodeUpgrade *service.NodeUpgradeService
+	db                      *gorm.DB
+	adminAuth               gin.HandlerFunc
+	nodeUpgrade             *service.NodeUpgradeService
+	registrationFingerprint string
 }
 
 // NewRouter 创建路由实例
-func NewRouter(db *gorm.DB, cfg config.AuthentikConfig, nodeUpgrade *service.NodeUpgradeService) (*Router, error) {
+func NewRouter(db *gorm.DB, cfg config.AuthentikConfig, nodeUpgrade *service.NodeUpgradeService, registrationFingerprint string) (*Router, error) {
 	adminAuth, err := middleware.NewAuthentikAuth(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return &Router{
-		db:          db,
-		adminAuth:   adminAuth,
-		nodeUpgrade: nodeUpgrade,
+		db:                      db,
+		adminAuth:               adminAuth,
+		nodeUpgrade:             nodeUpgrade,
+		registrationFingerprint: registrationFingerprint,
 	}, nil
 }
 
@@ -53,7 +55,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 	})
 
 	// 初始化服务
-	nodeService := service.NewNodeService(r.db)
+	nodeService := service.NewNodeService(r.db, r.registrationFingerprint)
 	ruleService := service.NewRuleService(r.db)
 	tunnelService := service.NewTunnelService(r.db)
 	statsService := service.NewStatsService(r.db)

@@ -46,7 +46,7 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := startTestReportServer(t, db)
-	nodes := service.NewNodeService(db)
+	nodes := service.NewNodeService(db, "")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	issue := func() string {

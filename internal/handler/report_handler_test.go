@@ -196,7 +196,7 @@ func startTestReportServer(t *testing.T, db *gorm.DB, options ...grpc.ServerOpti
 		t.Fatal(err)
 	}
 	server := grpc.NewServer(append(options, grpc.Creds(credentials.NewTLS(fixture.TLS)))...)
-	nodegrpc.RegisterV1Server(server, NewReportHandler(db, false))
+	nodegrpc.RegisterV1Server(server, NewReportHandler(db, ReportIPFromPeer))
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{RootCAs: trust})))
