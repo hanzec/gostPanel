@@ -18,7 +18,7 @@ vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
 
 const GIB = 1024 ** 3
 const primary = {
-  id: 7, name: '边缘节点', remark: '入口', status: 'online',
+  id: 7, name: '边缘节点', remark: '入口', status: 'online', username: 'node-7',
   address: '2001:db8::7', ipv4: '192.0.2.7', ipv6: '2001:db8::7', last_check_at: '2026-11-08T02:00:00Z',
   total_bytes: 1536, input_bytes: 512, output_bytes: 1024,
   traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily', traffic_quota_state: 'blocked', traffic_quota_used_bytes: GIB
@@ -44,6 +44,7 @@ afterEach(() => {
   wrapper = undefined
   vi.restoreAllMocks()
   delete window.navigator.clipboard
+  delete document.execCommand
   vi.useRealTimers()
 })
 
@@ -182,10 +183,13 @@ describe('node registration and quota settings', () => {
     expect(api.createNode).toHaveBeenCalledWith({
       name: newNode.name, remark: '', traffic_limit_bytes: GIB / 2, traffic_reset_period: 'weekly'
     })
-    expect(api.issueNodeRegistrationToken).toHaveBeenCalledWith(newNode.id)
-    expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain('https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh')
-    expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain("--panel-address 'panel.example.com:443/api/v1/grpc'")
-    expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain("--token 'secret'")
+    expect(api.issueNodeRegistrationToken).toHaveBeenCalledExactlyOnceWith(newNode.id)
+    const install = dialog(view, '安装节点 · 新节点')
+    expect(install.get('code').text()).toBe('secret')
+    expect(install.get('textarea').element.value).toBe(
+      "curl -fsSL 'https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh' | bash -s -- " +
+      "--panel-address 'panel.example.com:443/api/v1/grpc' --token 'secret'"
+    )
     expect(messages.success).toHaveBeenCalledWith('节点已添加')
   })
 
@@ -217,14 +221,17 @@ describe('node registration and quota settings', () => {
       traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily'
     })
     expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
-    expect(dialog(view, '安装节点 · 边缘节点-copy').get('#node-panel-address').element.value).toBe('')
+    expect(dialog(view, '安装节点 · 边缘节点-copy').get('[role="alert"]').text()).toContain('无法读取面板注册地址')
   })
 
-  it('validates panel addresses and can retry, copy and expire a registration command', async () => {
+  it('uses the configured address to generate, retry, copy and expire a registration command', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
     const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('clipboard denied'))
     Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
-    getPublicSystemConfig.mockResolvedValue(response({ reportAddress: '' }))
+    const execCommand = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false)
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
+    getPublicSystemConfig.mockResolvedValueOnce(response({ reportAddress: '' }))
+      .mockResolvedValue(response({ reportAddress: '[2001:db8::1]:39101' }))
     api.issueNodeRegistrationToken.mockRejectedValueOnce(new Error('retry'))
       .mockImplementationOnce(async () => token('expired', -1000))
       .mockImplementationOnce(async () => token("one'two", 1000))
@@ -232,35 +239,42 @@ describe('node registration and quota settings', () => {
     await flushPromises()
     await click(view, '安装')
     const install = dialog(view, '安装节点 · 边缘节点')
-    const address = install.get('#node-panel-address')
-    for (const invalid of ['https://panel.example.com:443/api/v1/grpc', 'panel.example.com:443/api/v2/grpc', '[broken:39101', 'panel.example.com']) {
-      await address.setValue(invalid)
-      expect(button(install, '签发注册令牌').element.disabled).toBe(true)
-    }
-    await address.setValue('[2001:db8::1]:39101')
-    await click(install, '签发注册令牌')
-    expect(install.get('[role="alert"]').text()).toContain('签发失败')
-    await click(install, '签发注册令牌')
+    expect(install.find('input').exists()).toBe(false)
+    expect(install.get('[role="alert"]').text()).toContain('report.address')
+    expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
+    await click(install, '重试生成')
+    expect(install.get('[role="alert"]').text()).toContain('签发注册令牌失败')
+    await click(install, '重试生成')
     expect(install.text()).toContain('令牌已过期')
-    expect(button(install, '复制命令').element.disabled).toBe(true)
-    await click(install, '重新签发令牌')
-    const command = install.get('code').text()
+    expect(install.find('textarea').exists()).toBe(false)
+    await click(install, '重试生成')
+    expect(install.get('code').text()).toBe("one'two")
+    expect(install.text()).toContain('重新注册会使旧实例失去访问权限')
+    const field = install.get('textarea').element
+    const command = field.value
+    expect(field.readOnly).toBe(true)
     expect(command).toContain("--panel-address '[2001:db8::1]:39101'")
     expect(command).toContain("--token 'one'\"'\"'two'")
-    await click(install, '复制命令')
+    await click(install, '复制安装命令')
     expect(writeText).toHaveBeenCalledWith(command)
-    expect(messages.success).toHaveBeenCalledWith('安装命令已复制')
-    await click(install, '复制命令')
-    expect(messages.error).toHaveBeenCalledWith('复制失败，请手动选择命令')
+    expect(install.get('[role="status"]').text()).toBe('安装命令已复制')
+    await click(install, '复制安装命令')
+    expect(execCommand).toHaveBeenCalledWith('copy')
+    expect(install.get('[role="status"]').text()).toBe('安装命令已复制')
+    delete window.navigator.clipboard
+    await click(install, '复制安装命令')
+    expect(field.selectionStart).toBe(0)
+    expect(field.selectionEnd).toBe(command.length)
+    expect(install.get('[role="status"]').text()).toContain('已选中安装命令')
     await vi.advanceTimersByTimeAsync(1000)
     expect(install.text()).toContain('令牌已过期')
-    expect(install.find('code').exists()).toBe(false)
+    expect(install.find('textarea').exists()).toBe(false)
     await click(install, '关闭')
     await click(view, '安装')
     expect(dialog(view, '安装节点 · 边缘节点').text()).not.toContain('令牌已过期')
   })
 
-  it('discards stale installation responses when the dialog is closed and reopened', async () => {
+  it('discards a closed dialog address and shares a pending token on reopen', async () => {
     const config = deferred()
     const issue = deferred()
     getPublicSystemConfig.mockReturnValueOnce(config.promise)
@@ -269,21 +283,21 @@ describe('node registration and quota settings', () => {
     await flushPromises()
     await click(view, '安装')
     const title = '安装节点 · 边缘节点'
-    expect(dialog(view, title).text()).toContain('正在读取面板注册地址')
+    expect(dialog(view, title).text()).toContain('正在生成注册令牌')
     await click(dialog(view, title), '关闭')
     config.resolve(response({ reportAddress: 'stale.example.com:1' }))
     await flushPromises()
     expect(view.find(`[aria-label="${title}"]`).exists()).toBe(false)
+    expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
     await click(view, '安装')
-    expect(dialog(view, title).get('#node-panel-address').element.value).toBe('panel.example.com:443/api/v1/grpc')
-    await click(dialog(view, title), '签发注册令牌')
-    expect(dialog(view, title).text()).toContain('正在签发注册令牌')
+    expect(button(dialog(view, title), '复制安装命令').element.disabled).toBe(true)
     await click(dialog(view, title), '关闭')
-    issue.resolve(token('stale-token'))
-    await flushPromises()
     await click(view, '安装')
-    expect(dialog(view, title).text()).not.toContain('stale-token')
-    expect(button(dialog(view, title), '复制命令').element.disabled).toBe(true)
+    expect(api.issueNodeRegistrationToken).toHaveBeenCalledExactlyOnceWith(primary.id)
+    issue.resolve(token('shared-token'))
+    await flushPromises()
+    expect(dialog(view, title).get('code').text()).toBe('shared-token')
+    expect(dialog(view, title).get('textarea').element.value).toContain("--panel-address 'panel.example.com:443/api/v1/grpc'")
   })
 
   it('retains a failed edit, ignores a duplicate submission and lets the user retry', async () => {
