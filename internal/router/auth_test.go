@@ -71,7 +71,8 @@ func TestAdminRouteBoundary(t *testing.T) {
 		{http.MethodGet, "/", "staff", http.StatusForbidden},
 		{http.MethodGet, "/", "yagp-admins", http.StatusOK},
 		{http.MethodGet, "/nodes/managed", "yagp-admins", http.StatusOK},
-		{http.MethodGet, "/favicon.ico", "yagp-admins", http.StatusOK},
+		{http.MethodGet, "/favicon.svg", "", http.StatusOK},
+		{http.MethodHead, "/favicon.svg", "", http.StatusOK},
 		{http.MethodGet, "/assets/unavailable.js", "yagp-admins", http.StatusNotFound},
 		{http.MethodGet, "/api/v1/auth/info", "yagp-admins", http.StatusOK},
 		{http.MethodGet, "/api/v1/nodes", "", http.StatusUnauthorized},
@@ -110,8 +111,16 @@ func TestAdminRouteBoundary(t *testing.T) {
 			!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") || !bytes.Contains(rec.Body.Bytes(), []byte(`id="app"`))) {
 			t.Fatal("a frontend deep link did not return the embedded app shell")
 		}
-		if tt.path == "/favicon.ico" && (rec.Body.Len() == 0 || strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html")) {
-			t.Fatal("favicon route did not return the embedded asset")
+		if tt.path == "/favicon.svg" {
+			if rec.Header().Get("Content-Type") != "image/svg+xml" {
+				t.Fatalf("favicon content type = %q", rec.Header().Get("Content-Type"))
+			}
+			if tt.method == http.MethodGet && !bytes.Contains(rec.Body.Bytes(), []byte("<svg")) {
+				t.Fatal("GET favicon did not return the SVG asset")
+			}
+			if tt.method == http.MethodHead && rec.Body.Len() != 0 {
+				t.Fatal("HEAD favicon returned a body")
+			}
 		}
 		if tt.path == "/api/v1/nodes/1/registration-token" && rec.Code == http.StatusOK {
 			var reply struct {
@@ -175,7 +184,7 @@ func testAuthentikFailureResponses(t *testing.T, engine *gin.Engine) {
 		{"homepage without administrator access", http.MethodGet, "/", trustedProxy, username, groups, http.StatusForbidden, "admin_group_required", true},
 		{"homepage without a groups header", http.MethodGet, "/", trustedProxy, username, "", http.StatusForbidden, "admin_group_required", true},
 		{"API with browser accept header", http.MethodGet, "/api/v1/auth/info", trustedProxy, "", groups, http.StatusUnauthorized, "invalid_identity", false},
-		{"asset with browser accept header", http.MethodGet, "/favicon.ico", trustedProxy, "", groups, http.StatusUnauthorized, "invalid_identity", false},
+		{"asset with browser accept header", http.MethodGet, "/assets/unavailable.js", trustedProxy, "", groups, http.StatusUnauthorized, "invalid_identity", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
