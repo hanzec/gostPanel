@@ -26,7 +26,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const nodeStateDir = "/etc/yagp-node"
+const nodeStateDir = "/etc/yagp-daemon"
 
 func enroll(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("enroll", flag.ExitOnError)

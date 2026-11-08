@@ -38,7 +38,7 @@ while (($#)); do
     shift 2
 done
 
-state_dir=/etc/yagp-node
+state_dir=/etc/yagp-daemon
 
 if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
     manager=systemd
@@ -52,7 +52,7 @@ if [[ "$action" == uninstall ]]; then
     [[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "请填写面板中的节点 ID"
     base_path="$state_dir/$node_id"
     gost_unit="yagp-gost-$node_id"
-    bridge_unit="yagp-node-$node_id"
+    bridge_unit="yagp-daemon-$node_id"
     if [[ "$manager" == systemd ]]; then
         systemctl disable --now "$bridge_unit" "$gost_unit" || true
         rm -f -- "/etc/systemd/system/$bridge_unit.service" "/etc/systemd/system/$gost_unit.service"
@@ -68,7 +68,7 @@ if [[ "$action" == uninstall ]]; then
         nft list table inet "yagp_node_$node_id" >/dev/null 2>&1; then
         nft delete table inet "yagp_node_$node_id"
     fi
-    rm -f -- "$base_path/yagp-node" "$base_path/gost"
+    rm -f -- "$base_path/yagp-daemon" "$base_path/gost"
     printf '节点 %s 服务已卸载，配置位于 %s\n' "$node_id" "$base_path"
     exit 0
 fi
@@ -83,7 +83,7 @@ esac
 
 repo="${YAGP_REPO:-hanzec/gostPanel}"
 release_path=latest/download
-node_version="${YAGP_NODE_VERSION:-}"
+node_version="${YAGP_DAEMON_VERSION:-}"
 if [[ -n "$node_version" ]]; then
     release_path="download/$node_version"
 fi
@@ -109,33 +109,33 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p -- "$tmp_dir/bridge" "$stage"
 
-bridge_bin="${YAGP_NODE_BIN:-}"
+bridge_bin="${YAGP_DAEMON_BIN:-}"
 if [[ -z "$bridge_bin" ]]; then
-    curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-node-linux-$arch.tar.gz" \
+    curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-daemon-linux-$arch.tar.gz" \
         -o "$tmp_dir/bridge.tar.gz"
     tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
     if [[ "$manager" == systemd ]]; then
-        bridge_bin="$tmp_dir/bridge/yagp-node-systemd-linux-$arch"
+        bridge_bin="$tmp_dir/bridge/yagp-daemon-systemd-linux-$arch"
     else
-        bridge_bin="$tmp_dir/bridge/yagp-node-linux-$arch"
+        bridge_bin="$tmp_dir/bridge/yagp-daemon-linux-$arch"
     fi
 fi
-[[ -f "$bridge_bin" ]] || die "找不到适用于 $manager 的 yagp-node 程序: $bridge_bin"
+[[ -f "$bridge_bin" ]] || die "找不到适用于 $manager 的 yagp-daemon 程序: $bridge_bin"
 
-install -m 0700 -- "$bridge_bin" "$stage/yagp-node"
+install -m 0700 -- "$bridge_bin" "$stage/yagp-daemon"
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
     install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$stage/LICENSE"
 fi
-"$stage/yagp-node" prepare-gost --output "$stage/gost"
+"$stage/yagp-daemon" prepare-gost --output "$stage/gost"
 
-if ! node_id=$(printf '%s' "$token" | "$stage/yagp-node" enroll --panel-address "$panel_address" --output "$stage"); then
+if ! node_id=$(printf '%s' "$token" | "$stage/yagp-daemon" enroll --panel-address "$panel_address" --output "$stage"); then
     die "节点未安装。若 token 已失效，请在面板生成新的 token 后重试。"
 fi
 unset token
-[[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "yagp-node 未返回有效的节点 ID"
+[[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "yagp-daemon 未返回有效的节点 ID"
 base_path="$state_dir/$node_id"
 gost_unit="yagp-gost-$node_id"
-bridge_unit="yagp-node-$node_id"
+bridge_unit="yagp-daemon-$node_id"
 mv -T -n -- "$stage" "$base_path"
 [[ ! -e "$stage" ]] || die "节点安装目录已存在: $base_path"
 
@@ -151,7 +151,7 @@ After=network.target nftables.service
 
 [Service]
 WorkingDirectory=$base_path
-ExecStartPre=$base_path/yagp-node ensure-gost -c $base_path/node.yaml
+ExecStartPre=$base_path/yagp-daemon ensure-gost -c $base_path/node.yaml
 ExecStart=$base_path/$executable $config_flag $base_path/$config_file
 Restart=on-failure
 RestartSec=2
@@ -178,7 +178,7 @@ EOF
     fi
 }
 
-write_service "$bridge_unit" "yagp node $node_id bridge" yagp-node -c node.yaml
+write_service "$bridge_unit" "yagp daemon $node_id" yagp-daemon -c node.yaml
 if [[ "$manager" == systemd ]]; then
     gost_unit_path="/etc/systemd/system/$gost_unit.service"
     gost_unit_existed=false

@@ -136,23 +136,27 @@ report:
 2. 打开该实例的 **安装** 操作，点击 **签发注册令牌**，并在目标 Linux 服务器以 root 执行生成的命令。命令只传 `--panel-address` 和 `--token`。token 有效期为 15 分钟，成功注册后立即失效，重新签发会替换尚未使用的 token。
 3. 节点在线后创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 gRPC `Panel.Report`。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
-首次注册时，`yagp-node` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `Panel.RegisterNode` 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-node/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
+首次注册时，`yagp-daemon` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `Panel.RegisterNode` 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-daemon/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
 
-参照 Komari，`yagp-node` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。两种地址均未获取时，面板使用注册连接的来源 IP。面板优先使用记录到的 IPv4，其次使用 IPv6。节点的 gRPC 端口须能通过该地址从面板访问。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
+参照 Komari，`yagp-daemon` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。两种地址均未获取时，面板使用注册连接的来源 IP。面板优先使用记录到的 IPv4，其次使用 IPv6。节点的 gRPC 端口须能通过该地址从面板访问。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
 
-`yagp-node` 启动时立即探测一次，随后每 5 分钟探测。节点用现有凭据通过 TLS 上报地址变化，面板自动更新连接地址。某一地址族探测失败时保留其上次记录；上报失败则在下一轮重试。[Komari 上报周期](https://komari-monitor.github.io/komari-document/dev/agent.html)
+`yagp-daemon` 启动时立即探测一次，随后每 5 分钟探测。节点用现有凭据通过 TLS 上报地址变化，面板自动更新连接地址。某一地址族探测失败时保留其上次记录；上报失败则在下一轮重试。[Komari 上报周期](https://komari-monitor.github.io/komari-document/dev/agent.html)
 
-已注册的节点无需重新注册。升级面板后，先停止节点服务，再替换 `/etc/yagp-node/<ID>/yagp-node`，最后启动原服务。systemd 节点使用发布包中的 `yagp-node-systemd-linux-<架构>`，服务名为 `yagp-node-<ID>`。保留实例目录中的配置和证书。
+Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TLS gRPC 接口下发配置。节点上报时使用注册获得的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
-Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS gRPC 接口下发配置。节点上报时使用注册获得的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
+如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-daemon/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载最新版 `yagp-daemon-linux-<架构>.tar.gz`，可用 `YAGP_DAEMON_VERSION` 指定发布版本。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_DAEMON_BIN=/path/to/yagp-daemon` 指定对应的二进制。
 
-如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-node/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载 `yagp-node` 发布包。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_NODE_BIN=/path/to/yagp-node` 指定对应的二进制。
+安装脚本为每个实例启用 `yagp-daemon-<ID>.service`。守护程序启动前检查对应的 `yagp-gost-<ID>.service`，在服务或程序缺少时尝试补装，并等待本机 Gost API 就绪。Gost 程序从官方 GitHub Releases 下载。
 
-安装脚本为每个实例启用 `yagp-node-<ID>.service`。节点桥启动前检查对应的 `yagp-gost-<ID>.service`，在服务或程序缺少时尝试补装，并等待本机 Gost API 就绪。Gost 程序从官方 GitHub Releases 下载。
-
-如果注册后服务启动失败，使用 `journalctl -u yagp-node-<ID> -u yagp-gost-<ID>` 查看日志。配置已写入实例目录时，排除故障后执行 `systemctl enable --now yagp-node-<ID>`。如果注册已完成但本地配置未写入，请重新签发令牌。
+如果注册后服务启动失败，使用 `journalctl -u yagp-daemon-<ID> -u yagp-gost-<ID>` 查看日志。配置已写入实例目录时，排除故障后执行 `systemctl enable --now yagp-daemon-<ID>`。如果注册已完成但本地配置未写入，请重新签发令牌。
 
 执行 `bash scripts/install_node.sh uninstall --node-id <ID>` 可卸载实例并保留配置。在同一台服务器重新注册同一节点前，先卸载原实例并移走保留的目录。
+
+### 升级已注册的节点
+
+已注册的节点可沿用原 ID、凭据和证书。升级时停止旧的 `yagp-node-<ID>` 和 `yagp-gost-<ID>` 服务，并取消旧守护服务的开机启动。将 `/etc/yagp-node/<ID>` 移到 `/etc/yagp-daemon/<ID>`，放入新版 `yagp-daemon`。systemd 选用包内的 `yagp-daemon-systemd-linux-<架构>`，OpenRC 选用 `yagp-daemon-linux-<架构>`。更新 `node.yaml` 的 `tls_cert_file` 和 `tls_key_file`，如 `report_ca_file` 指向已移动的文件，也一并更新。
+
+将守护服务定义改名为 `yagp-daemon-<ID>`，更新守护服务和 `yagp-gost-<ID>` 的工作目录、程序和配置路径。systemd 下执行 `systemctl daemon-reload`，再用 `systemctl enable --now yagp-daemon-<ID>` 启动新版，由它启动 Gost。OpenRC 下将新服务加入默认运行级别，再依次启动 Gost 和 `yagp-daemon-<ID>`。
 
 ### 查看和重启 Gost 服务
 
@@ -162,7 +166,7 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 ### 管理节点的 nftables 配置
 
-在装有 `nftables` 的 Linux 节点上，通过 **节点管理 → 更多 → nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。节点也可运行 `/etc/yagp-node/<ID>/yagp-node nft-template -c /etc/yagp-node/<ID>/node.yaml`，经 TLS 从面板获取同一份模板。
+在装有 `nftables` 的 Linux 节点上，通过 **节点管理 → 更多 → nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。节点也可运行 `/etc/yagp-daemon/<ID>/yagp-daemon nft-template -c /etc/yagp-daemon/<ID>/node.yaml`，经 TLS 从面板获取同一份模板。
 
 配置使用 `{"nftables":[...]}`，只允许为该节点专用的 `inet yagp_node_<ID>` 表添加链、规则、集合等对象。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除该表。卸载时安装脚本会清理该表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
 
@@ -192,14 +196,14 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 版本格式为 `x.y.z-sha`，例如 `0.1.67-a1b2c3d`。`x.y` 在仓库根目录的 `VERSION` 中维护，`z` 是沿第一父提交统计的主线提交数，`sha` 是提交 SHA 的前 7 位。用 `bash scripts/version.sh` 可查看当前检出提交的版本，需要完整 Git 历史。
 
-面板仪表盘、`/api/v1/health`、`yagp --version` 和 `yagp-node --version` 使用相同的构建版本。
+面板仪表盘、`/api/v1/health`、`yagp --version` 和 `yagp-daemon --version` 使用相同的构建版本。
 
 ### 开发与编译
 
 使用 Go 1.23+ 和 Node.js 20.19+（20.x）或 22.12+ 构建。Go 编译时会嵌入前端产物，首次编译后端前需先构建前端。
 
 ```bash
-# 完整构建，产物为 yagp 和 yagp-node
+# 完整构建，产物为 yagp 和 yagp-daemon
 make build
 
 # 只构建前端

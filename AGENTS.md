@@ -8,7 +8,7 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 ## 开发与验证
 
-- `cmd/server` 是面板入口，`cmd/yagp-node` 是节点桥入口，`internal` 包含 API、业务逻辑和持久化代码。`web` 包含 Vue 前端。
+- `cmd/server` 是面板入口，`cmd/yagp-daemon` 是节点守护程序入口，`internal` 包含 API、业务逻辑和持久化代码。`web` 包含 Vue 前端。
 - 项目名使用 `yagp`，转发节点继续使用 Gost 名称。涉及构建产物命名时，同步核对 Makefile、Dockerfile、发布工作流和面板安装脚本。
 - 使用 Go 1.23+ 和 Node.js 20.19+（20.x）或 22.12+。前端产物输出到 `internal/router/dist`，由 Go 编译时嵌入。验证后端前先构建前端。
 

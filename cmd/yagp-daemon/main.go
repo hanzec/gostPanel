@@ -40,7 +40,7 @@ func run(ctx context.Context, args []string) error {
 			return printNftTemplate(ctx, parseConfigFlag(args[0], args[1:]))
 		}
 	}
-	configFile := parseConfigFlag("yagp-node", args)
+	configFile := parseConfigFlag("yagp-daemon", args)
 	config, err := readConfig(configFile)
 	if err != nil {
 		return err

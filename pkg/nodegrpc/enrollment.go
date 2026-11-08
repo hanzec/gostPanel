@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-// NodeCertificateName is the DNS SAN in enrolled control server certificates.
+// NodeCertificateName is the stable DNS SAN used to verify enrolled control server certificates.
 const NodeCertificateName = "yagp-node"
 
 func ParseRegistrationTokenID(token string) (uint64, error) {

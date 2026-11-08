@@ -41,7 +41,7 @@ internal/router/dist/
 main
 gost-panel
 /yagp
-/yagp-node
+/yagp-daemon
 /config/**/*.key
 
 # Frontend (Web)

@@ -68,8 +68,8 @@ jobs:
           tar -czvf yagp-darwin-arm64.tar.gz yagp-darwin-arm64 config/config.yaml LICENSE
           # 打包 Windows
           zip yagp-windows-amd64.zip yagp-windows-amd64.exe config/config.yaml LICENSE
-          tar -czvf yagp-node-linux-amd64.tar.gz yagp-node-linux-amd64 yagp-node-systemd-linux-amd64 LICENSE
-          tar -czvf yagp-node-linux-arm64.tar.gz yagp-node-linux-arm64 yagp-node-systemd-linux-arm64 LICENSE
+          tar -czvf yagp-daemon-linux-amd64.tar.gz yagp-daemon-linux-amd64 yagp-daemon-systemd-linux-amd64 LICENSE
+          tar -czvf yagp-daemon-linux-arm64.tar.gz yagp-daemon-linux-arm64 yagp-daemon-systemd-linux-arm64 LICENSE
 
       - name: Check latest release eligibility
         id: latest
