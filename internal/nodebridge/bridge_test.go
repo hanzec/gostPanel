@@ -132,6 +132,9 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	if _, err = controlClient.ApplyNftConfig(timeout, &nodegrpc.NftConfig{Config: `{"nftables":[]}`}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated nftables request: %v", err)
 	}
+	if _, err = controlClient.SyncTrafficQuota(timeout, &nodegrpc.TrafficQuotaRequest{WindowStart: -1}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("unauthenticated quota removal request: %v", err)
+	}
 	configWithoutCertificate := &gost.Config{Address: controlAddress, Username: username, Password: password}
 	if err = gost.NewClient(configWithoutCertificate).HealthCheck(); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("node without a registration certificate: %v", err)
@@ -144,6 +147,9 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	client := gost.NewClient(&gost.Config{Address: controlAddress, CertificatePEM: nodeCert, Username: username, Password: password})
 	if err = client.HealthCheck(); err != nil {
 		t.Fatal(err)
+	}
+	if _, err = client.SyncTrafficQuota(timeout, 0, 0, -1, nil, nil); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("quota request without a node config file: %v", err)
 	}
 	address, err := client.ObserverAddress()
 	if err != nil || address != observerAddress {

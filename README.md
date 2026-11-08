@@ -240,6 +240,8 @@ GitHub Release 正文由 `cmd/release-notes` 生成。程序沿当前分支的�
 
 使用 Go 1.27.3 和 Node.js 26.13.0 LTS 构建。版本分别记录在 [go.mod](./go.mod) 和 [.node-version](./.node-version)。Go 编译时会嵌入前端产物，首次编译后端前需先构建前端。
 
+构建前端后，运行 `go test ./... -cover` 可查看各个 Go 包的语句覆盖率。发布工作流在创建 GitHub Release 前运行这些测试，并在运行摘要中显示总覆盖率。
+
 ```bash
 # 完整构建，产物为 yagp 和 yagp-daemon
 make build
