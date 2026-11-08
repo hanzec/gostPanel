@@ -13,7 +13,7 @@
       <div class="inventory-heading">
         <div>
           <h2 id="node-inventory-title">节点清单</h2>
-          <p class="ops-muted">查看节点健康状态与累计上下行流量。</p>
+          <p class="ops-muted">查看节点健康状态、累计上下行流量及上限。</p>
         </div>
         <span class="inventory-badge ops-mono">gRPC / TLS</span>
       </div>
@@ -90,6 +90,24 @@
                   <span aria-hidden="true"> · </span>
                   出 <span class="ops-mono">{{ formatBytes(node.output_bytes) }}</span>
                 </span>
+                <template v-if="node.traffic_limit_bytes > 0">
+                  <span class="inventory-secondary ops-muted">
+                    上限 <span class="ops-mono">{{ formatBytes(node.traffic_limit_bytes) }}</span>
+                    · {{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}
+                  </span>
+                  <span v-if="node.traffic_quota_state === 'active' || node.traffic_quota_state === 'blocked'" class="inventory-secondary ops-muted">
+                    {{ node.traffic_reset_period && node.traffic_reset_period !== 'none' ? '本期用量' : '额度用量' }}
+                    <span class="ops-mono">{{ formatBytes(node.traffic_quota_used_bytes) }}</span>
+                  </span>
+                  <span class="ops-status node-traffic-status" :class="(trafficQuotaStates[node.traffic_quota_state] || trafficQuotaStates.pending).tone">
+                    {{ (trafficQuotaStates[node.traffic_quota_state] || trafficQuotaStates.pending).label }}
+                  </span>
+                  <span v-if="node.traffic_quota_state === 'unsupported'" class="inventory-secondary ops-muted">
+                    需要支持流量配额的 yagp-daemon 和 nftables。
+                  </span>
+                </template>
+                <span v-else-if="node.traffic_quota_state" class="inventory-secondary ops-muted">解除限制待同步</span>
+                <span v-else class="inventory-secondary ops-muted">未设上限</span>
               </td>
               <td class="inventory-actions-cell" role="cell">
                 <div class="inventory-actions">
@@ -152,6 +170,18 @@
           </el-form-item>
           <el-form-item label="gRPC 端口" prop="port">
             <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
+          </el-form-item>
+          <el-form-item label="流量上限（GiB，可选）" prop="trafficLimitGiB" class="inventory-form-wide">
+            <el-input v-model.trim="form.trafficLimitGiB" inputmode="decimal" placeholder="例如 100.5" aria-describedby="node-traffic-limit-help" clearable />
+            <p id="node-traffic-limit-help" class="node-traffic-help ops-muted">
+              留空或输入 0 表示不限。达额后节点立即拦截转发，额度恢复后自动解除限制。在线节点约每 5 秒同步用量和周期。
+            </p>
+          </el-form-item>
+          <el-form-item label="重置周期" prop="trafficResetPeriod" class="inventory-form-wide">
+            <el-select v-model="form.trafficResetPeriod" :disabled="!trafficLimitBytes" aria-describedby="node-traffic-reset-help">
+              <el-option v-for="(label, period) in trafficResetPeriods" :key="period" :label="label" :value="period" />
+            </el-select>
+            <p id="node-traffic-reset-help" class="node-traffic-help ops-muted">按北京时间零点重置，每周从周一开始。</p>
           </el-form-item>
           <el-form-item label="备注" prop="remark" class="inventory-form-wide">
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录节点用途或部署位置" />
@@ -274,11 +304,19 @@ const nodeStates = {
   offline: { label: '离线', icon: CircleClose },
   error: { label: '异常', icon: Warning, tone: 'danger' }
 }
+const trafficResetPeriods = { none: '不重置', daily: '每日重置', weekly: '每周重置', monthly: '每月重置' }
+const trafficQuotaStates = {
+  active: { label: '配额生效', tone: 'is-success' },
+  blocked: { label: '已达上限', tone: 'is-danger' },
+  pending: { label: '待同步', tone: 'is-muted' },
+  unsupported: { label: '需升级', tone: 'is-warning' }
+}
 const configTabs = [
   { name: 'services', label: '服务' },
   { name: 'chains', label: '转发链' },
   { name: 'observers', label: '观察器' }
 ]
+const GIB = 1024 ** 3
 const dateFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
 
 const nodeList = ref([])
@@ -304,10 +342,30 @@ const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
 const submitLoading = ref(false)
 const formRef = ref(null)
-const form = reactive({ name: '', port: 39000, remark: '' })
+const form = reactive({ name: '', port: 39000, remark: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const originalTrafficLimitBytes = ref(0)
+let originalTrafficResetPeriod = 'none'
+const originalTrafficLimitGiB = computed(() => {
+  const bytes = originalTrafficLimitBytes.value
+  return bytes > 0 ? (bytes / GIB).toFixed(10).replace(/\.?0+$/, '') : ''
+})
+const trafficLimitBytes = computed(() => {
+  const value = form.trafficLimitGiB
+  if (value === originalTrafficLimitGiB.value) return originalTrafficLimitBytes.value
+  if (!value) return 0
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)) return null
+  const bytes = Number(value) * GIB
+  const rounded = Math.round(bytes)
+  return Number.isSafeInteger(rounded) && (bytes === 0 || rounded > 0) ? rounded : null
+})
 const rules = {
   name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
-  port: [{ required: true, message: '请输入端口', trigger: 'blur' }]
+  port: [{ required: true, message: '请输入端口', trigger: 'blur' }],
+  trafficLimitGiB: [{
+    validator: () => trafficLimitBytes.value !== null && (isEdit.value || Number.isSafeInteger(trafficLimitBytes.value)),
+    message: '请输入 0 或至少 1 字节且小于 8 PiB 的 GiB 数值。',
+    trigger: 'blur'
+  }]
 }
 
 const configDialogVisible = ref(false)
@@ -339,7 +397,7 @@ let registrationTimer
 
 const formatBytes = (bytes) => {
   if (!bytes) return '0 B'
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB']
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1)
   return Number((bytes / 1024 ** index).toFixed(2)) + ' ' + sizes[index]
 }
@@ -473,14 +531,14 @@ const clearFilters = () => {
 
 const openDialog = (row = null) => {
   editId.value = row?.id ?? null
-  Object.assign(form, row ? {
-    name: row.name,
-    port: row.port,
-    remark: row.remark || ''
-  } : {
-    name: '',
-    port: 39000,
-    remark: ''
+  originalTrafficLimitBytes.value = row?.traffic_limit_bytes ?? 0
+  originalTrafficResetPeriod = row?.traffic_reset_period || 'none'
+  Object.assign(form, {
+    name: row?.name ?? '',
+    port: row?.port ?? 39000,
+    remark: row?.remark || '',
+    trafficLimitGiB: originalTrafficLimitGiB.value,
+    trafficResetPeriod: originalTrafficResetPeriod
   })
   formRef.value?.clearValidate()
   dialogVisible.value = true
@@ -493,11 +551,18 @@ const handleSubmit = async () => {
     const valid = await formRef.value.validate().catch(() => false)
     if (!valid) return
 
+    const node = { name: form.name, port: form.port, remark: form.remark }
+    if (!isEdit.value || trafficLimitBytes.value !== originalTrafficLimitBytes.value) {
+      node.traffic_limit_bytes = trafficLimitBytes.value
+    }
+    if (!isEdit.value || form.trafficResetPeriod !== originalTrafficResetPeriod) {
+      node.traffic_reset_period = form.trafficResetPeriod
+    }
     if (isEdit.value) {
-      await updateNode(editId.value, form)
+      await updateNode(editId.value, node)
       ElMessage.success('节点已更新')
     } else {
-      const res = await createNode(form)
+      const res = await createNode(node)
       createdInstallNode = res.data
       ElMessage.success('节点已添加')
     }
@@ -587,6 +652,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .node-address-help { margin: 0 0 12px; line-height: 1.5; }
+.node-traffic-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+.node-traffic-status { margin-top: 4px; }
 .config-empty { text-align: center; padding: 24px 12px; }
 .config-entry { border: 1px solid var(--ops-border); border-radius: 8px; margin-bottom: 8px; min-width: 0; }
 .config-entry summary { padding: 10px 12px; cursor: pointer; overflow-wrap: anywhere; }
