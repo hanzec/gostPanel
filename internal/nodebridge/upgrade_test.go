@@ -181,7 +181,7 @@ func TestWaitForReadyRetries(t *testing.T) {
 const expectedDaemonUpgradeVersion = "0.1.99-abc1234"
 
 type readyUpgradeDaemon struct {
-	nodegrpc.UnimplementedNodeServer
+	nodegrpc.UnimplementedV1Server
 }
 
 func (readyUpgradeDaemon) GetUpgradeStatus(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
@@ -207,7 +207,7 @@ func TestWaitForDaemonUsesUpgradeAndRollbackProbes(t *testing.T) {
 	listener := listenLocal(t)
 	server := grpc.NewServer(grpc.Creds(tls))
 	t.Cleanup(server.Stop)
-	nodegrpc.RegisterNodeServer(server, readyUpgradeDaemon{})
+	nodegrpc.RegisterV1Server(server, readyUpgradeDaemon{})
 	go func() { _ = server.Serve(listener) }()
 	_, port, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {

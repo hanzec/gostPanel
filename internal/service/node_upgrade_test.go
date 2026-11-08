@@ -85,7 +85,7 @@ func TestAutomaticNodeUpgradeUsesStoredComponentPolicy(t *testing.T) {
 }
 
 type nodeUpgradeFixture struct {
-	nodegrpc.UnimplementedNodeServer
+	nodegrpc.UnimplementedV1Server
 	mu           sync.Mutex
 	gost, daemon string
 	started      chan string

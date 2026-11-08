@@ -9,13 +9,13 @@ import (
 )
 
 func (c *Client) GetNftConfig(ctx context.Context) (*nodegrpc.NftConfig, error) {
-	return callNode(ctx, c, c.config.Timeout, func(ctx context.Context, client nodegrpc.NodeClient) (*nodegrpc.NftConfig, error) {
+	return callNode(ctx, c, c.config.Timeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.NftConfig, error) {
 		return client.GetNftConfig(ctx, &emptypb.Empty{})
 	})
 }
 
 func (c *Client) ApplyNftConfig(ctx context.Context, config string) (*nodegrpc.NftConfig, error) {
-	return callNode(ctx, c, nodeMutationTimeout, func(ctx context.Context, client nodegrpc.NodeClient) (*nodegrpc.NftConfig, error) {
+	return callNode(ctx, c, nodeMutationTimeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.NftConfig, error) {
 		return client.ApplyNftConfig(ctx, &nodegrpc.NftConfig{Config: config})
 	})
 }

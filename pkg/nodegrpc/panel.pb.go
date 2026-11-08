@@ -27,37 +27,77 @@ var File_panel_proto protoreflect.FileDescriptor
 const file_panel_proto_rawDesc = "" +
 	"\n" +
 	"\vpanel.proto\x12\x04yagp\x1a\x1bgoogle/protobuf/empty.proto\x1a\n" +
-	"node.proto\x1a\x0eobserver.proto2\xa8\x02\n" +
+	"node.proto\x1a\x0eobserver.proto2\xa4\b\n" +
 	"\x02v1\x12:\n" +
 	"\x06Report\x12\x1b.yagp.node.v1.ReportRequest\x1a\x13.proto.ObserveReply\x12R\n" +
 	"\fRegisterNode\x12!.yagp.node.v1.RegisterNodeRequest\x1a\x1f.yagp.node.v1.RegisterNodeReply\x12K\n" +
 	"\x0eGetNftTemplate\x12 .yagp.node.v1.NftTemplateRequest\x1a\x17.yagp.node.v1.NftConfig\x12E\n" +
-	"\rUpdateNodeIPs\x12\x1c.yagp.node.v1.NodeIPsRequest\x1a\x16.google.protobuf.EmptyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
+	"\rUpdateNodeIPs\x12\x1c.yagp.node.v1.NodeIPsRequest\x1a\x16.google.protobuf.Empty\x12C\n" +
+	"\aExecute\x12\x1c.yagp.node.v1.CommandRequest\x1a\x1a.yagp.node.v1.CommandReply\x12M\n" +
+	"\x13GetObserverEndpoint\x12\x16.google.protobuf.Empty\x1a\x1e.yagp.node.v1.ObserverEndpoint\x12O\n" +
+	"\x14GetGostServiceStatus\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.GostServiceStatus\x12M\n" +
+	"\x12RestartGostService\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.GostServiceStatus\x12I\n" +
+	"\vGetGostLogs\x12\x1d.yagp.node.v1.GostLogsRequest\x1a\x1b.yagp.node.v1.GostLogsReply\x12?\n" +
+	"\fGetNftConfig\x12\x16.google.protobuf.Empty\x1a\x17.yagp.node.v1.NftConfig\x12B\n" +
+	"\x0eApplyNftConfig\x12\x17.yagp.node.v1.NftConfig\x1a\x17.yagp.node.v1.NftConfig\x12V\n" +
+	"\x10SyncTrafficQuota\x12!.yagp.node.v1.TrafficQuotaRequest\x1a\x1f.yagp.node.v1.TrafficQuotaReply\x12K\n" +
+	"\x10GetUpgradeStatus\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.NodeUpgradeStatus\x12Q\n" +
+	"\fStartUpgrade\x12 .yagp.node.v1.NodeUpgradeRequest\x1a\x1f.yagp.node.v1.NodeUpgradeStatusB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var file_panel_proto_goTypes = []any{
 	(*ReportRequest)(nil),       // 0: yagp.node.v1.ReportRequest
 	(*RegisterNodeRequest)(nil), // 1: yagp.node.v1.RegisterNodeRequest
 	(*NftTemplateRequest)(nil),  // 2: yagp.node.v1.NftTemplateRequest
 	(*NodeIPsRequest)(nil),      // 3: yagp.node.v1.NodeIPsRequest
-	(*proto.ObserveReply)(nil),  // 4: proto.ObserveReply
-	(*RegisterNodeReply)(nil),   // 5: yagp.node.v1.RegisterNodeReply
-	(*NftConfig)(nil),           // 6: yagp.node.v1.NftConfig
-	(*emptypb.Empty)(nil),       // 7: google.protobuf.Empty
+	(*CommandRequest)(nil),      // 4: yagp.node.v1.CommandRequest
+	(*emptypb.Empty)(nil),       // 5: google.protobuf.Empty
+	(*GostLogsRequest)(nil),     // 6: yagp.node.v1.GostLogsRequest
+	(*NftConfig)(nil),           // 7: yagp.node.v1.NftConfig
+	(*TrafficQuotaRequest)(nil), // 8: yagp.node.v1.TrafficQuotaRequest
+	(*NodeUpgradeRequest)(nil),  // 9: yagp.node.v1.NodeUpgradeRequest
+	(*proto.ObserveReply)(nil),  // 10: proto.ObserveReply
+	(*RegisterNodeReply)(nil),   // 11: yagp.node.v1.RegisterNodeReply
+	(*CommandReply)(nil),        // 12: yagp.node.v1.CommandReply
+	(*ObserverEndpoint)(nil),    // 13: yagp.node.v1.ObserverEndpoint
+	(*GostServiceStatus)(nil),   // 14: yagp.node.v1.GostServiceStatus
+	(*GostLogsReply)(nil),       // 15: yagp.node.v1.GostLogsReply
+	(*TrafficQuotaReply)(nil),   // 16: yagp.node.v1.TrafficQuotaReply
+	(*NodeUpgradeStatus)(nil),   // 17: yagp.node.v1.NodeUpgradeStatus
 }
 var file_panel_proto_depIdxs = []int32{
-	0, // 0: yagp.v1.Report:input_type -> yagp.node.v1.ReportRequest
-	1, // 1: yagp.v1.RegisterNode:input_type -> yagp.node.v1.RegisterNodeRequest
-	2, // 2: yagp.v1.GetNftTemplate:input_type -> yagp.node.v1.NftTemplateRequest
-	3, // 3: yagp.v1.UpdateNodeIPs:input_type -> yagp.node.v1.NodeIPsRequest
-	4, // 4: yagp.v1.Report:output_type -> proto.ObserveReply
-	5, // 5: yagp.v1.RegisterNode:output_type -> yagp.node.v1.RegisterNodeReply
-	6, // 6: yagp.v1.GetNftTemplate:output_type -> yagp.node.v1.NftConfig
-	7, // 7: yagp.v1.UpdateNodeIPs:output_type -> google.protobuf.Empty
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0,  // 0: yagp.v1.Report:input_type -> yagp.node.v1.ReportRequest
+	1,  // 1: yagp.v1.RegisterNode:input_type -> yagp.node.v1.RegisterNodeRequest
+	2,  // 2: yagp.v1.GetNftTemplate:input_type -> yagp.node.v1.NftTemplateRequest
+	3,  // 3: yagp.v1.UpdateNodeIPs:input_type -> yagp.node.v1.NodeIPsRequest
+	4,  // 4: yagp.v1.Execute:input_type -> yagp.node.v1.CommandRequest
+	5,  // 5: yagp.v1.GetObserverEndpoint:input_type -> google.protobuf.Empty
+	5,  // 6: yagp.v1.GetGostServiceStatus:input_type -> google.protobuf.Empty
+	5,  // 7: yagp.v1.RestartGostService:input_type -> google.protobuf.Empty
+	6,  // 8: yagp.v1.GetGostLogs:input_type -> yagp.node.v1.GostLogsRequest
+	5,  // 9: yagp.v1.GetNftConfig:input_type -> google.protobuf.Empty
+	7,  // 10: yagp.v1.ApplyNftConfig:input_type -> yagp.node.v1.NftConfig
+	8,  // 11: yagp.v1.SyncTrafficQuota:input_type -> yagp.node.v1.TrafficQuotaRequest
+	5,  // 12: yagp.v1.GetUpgradeStatus:input_type -> google.protobuf.Empty
+	9,  // 13: yagp.v1.StartUpgrade:input_type -> yagp.node.v1.NodeUpgradeRequest
+	10, // 14: yagp.v1.Report:output_type -> proto.ObserveReply
+	11, // 15: yagp.v1.RegisterNode:output_type -> yagp.node.v1.RegisterNodeReply
+	7,  // 16: yagp.v1.GetNftTemplate:output_type -> yagp.node.v1.NftConfig
+	5,  // 17: yagp.v1.UpdateNodeIPs:output_type -> google.protobuf.Empty
+	12, // 18: yagp.v1.Execute:output_type -> yagp.node.v1.CommandReply
+	13, // 19: yagp.v1.GetObserverEndpoint:output_type -> yagp.node.v1.ObserverEndpoint
+	14, // 20: yagp.v1.GetGostServiceStatus:output_type -> yagp.node.v1.GostServiceStatus
+	14, // 21: yagp.v1.RestartGostService:output_type -> yagp.node.v1.GostServiceStatus
+	15, // 22: yagp.v1.GetGostLogs:output_type -> yagp.node.v1.GostLogsReply
+	7,  // 23: yagp.v1.GetNftConfig:output_type -> yagp.node.v1.NftConfig
+	7,  // 24: yagp.v1.ApplyNftConfig:output_type -> yagp.node.v1.NftConfig
+	16, // 25: yagp.v1.SyncTrafficQuota:output_type -> yagp.node.v1.TrafficQuotaReply
+	17, // 26: yagp.v1.GetUpgradeStatus:output_type -> yagp.node.v1.NodeUpgradeStatus
+	17, // 27: yagp.v1.StartUpgrade:output_type -> yagp.node.v1.NodeUpgradeStatus
+	14, // [14:28] is the sub-list for method output_type
+	0,  // [0:14] is the sub-list for method input_type
+	0,  // [0:0] is the sub-list for extension type_name
+	0,  // [0:0] is the sub-list for extension extendee
+	0,  // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_panel_proto_init() }

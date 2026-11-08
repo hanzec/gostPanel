@@ -190,7 +190,7 @@ report:
 
 `yagp-daemon` 启动时立即探测一次，随后每 5 分钟探测。节点用现有凭据通过 TLS 上报地址变化，面板自动更新连接地址。某一地址族探测失败时保留其上次记录；上报失败则在下一轮重试。[Komari 上报周期](https://komari-monitor.github.io/komari-document/dev/agent.html)
 
-Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TLS gRPC 接口下发配置。节点上报时使用注册获得的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
+Gost 的管理 Web API 绑定在节点本机。面板通过节点的 TLS gRPC 监听器调用 `yagp.v1` 下的反向管理方法，例如 `/yagp.v1/Execute`。节点注册、上报和反向管理共用 `yagp.v1` 服务名，各自的监听器只处理对应方向的 RPC。Traefik 只对外提供节点注册和上报使用的四个方法。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
 如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-daemon/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载最新版 `yagp-daemon-linux-<架构>.tar.gz`，可用 `YAGP_DAEMON_VERSION` 指定发布版本。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_DAEMON_BIN=/path/to/yagp-daemon` 指定对应的二进制。
 
@@ -250,7 +250,7 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TL
 
 发布包以 `yagp-` 开头。面板支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。节点安装包支持 Linux（amd64、arm64）。[查看当前仓库的 Releases](https://github.com/hanzec/gostPanel/releases)
 
-面板和节点桥需要一起更新到使用 `yagp.node.v1` 的版本。更新后在面板中停止并重新启动已运行的转发规则，以更新 Gost 观察器凭据。未通过令牌注册的节点须重新注册。
+面板和节点需要一起更新到使用 `yagp.v1` 的版本。通过令牌注册过的节点可继续使用原来的节点 ID、凭据和证书。
 
 ### 自动版本号
 

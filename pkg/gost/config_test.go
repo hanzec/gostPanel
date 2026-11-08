@@ -62,11 +62,11 @@ func TestObserverChangesOnlyWhenPluginChanges(t *testing.T) {
 	if err := client.DeleteObserver("metrics"); err == nil {
 		t.Fatal("delete proceeded after lookup failed")
 	}
-	calls <- controlCall{method: nodegrpc.Node_GetObserverEndpoint_FullMethodName, request: &emptypb.Empty{}, response: &nodegrpc.ObserverEndpoint{Address: "127.0.0.1:2000"}}
+	calls <- controlCall{method: nodegrpc.V1_GetObserverEndpoint_FullMethodName, request: &emptypb.Empty{}, response: &nodegrpc.ObserverEndpoint{Address: "127.0.0.1:2000"}}
 	if addr, err := client.ObserverAddress(); err != nil || addr != observer.Plugin.Addr {
 		t.Fatalf("observer address = %q, %v", addr, err)
 	}
-	calls <- controlCall{method: nodegrpc.Node_GetObserverEndpoint_FullMethodName, request: &emptypb.Empty{}, err: status.Error(codes.PermissionDenied, "observer disabled")}
+	calls <- controlCall{method: nodegrpc.V1_GetObserverEndpoint_FullMethodName, request: &emptypb.Empty{}, err: status.Error(codes.PermissionDenied, "observer disabled")}
 	if _, err := client.ObserverAddress(); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("disabled observer = %v", err)
 	}

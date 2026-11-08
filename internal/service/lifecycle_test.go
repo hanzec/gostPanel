@@ -292,7 +292,7 @@ func requireServiceError(t *testing.T, got, want error) {
 
 // lifecycleNode serves Gost resource responses across the real authenticated TLS client.
 type lifecycleNode struct {
-	nodegrpc.UnimplementedNodeServer
+	nodegrpc.UnimplementedV1Server
 	t           *testing.T
 	mu          sync.Mutex
 	resources   map[string]json.RawMessage

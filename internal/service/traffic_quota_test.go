@@ -227,7 +227,7 @@ func newTrafficQuotaTestDB(t *testing.T) *gorm.DB {
 }
 
 type trafficQuotaTestNode struct {
-	nodegrpc.UnimplementedNodeServer
+	nodegrpc.UnimplementedV1Server
 	mu       sync.Mutex
 	check    func(*nodegrpc.TrafficQuotaRequest)
 	used     uint64

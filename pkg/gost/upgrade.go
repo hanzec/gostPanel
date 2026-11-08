@@ -16,7 +16,7 @@ func (c *Client) GetUpgradeStatus(ctx context.Context) (*nodegrpc.NodeUpgradeSta
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(ctx, c.config.Timeout)
 	defer cancel()
-	return nodegrpc.NewNodeClient(conn).GetUpgradeStatus(ctx, &emptypb.Empty{})
+	return nodegrpc.NewV1Client(conn).GetUpgradeStatus(ctx, &emptypb.Empty{})
 }
 
 func (c *Client) StartUpgrade(ctx context.Context, component, version string) (*nodegrpc.NodeUpgradeStatus, error) {
@@ -27,5 +27,5 @@ func (c *Client) StartUpgrade(ctx context.Context, component, version string) (*
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(ctx, c.config.Timeout)
 	defer cancel()
-	return nodegrpc.NewNodeClient(conn).StartUpgrade(ctx, &nodegrpc.NodeUpgradeRequest{Component: component, Version: version})
+	return nodegrpc.NewV1Client(conn).StartUpgrade(ctx, &nodegrpc.NodeUpgradeRequest{Component: component, Version: version})
 }

@@ -4,7 +4,6 @@ package yagp.node.v1;
 
 option go_package = "yagp/pkg/nodegrpc";
 
-import "google/protobuf/empty.proto";
 import "observer.proto";
 
 message CommandRequest {
@@ -76,19 +75,6 @@ message NodeUpgradeStatus {
   string target_version = 5;
   string state = 6;
   string error = 7;
-}
-
-service Node {
-  rpc Execute(CommandRequest) returns (CommandReply);
-  rpc GetObserverEndpoint(google.protobuf.Empty) returns (ObserverEndpoint);
-  rpc GetGostServiceStatus(google.protobuf.Empty) returns (GostServiceStatus);
-  rpc RestartGostService(google.protobuf.Empty) returns (GostServiceStatus);
-  rpc GetGostLogs(GostLogsRequest) returns (GostLogsReply);
-  rpc GetNftConfig(google.protobuf.Empty) returns (NftConfig);
-  rpc ApplyNftConfig(NftConfig) returns (NftConfig);
-  rpc SyncTrafficQuota(TrafficQuotaRequest) returns (TrafficQuotaReply);
-  rpc GetUpgradeStatus(google.protobuf.Empty) returns (NodeUpgradeStatus);
-  rpc StartUpgrade(NodeUpgradeRequest) returns (NodeUpgradeStatus);
 }
 
 message ReportRequest {

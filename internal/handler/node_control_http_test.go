@@ -72,7 +72,7 @@ func (f *handlerHTTPFixture) enrollFixtureNode(t *testing.T, name string, nodeCo
 			return call(ctx, req)
 		}),
 	)
-	nodegrpc.RegisterNodeServer(server, nodeControl)
+	nodegrpc.RegisterV1Server(server, nodeControl)
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	node := model.GostNode{
@@ -87,7 +87,7 @@ func (f *handlerHTTPFixture) enrollFixtureNode(t *testing.T, name string, nodeCo
 }
 
 type handlerNodeControl struct {
-	nodegrpc.UnimplementedNodeServer
+	nodegrpc.UnimplementedV1Server
 	admin       http.Handler
 	mu          sync.Mutex
 	nft         string
@@ -224,12 +224,12 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 		{codes.FailedPrecondition, 409}, {codes.NotFound, 409}, {codes.PermissionDenied, 409},
 		{codes.DeadlineExceeded, 504}, {codes.Unavailable, 502}, {codes.Unauthenticated, 502}, {codes.Internal, 500},
 	} {
-		control.reject(nodegrpc.Node_GetGostServiceStatus_FullMethodName, test.rpcCode)
+		control.reject(nodegrpc.V1_GetGostServiceStatus_FullMethodName, test.rpcCode)
 		f.request(t, "GET", path+"/gost/service", "", test.http)
 	}
-	control.reject(nodegrpc.Node_RestartGostService_FullMethodName, codes.FailedPrecondition)
+	control.reject(nodegrpc.V1_RestartGostService_FullMethodName, codes.FailedPrecondition)
 	f.request(t, "POST", path+"/gost/restart", "", 409)
-	control.reject(nodegrpc.Node_GetGostLogs_FullMethodName, codes.Unimplemented)
+	control.reject(nodegrpc.V1_GetGostLogs_FullMethodName, codes.Unimplemented)
 	f.request(t, "GET", path+"/gost/logs", "", 501)
 
 	const nftJSON = `{"nftables":[]}`
@@ -246,7 +246,7 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 		!json.Valid([]byte(read.Template)) || !strings.Contains(read.Template, read.Table) {
 		t.Fatalf("bridge returned an unexpected nftables config: %+v", read)
 	}
-	control.reject(nodegrpc.Node_GetNftConfig_FullMethodName, codes.Unimplemented)
+	control.reject(nodegrpc.V1_GetNftConfig_FullMethodName, codes.Unimplemented)
 	f.request(t, "GET", path+"/nft", "", 501)
 	control.mu.Lock()
 	restarts := control.restartCall

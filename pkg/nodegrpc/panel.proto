@@ -9,8 +9,21 @@ import "node.proto";
 import "observer.proto";
 
 service v1 {
+  // Implemented by the panel listener.
   rpc Report(.yagp.node.v1.ReportRequest) returns (.proto.ObserveReply);
   rpc RegisterNode(.yagp.node.v1.RegisterNodeRequest) returns (.yagp.node.v1.RegisterNodeReply);
   rpc GetNftTemplate(.yagp.node.v1.NftTemplateRequest) returns (.yagp.node.v1.NftConfig);
   rpc UpdateNodeIPs(.yagp.node.v1.NodeIPsRequest) returns (.google.protobuf.Empty);
+
+  // Implemented by the node control listener.
+  rpc Execute(.yagp.node.v1.CommandRequest) returns (.yagp.node.v1.CommandReply);
+  rpc GetObserverEndpoint(.google.protobuf.Empty) returns (.yagp.node.v1.ObserverEndpoint);
+  rpc GetGostServiceStatus(.google.protobuf.Empty) returns (.yagp.node.v1.GostServiceStatus);
+  rpc RestartGostService(.google.protobuf.Empty) returns (.yagp.node.v1.GostServiceStatus);
+  rpc GetGostLogs(.yagp.node.v1.GostLogsRequest) returns (.yagp.node.v1.GostLogsReply);
+  rpc GetNftConfig(.google.protobuf.Empty) returns (.yagp.node.v1.NftConfig);
+  rpc ApplyNftConfig(.yagp.node.v1.NftConfig) returns (.yagp.node.v1.NftConfig);
+  rpc SyncTrafficQuota(.yagp.node.v1.TrafficQuotaRequest) returns (.yagp.node.v1.TrafficQuotaReply);
+  rpc GetUpgradeStatus(.google.protobuf.Empty) returns (.yagp.node.v1.NodeUpgradeStatus);
+  rpc StartUpgrade(.yagp.node.v1.NodeUpgradeRequest) returns (.yagp.node.v1.NodeUpgradeStatus);
 }
