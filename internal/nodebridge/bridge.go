@@ -29,15 +29,16 @@ import (
 const maxResponseBytes = 4 << 20
 
 type Config struct {
-	NodeID         uint64 `yaml:"node_id"`
-	Username       string `yaml:"username"`
-	Password       string `yaml:"password"`
-	AdminAddress   string `yaml:"admin_address"`
-	ObserverListen string `yaml:"observer_listen"`
-	ReportAddress  string `yaml:"report_address"`
-	ReportCAFile   string `yaml:"report_ca_file"`
-	NftConfigFile  string `yaml:"-"`
-	ConfigFile     string `yaml:"-"`
+	NodeID           uint64 `yaml:"node_id"`
+	Username         string `yaml:"username"`
+	Password         string `yaml:"password"`
+	AdminAddress     string `yaml:"admin_address"`
+	ObserverListen   string `yaml:"observer_listen"`
+	ReportAddress    string `yaml:"report_address"`
+	ReportCAFile     string `yaml:"report_ca_file"`
+	ReportCertSHA256 string `yaml:"report_cert_sha256,omitempty"`
+	NftConfigFile    string `yaml:"-"`
+	ConfigFile       string `yaml:"-"`
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -117,9 +118,9 @@ func connectPanel(cfg Config) (*grpc.ClientConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	transport, err := nodegrpc.ClientTLS(cfg.ReportCAFile)
+	transport, err := address.ClientTLS(cfg.ReportCAFile, cfg.ReportCertSHA256)
 	if err != nil {
-		return nil, fmt.Errorf("load panel report CA: %w", err)
+		return nil, fmt.Errorf("configure panel report TLS: %w", err)
 	}
 	return address.NewClientConn(grpc.WithTransportCredentials(transport),
 		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)),

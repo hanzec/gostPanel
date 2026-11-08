@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"net"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"yagp/internal/nodebridge"
@@ -105,6 +108,41 @@ func TestRegisterNodeWritesEnrolledCredentials(t *testing.T) {
 	}
 	if _, err := registerNode(ctx, address, token, stateDir, output, detect); err == nil || !errors.Is(err, os.ErrExist) {
 		t.Fatalf("re-enrollment overwrote staged files: %v", err)
+	}
+}
+
+func TestRegisterNodePinsGeneratedPanelCertificate(t *testing.T) {
+	var calls atomic.Int32
+	address, caFile := testPanel(t, enrollmentPanel{register: func(req *nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
+		calls.Add(1)
+		return &nodegrpc.RegisterNodeReply{NodeId: 42, Username: "registered", Password: "test-secret"}, nil
+	}})
+	data, err := os.ReadFile(caFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, _ := pem.Decode(data)
+	digest := sha256.Sum256(block.Bytes)
+	fingerprint := hex.EncodeToString(digest[:])
+	baseToken := "42." + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("YAGP_PANEL_CA_FILE", filepath.Join(t.TempDir(), "unused-ca.pem"))
+	stateDir, output := t.TempDir(), t.TempDir()
+	detect := func(context.Context) (string, string) { return "", "" }
+	if _, err := registerNode(t.Context(), address, baseToken+"."+strings.Repeat("0", 64), stateDir, output, detect); err == nil ||
+		!strings.Contains(err.Error(), "fingerprint mismatch") || calls.Load() != 0 {
+		t.Fatalf("invalid fingerprint reached enrollment: %v, %d requests", err, calls.Load())
+	}
+	id, err := registerNode(t.Context(), address, baseToken+"."+fingerprint, stateDir, output, detect)
+	if err != nil || id != 42 || calls.Load() != 1 {
+		t.Fatalf("enrollment with pin = %d, %v, %d requests", id, err, calls.Load())
+	}
+	configPath := filepath.Join(output, "node.yaml")
+	config, err := readConfig(configPath)
+	if err != nil || config.ReportCertSHA256 != fingerprint || config.ReportCAFile != "" {
+		t.Fatalf("staged certificate identity = %q, %q, %v", config.ReportCertSHA256, config.ReportCAFile, err)
+	}
+	if err := run(t.Context(), []string{"nft-template", "-c", configPath}); err != nil {
+		t.Fatal(err)
 	}
 }
 

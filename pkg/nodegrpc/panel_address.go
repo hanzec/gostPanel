@@ -15,6 +15,7 @@ const PanelProxyPath = "/api/v1/grpc"
 
 type PanelAddress struct {
 	target  string
+	host    string
 	proxied bool
 }
 
@@ -25,8 +26,10 @@ func ParsePanelAddress(address string) (PanelAddress, error) {
 	if err != nil || host == "" || strings.ContainsAny(host, "/ \\?#@\t\r\n") || portErr != nil || portNumber == 0 {
 		return PanelAddress{}, errors.New("panel address must be HOST:PORT or HOST:PORT" + PanelProxyPath)
 	}
-	return PanelAddress{target: target, proxied: proxied}, nil
+	return PanelAddress{target: target, host: host, proxied: proxied}, nil
 }
+
+func (a PanelAddress) Host() string { return a.host }
 
 func (a PanelAddress) Proxied() bool { return a.proxied }
 

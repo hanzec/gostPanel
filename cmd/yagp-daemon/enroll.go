@@ -52,7 +52,7 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 		return 0, err
 	}
 	// The token ID is a local preflight hint. The panel verifies the full token.
-	expectedID, err := nodegrpc.ParseRegistrationTokenID(token)
+	expectedID, fingerprint, err := nodegrpc.ParseRegistrationToken(token)
 	if err != nil {
 		return 0, err
 	}
@@ -62,11 +62,14 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return 0, err
 	}
-	caFile, err := panelCAFile(stateDir)
-	if err != nil {
-		return 0, err
+	var caFile string
+	if fingerprint == "" {
+		caFile, err = panelCAFile(stateDir)
+		if err != nil {
+			return 0, err
+		}
 	}
-	transport, err := nodegrpc.ClientTLS(caFile)
+	transport, err := panelAddress.ClientTLS(caFile, fingerprint)
 	if err != nil {
 		return 0, fmt.Errorf("load panel CA: %w", err)
 	}
@@ -91,7 +94,7 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 	}
 	config := nodebridge.Config{
 		NodeID: reply.GetNodeId(), Username: reply.GetUsername(), Password: reply.GetPassword(),
-		ReportAddress: address, ReportCAFile: caFile,
+		ReportAddress: address, ReportCAFile: caFile, ReportCertSHA256: fingerprint,
 	}
 	if err = writeEnrollment(output, config); err != nil {
 		return 0, fmt.Errorf("registration succeeded, but local configuration failed: %w", err)

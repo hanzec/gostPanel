@@ -2,11 +2,17 @@ package nodegrpc
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
+	"errors"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/metadata"
@@ -14,24 +20,35 @@ import (
 
 func TestParseRegistrationTokenID(t *testing.T) {
 	secret := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	fingerprint := strings.Repeat("a1", 32)
 	for _, test := range []struct {
-		token string
-		id    uint64
+		token       string
+		id          uint64
+		fingerprint string
 	}{
-		{"1." + secret, 1},
-		{"4294967295." + secret, 4294967295},
-		{"4294967296." + secret, 0},
-		{"0." + secret, 0},
-		{"1." + secret[:42] + "B", 0},
-		{"1." + secret[:42] + "?", 0},
-		{"1." + secret + "=", 0},
-		{"1." + secret[:42], 0},
-		{"1", 0},
+		{"1." + secret, 1, ""},
+		{"4294967295." + secret, 4294967295, ""},
+		{"4294967295." + secret + "." + fingerprint, 4294967295, fingerprint},
+		{"4294967296." + secret, 0, ""},
+		{"0." + secret, 0, ""},
+		{"1." + secret[:42] + "B", 0, ""},
+		{"1." + secret[:42] + "?", 0, ""},
+		{"1." + secret + "=", 0, ""},
+		{"1." + secret[:42], 0, ""},
+		{"1", 0, ""},
+		{"1." + secret + ".", 0, ""},
+		{"1." + secret + "." + fingerprint[:63], 0, ""},
+		{"1." + secret + "." + fingerprint + ".extra", 0, ""},
+		{"1." + secret + "." + strings.ToUpper(fingerprint), 0, ""},
+		{"1." + secret + "." + fingerprint[:63] + "g", 0, ""},
 	} {
 		t.Run(test.token, func(t *testing.T) {
-			id, err := ParseRegistrationTokenID(test.token)
-			if id != test.id || (err != nil) != (test.id == 0) {
-				t.Fatalf("parsed ID = %d, %v, want %d", id, err, test.id)
+			id, fingerprint, err := ParseRegistrationToken(test.token)
+			if id != test.id || fingerprint != test.fingerprint || (err != nil) != (test.id == 0) {
+				t.Fatalf("parsed ID and fingerprint = %d, %q, %v, want %d, %q", id, fingerprint, err, test.id, test.fingerprint)
+			}
+			if parsedID, err := ParseRegistrationTokenID(test.token); parsedID != id || (err != nil) != (test.id == 0) {
+				t.Fatalf("parsed ID = %d, %v, want %d", parsedID, err, id)
 			}
 		})
 	}
@@ -93,5 +110,33 @@ func TestClientTLSLoadsExplicitRoots(t *testing.T) {
 	}
 	if creds, err := ClientTLS(""); err != nil || creds.Info().SecurityProtocol != "tls" {
 		t.Fatalf("client with system roots = %v, %v", creds, err)
+	}
+}
+
+func TestPinnedTLSStillChecksThePanelHostname(t *testing.T) {
+	server := httptest.NewUnstartedServer(nil)
+	server.EnableHTTP2 = true
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	digest := sha256.Sum256(server.Certificate().Raw)
+	address, err := ParsePanelAddress("wrong.example:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := address.ClientTLS("", "invalid-fingerprint"); err == nil {
+		t.Fatal("malformed fingerprint was accepted")
+	}
+	transport, err := address.ClientTLS("", hex.EncodeToString(digest[:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := net.Dial("tcp", server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if conn, _, err := transport.ClientHandshake(t.Context(), "wrong.example:443", raw); conn != nil ||
+		!errors.As(err, new(x509.HostnameError)) {
+		t.Fatalf("pinned TLS handshake for a different hostname = %v, %v", conn, err)
 	}
 }
