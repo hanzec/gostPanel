@@ -539,6 +539,8 @@ type RegisterNodeRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Token              string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
 	NodeCertificatePem string                 `protobuf:"bytes,2,opt,name=node_certificate_pem,json=nodeCertificatePem,proto3" json:"node_certificate_pem,omitempty"`
+	Ipv4               string                 `protobuf:"bytes,3,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	Ipv6               string                 `protobuf:"bytes,4,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -583,6 +585,20 @@ func (x *RegisterNodeRequest) GetToken() string {
 func (x *RegisterNodeRequest) GetNodeCertificatePem() string {
 	if x != nil {
 		return x.NodeCertificatePem
+	}
+	return ""
+}
+
+func (x *RegisterNodeRequest) GetIpv4() string {
+	if x != nil {
+		return x.Ipv4
+	}
+	return ""
+}
+
+func (x *RegisterNodeRequest) GetIpv6() string {
+	if x != nil {
+		return x.Ipv6
 	}
 	return ""
 }
@@ -691,10 +707,12 @@ const file_node_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\"a\n" +
 	"\rReportRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x127\n" +
-	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"]\n" +
+	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"\x85\x01\n" +
 	"\x13RegisterNodeRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x120\n" +
-	"\x14node_certificate_pem\x18\x02 \x01(\tR\x12nodeCertificatePem\"\x87\x01\n" +
+	"\x14node_certificate_pem\x18\x02 \x01(\tR\x12nodeCertificatePem\x12\x12\n" +
+	"\x04ipv4\x18\x03 \x01(\tR\x04ipv4\x12\x12\n" +
+	"\x04ipv6\x18\x04 \x01(\tR\x04ipv6\"\x87\x01\n" +
 	"\x11RegisterNodeReply\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +

@@ -69,6 +69,8 @@ message ReportRequest {
 message RegisterNodeRequest {
   string token = 1;
   string node_certificate_pem = 2;
+  string ipv4 = 3;
+  string ipv6 = 4;
 }
 
 message RegisterNodeReply {

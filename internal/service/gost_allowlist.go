@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/netip"
 	"slices"
-	"strings"
 
 	bizerrors "yagp/internal/errors"
 	"yagp/internal/model"
@@ -32,33 +30,53 @@ func (s *GostAllowlistService) Get(ctx context.Context) (model.GostAllowlist, er
 	if err := s.db.WithContext(ctx).Find(&config, gostAllowlistID).Error; err != nil {
 		return model.GostAllowlist{}, err
 	}
+	// Selections survive re-registration, so resolve their current addresses on each sync.
+	addresses, err := s.resolveAddresses(ctx, config.NodeIDs, false)
+	if err != nil {
+		return model.GostAllowlist{}, err
+	}
+	config.Addresses = addresses
 	return config, nil
 }
 
 func (s *GostAllowlistService) Update(ctx context.Context, nodeIDs []uint) (model.GostAllowlist, error) {
 	nodeIDs = append([]uint{}, nodeIDs...)
 	slices.Sort(nodeIDs)
-	config := model.GostAllowlist{ID: gostAllowlistID, NodeIDs: slices.Compact(nodeIDs), Addresses: []string{}}
-	if len(config.NodeIDs) > 0 {
-		var nodes []model.GostNode
-		if err := s.db.WithContext(ctx).Select("id", "name", "address").Where("id IN ?", config.NodeIDs).Find(&nodes).Error; err != nil {
-			return config, err
-		}
-		if len(nodes) != len(config.NodeIDs) {
-			return config, bizerrors.New(40000, "白名单包含不存在的节点", http.StatusBadRequest)
-		}
-		for _, node := range nodes {
-			ip, err := netip.ParseAddr(strings.Trim(node.Address, "[]"))
-			if err != nil || ip.Zone() != "" {
-				return config, bizerrors.New(40000, fmt.Sprintf("节点 %q 的地址须为 IPv4 或 IPv6", node.Name), http.StatusBadRequest)
-			}
-			config.Addresses = append(config.Addresses, ip.Unmap().String())
-		}
-		slices.Sort(config.Addresses)
-		config.Addresses = slices.Compact(config.Addresses)
+	config := model.GostAllowlist{ID: gostAllowlistID, NodeIDs: slices.Compact(nodeIDs)}
+	addresses, err := s.resolveAddresses(ctx, config.NodeIDs, true)
+	if err != nil {
+		return config, err
 	}
-	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&config).Error
+	config.Addresses = addresses
+	err = s.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&config).Error
 	return config, err
+}
+
+func (s *GostAllowlistService) resolveAddresses(ctx context.Context, nodeIDs []uint, strict bool) ([]string, error) {
+	addresses := []string{}
+	if len(nodeIDs) == 0 {
+		return addresses, nil
+	}
+	var nodes []model.GostNode
+	if err := s.db.WithContext(ctx).Select("id", "name", "ipv4", "ipv6").Where("id IN ?", nodeIDs).Find(&nodes).Error; err != nil {
+		return nil, err
+	}
+	if strict && len(nodes) != len(nodeIDs) {
+		return nil, bizerrors.New(40000, "白名单包含不存在的节点", http.StatusBadRequest)
+	}
+	for _, node := range nodes {
+		if strict && node.IPv4 == "" && node.IPv6 == "" {
+			return nil, bizerrors.New(40000, fmt.Sprintf("节点 %q 暂无注册 IP，请先注册该节点", node.Name), http.StatusBadRequest)
+		}
+		if node.IPv4 != "" {
+			addresses = append(addresses, node.IPv4)
+		}
+		if node.IPv6 != "" {
+			addresses = append(addresses, node.IPv6)
+		}
+	}
+	slices.Sort(addresses)
+	return slices.Compact(addresses), nil
 }
 
 func relayAdmission(config model.GostAllowlist) gost.AdmissionConfig {

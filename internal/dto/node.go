@@ -7,18 +7,16 @@ import "time"
 
 // CreateNodeReq 创建节点请求
 type CreateNodeReq struct {
-	Name    string `json:"name" binding:"required,min=1,max=100"`   // 节点名称
-	Address string `json:"address" binding:"required"`              // IP 或域名
-	Port    int    `json:"port" binding:"required,min=1,max=65535"` // 端口
-	Remark  string `json:"remark"`                                  // 备注
+	Name   string `json:"name" binding:"required,min=1,max=100"`   // 节点名称
+	Port   int    `json:"port" binding:"required,min=1,max=65535"` // 端口
+	Remark string `json:"remark"`                                  // 备注
 }
 
 // UpdateNodeReq 更新节点请求
 type UpdateNodeReq struct {
-	Name    string `json:"name" binding:"required,min=1,max=100"`   // 节点名称
-	Address string `json:"address" binding:"required"`              // IP 或域名
-	Port    int    `json:"port" binding:"required,min=1,max=65535"` // 端口
-	Remark  string `json:"remark"`                                  // 备注
+	Name   string `json:"name" binding:"required,min=1,max=100"`   // 节点名称
+	Port   int    `json:"port" binding:"required,min=1,max=65535"` // 端口
+	Remark string `json:"remark"`                                  // 备注
 }
 
 type NodeRegistrationToken struct {

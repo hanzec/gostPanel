@@ -53,11 +53,10 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 
 	// 创建节点
 	node := &model.GostNode{
-		Name:    req.Name,
-		Address: req.Address,
-		Port:    req.Port,
-		Remark:  req.Remark,
-		Status:  model.NodeStatusOffline,
+		Name:   req.Name,
+		Port:   req.Port,
+		Remark: req.Remark,
+		Status: model.NodeStatusOffline,
 	}
 
 	if err = s.nodeRepo.Create(node); err != nil {
@@ -74,7 +73,7 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 		ip,
 		userAgent)
 
-	logger.Infof("创建节点成功: %s (%s:%d)", node.Name, node.Address, node.Port)
+	logger.Infof("创建节点成功: %s", node.Name)
 	return node, nil
 }
 
@@ -101,7 +100,6 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 
 	// 更新节点
 	node.Name = req.Name
-	node.Address = req.Address
 	node.Port = req.Port
 	node.Remark = req.Remark
 
@@ -141,16 +139,23 @@ func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, usern
 	return issued, nil
 }
 
-func (s *NodeService) Register(ctx context.Context, id uint, token, certPEM string) (*model.GostNode, error) {
+func (s *NodeService) Register(ctx context.Context, id uint, token, certPEM, ipv4, ipv6 string) (*model.GostNode, error) {
 	password, err := newNodeSecret()
 	if err != nil {
 		return nil, err
 	}
+	address := ipv4
+	if address == "" {
+		address = ipv6
+	}
 	node := &model.GostNode{
 		ID:                id,
+		Address:           address,
 		Username:          fmt.Sprintf("node-%d", id),
 		Password:          password,
 		TLSCertificatePEM: certPEM,
+		IPv4:              ipv4,
+		IPv6:              ipv6,
 	}
 	if err := s.nodeRepo.ConsumeRegistrationToken(ctx, node, registrationTokenHash(token)); err != nil {
 		return nil, err
@@ -244,10 +249,8 @@ func (s *NodeService) List(req *dto.NodeListReq) ([]model.GostNode, int64, error
 
 	// 关键词搜索
 	if req.Keyword != "" {
-		opt.Conditions["name LIKE ? OR address LIKE ?"] = []interface{}{
-			"%" + req.Keyword + "%",
-			"%" + req.Keyword + "%",
-		}
+		keyword := "%" + req.Keyword + "%"
+		opt.Conditions["name LIKE ? OR address LIKE ? OR ipv4 LIKE ? OR ipv6 LIKE ?"] = []any{keyword, keyword, keyword, keyword}
 	}
 
 	return s.nodeRepo.List(opt)

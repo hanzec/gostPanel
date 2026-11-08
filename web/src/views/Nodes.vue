@@ -73,6 +73,8 @@
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">gRPC 地址</span>
                 <strong class="ops-mono">{{ nodeEndpoint(node) }}</strong>
+                <span v-if="node.ipv4" class="inventory-secondary ops-muted">IPv4 · <span class="ops-mono">{{ node.ipv4 }}</span></span>
+                <span v-if="node.ipv6" class="inventory-secondary ops-muted">IPv6 · <span class="ops-mono">{{ node.ipv6 }}</span></span>
                 <span class="inventory-secondary ops-muted">检查 · {{ node.last_check_at ? formatTime(node.last_check_at) : '待检查' }}</span>
               </td>
               <td class="inventory-status" role="cell">
@@ -139,12 +141,10 @@
       :close-on-click-modal="false"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="handleSubmit">
+        <p class="node-address-help ops-muted">节点注册时会自动获取连接地址。</p>
         <div class="inventory-form-grid">
           <el-form-item label="节点名称" prop="name" class="inventory-form-wide">
             <el-input v-model="form.name" placeholder="例如 华东入口" />
-          </el-form-item>
-          <el-form-item label="IP 或域名" prop="address">
-            <el-input v-model="form.address" placeholder="gost.example.com" />
           </el-form-item>
           <el-form-item label="gRPC 端口" prop="port">
             <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
@@ -191,15 +191,15 @@
 
     <el-dialog
       v-model="installDialogVisible"
-      :title="'安装节点 · ' + (currentInstallNode?.name || '')"
+      :title="'安装节点 · ' + (installNode?.name || '')"
       width="min(680px, calc(100vw - 24px))"
       :close-on-click-modal="false"
       @close="clearRegistration"
     >
-      <p class="install-intro ops-muted">在目标服务器上以 root 身份执行安装命令。节点首次通过 TLS 注册时会自动获取节点 ID 和凭据。</p>
-      <dl v-if="currentInstallNode" class="install-meta">
-        <div><dt>节点 ID</dt><dd class="ops-mono">#{{ currentInstallNode.id }}</dd></div>
-        <div><dt>gRPC 地址</dt><dd class="ops-mono">{{ nodeEndpoint(currentInstallNode) }}</dd></div>
+      <p class="install-intro ops-muted">在目标服务器上以 root 身份执行安装命令。节点首次通过 TLS 注册时会自动获取节点 ID 和凭据，并探测 IP。</p>
+      <dl v-if="installNode" class="install-meta">
+        <div><dt>节点 ID</dt><dd class="ops-mono">#{{ installNode.id }}</dd></div>
+        <div><dt>gRPC 地址</dt><dd class="ops-mono">{{ nodeEndpoint(installNode) }}</dd></div>
       </dl>
       <el-form label-position="top" @submit.prevent>
         <el-form-item label="面板注册地址" for="node-panel-address">
@@ -285,10 +285,9 @@ const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
 const submitLoading = ref(false)
 const formRef = ref(null)
-const form = reactive({ name: '', address: '', port: 39000, remark: '' })
+const form = reactive({ name: '', port: 39000, remark: '' })
 const rules = {
   name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
-  address: [{ required: true, message: '请输入 IP 或域名', trigger: 'blur' }],
   port: [{ required: true, message: '请输入端口', trigger: 'blur' }]
 }
 
@@ -306,6 +305,7 @@ const nftDialogVisible = ref(false)
 
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
+const installNode = computed(() => nodeList.value.find(node => node.id === currentInstallNode.value?.id) || currentInstallNode.value)
 const panelAddress = ref('')
 const registrationToken = ref('')
 const registrationExpiresAt = ref('')
@@ -322,8 +322,10 @@ const formatBytes = (bytes) => {
 const formatTime = (value) => dateFormatter.format(new Date(value))
 
 const nodeEndpoint = (node) => {
-  const address = node.address.includes(':') && !node.address.startsWith('[') ? '[' + node.address + ']' : node.address
-  return address + ':' + node.port
+  const address = node.address
+  if (!address) return '待获取地址'
+  const host = address.includes(':') && !address.startsWith('[') ? `[${address}]` : address
+  return `${host}:${node.port}`
 }
 
 const configSummary = (tab, entry) => {
@@ -342,7 +344,7 @@ const installCommand = computed(() => {
 })
 
 const showInstallCommand = async (row) => {
-  currentInstallNode.value = { id: row.id, name: row.name, address: row.address, port: row.port }
+  currentInstallNode.value = row
   installDialogVisible.value = true
   if (!panelAddress.value) {
     const res = await getPublicSystemConfig().catch(() => null)
@@ -417,12 +419,10 @@ const openDialog = (row = null) => {
   editId.value = row?.id ?? null
   Object.assign(form, row ? {
     name: row.name,
-    address: row.address,
     port: row.port,
     remark: row.remark || ''
   } : {
     name: '',
-    address: '127.0.0.1',
     port: 39000,
     remark: ''
   })
@@ -518,6 +518,7 @@ onBeforeUnmount(() => {
 <style scoped src="../inventory.css"></style>
 
 <style scoped>
+.node-address-help { margin: 0 0 12px; line-height: 1.5; }
 .config-empty { text-align: center; padding: 24px 12px; }
 .config-entry { border: 1px solid var(--ops-border); border-radius: 8px; margin-bottom: 8px; min-width: 0; }
 .config-entry summary { padding: 10px 12px; cursor: pointer; overflow-wrap: anywhere; }

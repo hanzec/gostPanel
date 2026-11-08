@@ -132,11 +132,13 @@ report:
 
 ## 📡 添加 Gost 实例
 
-1. 在 **节点管理** 添加实例，填写面板用于连接节点桥的地址和 gRPC 端口。多个实例部署到同一台服务器时，为每个实例分配独立端口。
+1. 在 **节点管理** 添加实例并填写 gRPC 端口。连接地址在节点注册时自动获取。多个实例部署到同一台服务器时，为每个实例分配独立端口。
 2. 打开该实例的 **安装** 操作，点击 **签发注册令牌**，并在目标 Linux 服务器以 root 执行生成的命令。命令只传 `--panel-address` 和 `--token`。token 有效期为 15 分钟，成功注册后立即失效，重新签发会替换尚未使用的 token。
 3. 节点在线后创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 gRPC `Panel.Report`。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
 首次注册时，`yagp-node` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `Panel.RegisterNode` 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-node/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
+
+参照 Komari，`yagp-node` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。两种地址均未获取时，面板使用注册连接的来源 IP。面板优先使用记录到的 IPv4，其次使用 IPv6。节点的 gRPC 端口须能通过该地址从面板访问。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
 
 Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS gRPC 接口下发配置。节点上报时使用注册获得的 ID 和凭据。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
@@ -162,7 +164,7 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 ### Gost Relay 来源 IP 白名单
 
-在 **系统设置 → Gost IP 白名单** 勾选允许连接的节点。面板从所选节点的登记地址生成 IPv4/IPv6 白名单，并应用到面板管理的隧道出口 Relay。登记地址应填写这些节点连接 Relay 时使用的源 IP。清空选择并保存可解除该白名单限制。首次为已有 Relay 绑定准入配置时会重载该服务，后续修改名单会热更新。
+在 **系统设置 → Gost IP 白名单** 勾选允许连接的节点。面板将所选节点注册时记录的 IPv4 和 IPv6 应用到面板管理的隧道出口 Relay，重新注册后自动同步新的地址。还没有自动地址的节点需要重新注册才会进入白名单。Relay 匹配实际连接的来源 IP，多出口节点的探测地址可能与连接 Relay 时使用的地址不同。清空选择并保存可解除该白名单限制。首次为已有 Relay 绑定准入配置时会重载该服务，后续修改名单会热更新。
 
 ### Clash 规则集订阅
 

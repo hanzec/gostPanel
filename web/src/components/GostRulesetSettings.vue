@@ -34,7 +34,7 @@
         placeholder="选择运行 Gost 透明代理的节点"
         no-data-text="请先在节点管理中添加节点"
       >
-        <el-option v-for="node in nodes" :key="node.id" :label="`${node.name}（${node.address}）`" :value="node.id" />
+        <el-option v-for="node in nodes" :key="node.id" :label="`${node.name}（${node.address || '待获取地址'}）`" :value="node.id" />
       </el-select>
       <p id="gost-ruleset-nodes-help" class="ops-muted field-help">取消选中并保存后，该节点按最后一次同步的规则分流。</p>
     </el-form-item>

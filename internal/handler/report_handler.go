@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 )
@@ -37,7 +39,14 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 	if err := nodegrpc.ValidateNodeCertificate(request.GetNodeCertificatePem()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid node certificate")
 	}
-	node, err := h.nodes.Register(ctx, uint(id), request.GetToken(), request.GetNodeCertificatePem())
+	ipv4, ipv6, err := registrationIPs(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if ipv4 == "" && ipv6 == "" {
+		return nil, status.Error(codes.FailedPrecondition, "could not detect a node IP address")
+	}
+	node, err := h.nodes.Register(ctx, uint(id), request.GetToken(), request.GetNodeCertificatePem(), ipv4, ipv6)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, status.Error(codes.Unauthenticated, "invalid or expired registration token")
 	}
@@ -51,6 +60,48 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 		Password:    node.Password,
 		ControlPort: uint32(node.Port),
 	}, nil
+}
+
+func registrationIPs(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (string, string, error) {
+	ipv4, valid := parseReportedIP(request.GetIpv4(), 32)
+	if !valid {
+		return "", "", status.Error(codes.InvalidArgument, "invalid registration IPv4")
+	}
+	ipv6, valid := parseReportedIP(request.GetIpv6(), 128)
+	if !valid {
+		return "", "", status.Error(codes.InvalidArgument, "invalid registration IPv6")
+	}
+	if ipv4 != "" || ipv6 != "" {
+		return ipv4, ipv6, nil
+	}
+	// A registration proxy can have a different address from the node itself.
+	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		endpoint, err := netip.ParseAddrPort(p.Addr.String())
+		ip := endpoint.Addr().Unmap()
+		if err == nil && isRegistrationIP(ip) {
+			if ip.Is4() {
+				return ip.String(), "", nil
+			}
+			return "", ip.String(), nil
+		}
+	}
+	return "", "", nil
+}
+
+func parseReportedIP(value string, bits int) (string, bool) {
+	if value == "" {
+		return "", true
+	}
+	ip, err := netip.ParseAddr(value)
+	ip = ip.Unmap()
+	if err != nil || ip.BitLen() != bits || !isRegistrationIP(ip) {
+		return "", false
+	}
+	return ip.String(), true
+}
+
+func isRegistrationIP(ip netip.Addr) bool {
+	return ip.Zone() == "" && (ip.IsGlobalUnicast() || ip.IsLoopback())
 }
 
 func (h *ReportHandler) Report(ctx context.Context, request *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {

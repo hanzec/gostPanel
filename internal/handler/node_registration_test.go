@@ -45,7 +45,7 @@ func TestNodeRegistration(t *testing.T) {
 	if err := db.AutoMigrate(&model.GostNode{}, &model.OperationLog{}); err != nil {
 		t.Fatal(err)
 	}
-	node := model.GostNode{Name: "test", Address: "localhost", Port: 39000}
+	node := model.GostNode{Name: "test", Port: 39000}
 	if err := db.Create(&node).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +112,9 @@ func TestNodeRegistration(t *testing.T) {
 		enrolled.Username != reply.GetUsername() || enrolled.Password != reply.GetPassword() {
 		t.Fatal("stored registration state does not match the successful reply")
 	}
+	if enrolled.Address != "127.0.0.1" || enrolled.IPv4 != "127.0.0.1" || enrolled.IPv6 != "" {
+		t.Fatal("registration did not store the direct peer address for automatic control")
+	}
 	data, err := json.Marshal(enrolled)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +126,9 @@ func TestNodeRegistration(t *testing.T) {
 	if _, ok := publicNode["password"]; ok {
 		t.Fatal("node JSON exposes the password")
 	}
+	if publicNode["ipv4"] != enrolled.IPv4 || publicNode["ipv6"] != enrolled.IPv6 {
+		t.Fatal("node JSON does not expose the detected addresses")
+	}
 	initialAuth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(reply.GetUsername(), reply.GetPassword()))
 	report := &nodegrpc.ReportRequest{NodeId: reply.GetNodeId(), Observation: &observer.ObserveRequest{}}
 	if _, err := client.Report(ctx, report, initialAuth); err != nil {
@@ -130,6 +136,12 @@ func TestNodeRegistration(t *testing.T) {
 	}
 
 	request.Token = issue()
+	request.Ipv4 = "2001:db8::7"
+	if _, err := client.RegisterNode(ctx, request); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("register with wrong address family = %v", err)
+	}
+	request.Ipv4 = ""
+	request.Ipv6 = "2001:0db8:0:0::7"
 	type result struct {
 		reply *nodegrpc.RegisterNodeReply
 		err   error
@@ -147,6 +159,12 @@ func TestNodeRegistration(t *testing.T) {
 	}
 	if first.err != nil || status.Code(second.err) != codes.Unauthenticated {
 		t.Fatalf("concurrent registrations = %v and %v, want exactly one success", first.err, second.err)
+	}
+	if err := db.First(&enrolled, node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if enrolled.IPv4 != "" || enrolled.IPv6 != "2001:db8::7" || enrolled.Address != enrolled.IPv6 {
+		t.Fatal("re-registration did not replace the address with the normalized IPv6")
 	}
 	assertRejected(request.Token, certPEM, codes.Unauthenticated)
 	if _, err := client.Report(ctx, report, initialAuth); status.Code(err) != codes.Unauthenticated {

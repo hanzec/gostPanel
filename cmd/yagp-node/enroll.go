@@ -86,10 +86,12 @@ func registerNode(ctx context.Context, address, token, stateDir, output string) 
 		return 0, err
 	}
 	defer conn.Close()
+	ipv4, ipv6 := detectPublicIPs(ctx)
 	rpcCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	reply, err := nodegrpc.NewPanelClient(conn).RegisterNode(rpcCtx, &nodegrpc.RegisterNodeRequest{
 		Token: token, NodeCertificatePem: string(cert),
+		Ipv4: ipv4, Ipv6: ipv6,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("register with panel: %w", err)

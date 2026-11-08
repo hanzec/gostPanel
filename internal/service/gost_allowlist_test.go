@@ -25,9 +25,10 @@ func TestGostAllowlistPersistsValidNodeSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodes := []model.GostNode{
-		{Name: "IPv4", Address: "192.0.2.1", Port: 39000},
-		{Name: "IPv6", Address: "[2001:0db8::1]", Port: 39000},
-		{Name: "hostname", Address: "example.com", Port: 39000},
+		{Name: "IPv4", IPv4: "192.0.2.1", Port: 39000},
+		{Name: "IPv6", IPv6: "2001:db8::1", Port: 39000},
+		{Name: "old address", Address: "198.51.100.2", Port: 39000},
+		{Name: "dual stack", IPv4: "192.0.2.2", IPv6: "2001:db8::2", Port: 39000},
 	}
 	if err = db.Create(&nodes).Error; err != nil {
 		t.Fatal(err)
@@ -38,7 +39,7 @@ func TestGostAllowlistPersistsValidNodeSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = service.Update(ctx, []uint{nodes[2].ID}); err == nil {
-		t.Fatal("accepted a node without a literal IP address")
+		t.Fatal("accepted a node without a registered IP address")
 	}
 	config, err := service.Get(ctx)
 	if err != nil {
@@ -47,6 +48,27 @@ func TestGostAllowlistPersistsValidNodeSelection(t *testing.T) {
 	if !slices.Equal(config.NodeIDs, []uint{nodes[0].ID, nodes[1].ID}) ||
 		!slices.Equal(config.Addresses, []string{"192.0.2.1", "2001:db8::1"}) {
 		t.Fatalf("saved policy = %+v", config)
+	}
+	if _, err = service.Update(ctx, []uint{nodes[3].ID}); err != nil {
+		t.Fatal(err)
+	}
+	config, err = service.Get(ctx)
+	if err != nil || !slices.Equal(config.Addresses, []string{"192.0.2.2", "2001:db8::2"}) {
+		t.Fatalf("detected policy = %+v, err = %v", config, err)
+	}
+	if err = db.Model(&nodes[3]).Updates(map[string]any{"ipv4": "", "ipv6": "2001:db8::3"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	config, err = service.Get(ctx)
+	if err != nil || !slices.Equal(config.Addresses, []string{"2001:db8::3"}) {
+		t.Fatalf("refreshed policy = %+v, err = %v", config, err)
+	}
+	if err = db.Delete(&nodes[3]).Error; err != nil {
+		t.Fatal(err)
+	}
+	config, err = service.Get(ctx)
+	if err != nil || !slices.Equal(config.NodeIDs, []uint{nodes[3].ID}) || len(config.Addresses) != 0 || !relayAdmission(config).Whitelist {
+		t.Fatalf("policy after node deletion = %+v, err = %v", config, err)
 	}
 	if _, err = service.Update(ctx, nil); err != nil {
 		t.Fatal(err)

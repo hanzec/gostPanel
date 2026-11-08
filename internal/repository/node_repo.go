@@ -28,7 +28,7 @@ func (r *NodeRepository) Create(node *model.GostNode) error {
 
 // Update 更新节点元数据，不覆盖并发完成的注册或健康检查。
 func (r *NodeRepository) Update(node *model.GostNode) error {
-	return r.DB.Model(node).Select("Name", "Address", "Port", "Remark").Updates(node).Error
+	return r.DB.Model(node).Select("Name", "Port", "Remark").Updates(node).Error
 }
 
 func (r *NodeRepository) SetRegistrationToken(ctx context.Context, id uint, hash string, expiresAt time.Time) error {
@@ -54,6 +54,9 @@ func (r *NodeRepository) ConsumeRegistrationToken(ctx context.Context, node *mod
 				"username":                node.Username,
 				"password":                node.Password,
 				"tls_certificate_pem":     node.TLSCertificatePEM,
+				"address":                 node.Address,
+				"ipv4":                    node.IPv4,
+				"ipv6":                    node.IPv6,
 			})
 		if result.Error != nil {
 			return result.Error

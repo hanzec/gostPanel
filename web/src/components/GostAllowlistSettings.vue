@@ -18,12 +18,18 @@
         clearable
         collapse-tags
         collapse-tags-tooltip
-        placeholder="选择登记了 IP 地址的节点"
+        placeholder="选择已获取 IP 的节点"
         no-data-text="请先在节点管理中添加节点"
       >
-        <el-option v-for="node in nodes" :key="node.id" :label="`${node.name}（${node.address}）`" :value="node.id" />
+        <el-option
+          v-for="node in nodes"
+          :key="node.id"
+          :label="`${node.name}（${[node.ipv4, node.ipv6].filter(Boolean).join(' / ') || '未获取 IP'}）`"
+          :value="node.id"
+          :disabled="!node.ipv4 && !node.ipv6 && !nodeIds.includes(node.id)"
+        />
       </el-select>
-      <p id="gost-allowlist-help" class="ops-muted field-help">面板从所选节点的登记地址提取 IPv4 或 IPv6。清空后保存将解除来源 IP 限制。</p>
+      <p id="gost-allowlist-help" class="ops-muted field-help">面板加入节点注册时自动获取的 IPv4 和 IPv6。清空选择并保存可解除来源 IP 限制。</p>
     </el-form-item>
     <dl class="allowlist-preview" aria-live="polite">
       <dt>已保存的来源 IP</dt>
