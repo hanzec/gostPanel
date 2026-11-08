@@ -1,4 +1,4 @@
-# yagp 仓库指南
+# yagp（Yet Another Gost Panel）仓库指南
 
 ## 项目来源与 AI 使用
 

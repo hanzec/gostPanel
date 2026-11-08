@@ -273,7 +273,7 @@ func TestNodeHTTPUpgradeLifecycle(t *testing.T) {
 		switch req.URL.String() {
 		case "https://api.github.com/repos/go-gost/gost/releases/latest":
 			tag = "v3.1.0"
-		case "https://api.github.com/repos/hanzec/gostPanel/releases/latest":
+		case "https://api.github.com/repos/hanzec/yagp/releases/latest":
 			tag = "0.1.2-abcdef1"
 		default:
 			return nil, fmt.Errorf("unexpected release lookup: %s", req.URL)

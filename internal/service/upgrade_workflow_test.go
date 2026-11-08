@@ -38,7 +38,7 @@ func TestManualUpgradeValidatesStateAndStartsStableRelease(t *testing.T) {
 				return
 			}
 			_, _ = fmt.Fprint(w, "{\"tag_name\":\"v3.2.8\"}")
-		case "/repos/hanzec/gostPanel/releases/latest":
+		case "/repos/hanzec/yagp/releases/latest":
 			if releaseFailures.Load()&2 != 0 {
 				http.Error(w, "unavailable", http.StatusServiceUnavailable)
 				return

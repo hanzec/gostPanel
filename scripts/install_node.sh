@@ -93,7 +93,7 @@ case "$(uname -m)" in
     *) die "当前发布支持 Linux amd64 和 arm64" ;;
 esac
 
-repo="${YAGP_REPO:-hanzec/gostPanel}"
+repo="${YAGP_REPO:-hanzec/yagp}"
 release_path=latest/download
 node_version="${YAGP_DAEMON_VERSION:-}"
 if [[ -n "$node_version" ]]; then

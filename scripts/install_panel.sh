@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# yagp Binary Installation Script
+# Yet Another Gost Panel (yagp) Binary Installation Script
 # Original author: code-gopher
 # Upstream project: https://github.com/code-gopher/gostPanel
 
@@ -24,7 +24,7 @@ INSTALL_DIR="/usr/local/bin"
 SERVICE_NAME="gost-panel"
 CONFIG_DIR="/etc/gost-panel"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-REPO=${YAGP_REPO:-hanzec/gostPanel}
+REPO=${YAGP_REPO:-hanzec/yagp}
 GH_PROXY=${GH_PROXY:-""}
 
 # Detect Architecture
@@ -103,7 +103,7 @@ function install_panel() {
     info "创建系统服务..."
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=yagp Service
+Description=Yet Another Gost Panel (yagp)
 After=network.target
 
 [Service]
