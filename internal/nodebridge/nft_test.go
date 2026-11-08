@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"yagp/pkg/nodegrpc"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -28,13 +30,16 @@ func TestNftConfigTableScope(t *testing.T) {
 			t.Errorf("accepted unsupported configuration %s", config)
 		}
 	}
+	if _, err := nftBatch(1, strings.Repeat(" ", nodegrpc.MaxNftConfigBytes+1)); err == nil {
+		t.Error("accepted oversized nftables configuration")
+	}
 }
 
 func TestNftConfigApplyAndRestore(t *testing.T) {
 	if runtime.GOOS != "linux" || os.Getenv("YAGP_TEST_NFT") != "1" {
 		t.Skip("set YAGP_TEST_NFT=1 in a disposable Linux network namespace with nft installed")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(controlTestContext(), 10*time.Second)
 	defer cancel()
 	id := uint64(time.Now().UnixNano())
 	table := fmt.Sprintf("yagp_node_%d", id)
@@ -58,8 +63,12 @@ func TestNftConfigApplyAndRestore(t *testing.T) {
 		return fmt.Sprintf(`{"nftables":[{"add":{"chain":{"family":"inet","table":%q,"name":%q,"type":"nat","hook":%q,"prio":-110,"policy":"accept"}}}]}`, table, chain, hook)
 	}
 	initial := config("before", "prerouting")
-	if err := applyNftConfig(ctx, id, configPath, initial); err != nil {
-		t.Fatal(err)
+	control := controlServer{config: Config{
+		NodeID: id, Username: controlTestUser, Password: controlTestPassword, NftConfigFile: configPath,
+	}}
+	reply, err := control.ApplyNftConfig(ctx, &nodegrpc.NftConfig{Config: initial})
+	if err != nil || reply.GetConfig() != initial {
+		t.Fatalf("applying nft config through control API returned %v, %v", reply, err)
 	}
 	if err := applyNftConfig(ctx, id, configPath, config("invalid", "wrong-hook")); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("invalid nft configuration: %v", err)

@@ -126,6 +126,9 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	if _, err = controlClient.RestartGostService(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated restart request: %v", err)
 	}
+	if _, err = controlClient.GetObserverEndpoint(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("unauthenticated observer endpoint request: %v", err)
+	}
 	if _, err = controlClient.StartUpgrade(timeout, &nodegrpc.NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated upgrade request: %v", err)
 	}

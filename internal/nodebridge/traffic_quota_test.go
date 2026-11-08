@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"yagp/pkg/nodegrpc"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -105,15 +107,17 @@ func TestNativeTrafficQuotaLifecycle(t *testing.T) {
 	if runtime.GOOS != "linux" || os.Getenv("YAGP_TEST_NFT") != "1" {
 		t.Skip("set YAGP_TEST_NFT=1 in a disposable Linux network namespace with nft installed")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(controlTestContext(), 10*time.Second)
 	defer cancel()
 	nft, err := exec.LookPath("nft")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := Config{NodeID: uint64(time.Now().UnixNano()), ConfigFile: filepath.Join(t.TempDir(), "node.yaml")}
+	cfg.Username, cfg.Password = controlTestUser, controlTestPassword
 	table := fmt.Sprintf("yagp_quota_%d", cfg.NodeID)
 	t.Cleanup(func() { _ = exec.Command(nft, "delete", "table", "inet", table).Run() })
+	control := controlServer{config: cfg}
 
 	tcp := listenLocal(t)
 	port := uint32(tcp.Addr().(*net.TCPAddr).Port)
@@ -124,11 +128,14 @@ func TestNativeTrafficQuotaLifecycle(t *testing.T) {
 	defer udp.Close()
 	apply := func(policy trafficQuotaState) uint64 {
 		t.Helper()
-		used, err := syncTrafficQuota(ctx, cfg, policy)
+		reply, err := control.SyncTrafficQuota(ctx, &nodegrpc.TrafficQuotaRequest{
+			LimitBytes: policy.LimitBytes, UsedBytes: policy.UsedBytes, WindowStart: policy.WindowStart,
+			TcpPorts: policy.TCPPorts, UdpPorts: policy.UDPPorts,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return used
+		return reply.GetUsedBytes()
 	}
 	live := func() *liveTrafficQuota {
 		t.Helper()
@@ -142,6 +149,9 @@ func TestNativeTrafficQuotaLifecycle(t *testing.T) {
 	state := trafficQuotaState{
 		LimitBytes: 100_000, UsedBytes: 20, WindowStart: 100,
 		TCPPorts: []uint32{port, port}, UDPPorts: []uint32{port},
+	}
+	if used := apply(trafficQuotaState{WindowStart: -1, UsedBytes: 5_000}); used != 0 {
+		t.Fatalf("clearing a nonexistent quota retained %d bytes", used)
 	}
 	if used := apply(state); used != 20 {
 		t.Fatalf("initial usage = %d, want 20", used)
@@ -200,6 +210,9 @@ func TestNativeTrafficQuotaLifecycle(t *testing.T) {
 	}
 	if used := apply(trafficQuotaState{WindowStart: -1, UsedBytes: 5_000}); used != 0 {
 		t.Fatalf("clearing quota retained %d bytes", used)
+	}
+	if used := apply(trafficQuotaState{WindowStart: -1}); used != 0 {
+		t.Fatalf("clearing an already disabled quota retained %d bytes", used)
 	}
 	if quota := live(); quota != nil {
 		t.Fatalf("clearing quota left a kernel quota: %+v", quota)

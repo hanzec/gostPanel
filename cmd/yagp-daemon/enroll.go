@@ -44,7 +44,7 @@ func enroll(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read registration token: %w", err)
 	}
-	nodeID, err := registerNode(ctx, *address, strings.TrimSpace(string(token)), nodeStateDir, *output)
+	nodeID, err := registerNode(ctx, *address, strings.TrimSpace(string(token)), nodeStateDir, *output, nodebridge.DetectPublicIPs)
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func enroll(ctx context.Context, args []string) error {
 	return err
 }
 
-func registerNode(ctx context.Context, address, token, stateDir, output string) (uint64, error) {
+func registerNode(ctx context.Context, address, token, stateDir, output string, detectIPs func(context.Context) (string, string)) (uint64, error) {
 	host, port, err := net.SplitHostPort(address)
 	portNumber, portErr := strconv.ParseUint(port, 10, 16)
 	if err != nil || host == "" || strings.ContainsAny(host, "/ \\?#\t\r\n") || portErr != nil || portNumber == 0 {
@@ -86,7 +86,7 @@ func registerNode(ctx context.Context, address, token, stateDir, output string) 
 		return 0, err
 	}
 	defer conn.Close()
-	ipv4, ipv6 := nodebridge.DetectPublicIPs(ctx)
+	ipv4, ipv6 := detectIPs(ctx)
 	rpcCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	reply, err := nodegrpc.NewPanelClient(conn).RegisterNode(rpcCtx, &nodegrpc.RegisterNodeRequest{
