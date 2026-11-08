@@ -106,7 +106,7 @@ type handlerPage[T any] struct {
 }
 
 func (f *handlerHTTPFixture) registerNodes() {
-	h := NewNodeHandler(service.NewNodeService(f.db), service.NewNodeUpgradeService(f.db))
+	h := NewNodeHandler(service.NewNodeService(f.db, ""), service.NewNodeUpgradeService(f.db))
 	f.engine.GET("/nodes", h.List)
 	f.engine.POST("/nodes", h.Create)
 	f.engine.GET("/nodes/:id", h.GetByID)

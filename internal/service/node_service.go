@@ -27,15 +27,17 @@ const registrationTokenLifetime = 15 * time.Minute
 // NodeService 节点服务
 // 负责节点的 CRUD 操作和业务逻辑处理
 type NodeService struct {
-	nodeRepo   *repository.NodeRepository
-	logService *LogService
+	nodeRepo                *repository.NodeRepository
+	logService              *LogService
+	registrationFingerprint string
 }
 
 // NewNodeService 创建节点服务
-func NewNodeService(db *gorm.DB) *NodeService {
+func NewNodeService(db *gorm.DB, registrationFingerprint string) *NodeService {
 	return &NodeService{
-		nodeRepo:   repository.NewNodeRepository(db),
-		logService: NewLogService(db),
+		nodeRepo:                repository.NewNodeRepository(db),
+		logService:              NewLogService(db),
+		registrationFingerprint: registrationFingerprint,
 	}
 }
 
@@ -136,6 +138,9 @@ func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, usern
 	issued := &dto.NodeRegistrationToken{
 		Token:     fmt.Sprintf("%d.%s", id, secret),
 		ExpiresAt: time.Now().UTC().Add(registrationTokenLifetime),
+	}
+	if s.registrationFingerprint != "" {
+		issued.Token += "." + s.registrationFingerprint
 	}
 	if err := s.nodeRepo.SetRegistrationToken(ctx, id, registrationTokenHash(issued.Token), issued.ExpiresAt); err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {

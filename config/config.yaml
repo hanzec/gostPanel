@@ -14,9 +14,8 @@ authentik:
 report:
   listen: ""
   address: ""  # Traefik 部署使用 主机:端口/api/v1/grpc；直连使用 主机:端口
-  proxy_ip: ""  # Traefik 的 Docker 网络 IP；仅在由 Traefik 终止 TLS 时设置
-  cert_file: ""
-  key_file: ""
+  # Compose 的 Traefik 回源使用内部端口，proxy_ip 可选。
+  # 直连时省略 cert_file 和 key_file 即自动生成并保存证书。
 
 log:
   level: "info"  # debug, info, warn, error

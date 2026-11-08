@@ -36,7 +36,7 @@ func TestNodeTrafficLimitPreservesOmittedValueAndAcceptsZero(t *testing.T) {
 	if err := db.Create(&node).Error; err != nil {
 		t.Fatal(err)
 	}
-	service := NewNodeService(db)
+	service := NewNodeService(db, "")
 	for _, test := range []struct {
 		body   string
 		limit  int64

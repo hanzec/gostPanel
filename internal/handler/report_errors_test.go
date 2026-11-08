@@ -24,11 +24,11 @@ func TestNodeRegistrationRequiresAnAddressAndPersistsIt(t *testing.T) {
 	if err := f.db.Create(&node).Error; err != nil {
 		t.Fatal(err)
 	}
-	issued, err := service.NewNodeService(f.db).IssueRegistrationToken(t.Context(), node.ID, "admin", "127.0.0.1", "test")
+	issued, err := service.NewNodeService(f.db, "").IssueRegistrationToken(t.Context(), node.ID, "admin", "127.0.0.1", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewReportHandler(f.db, false)
+	handler := NewReportHandler(f.db, ReportIPFromPeer)
 	req := &nodegrpc.RegisterNodeRequest{Token: "invalid"}
 	if _, err := handler.RegisterNode(t.Context(), req); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("register with invalid token: %v", err)
@@ -63,24 +63,26 @@ func TestNodeRegistrationRequiresAnAddressAndPersistsIt(t *testing.T) {
 func TestRegistrationIPFallbackThroughTrustedProxy(t *testing.T) {
 	ctx := peer.NewContext(t.Context(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP("172.30.0.2"), Port: 39000}})
 	for _, tt := range []struct {
-		name        string
-		behindProxy bool
-		forwarded   []string
-		reported    string
-		want4       string
-		want6       string
+		name      string
+		ipSource  ReportIPSource
+		forwarded []string
+		reported  string
+		want4     string
+		want6     string
 	}{
-		{"direct connection ignores forwarded IP", false, []string{"192.0.2.3"}, "", "172.30.0.2", ""},
-		{"node report takes precedence", true, []string{"192.0.2.3"}, "192.0.2.4", "192.0.2.4", ""},
-		{"proxy IPv4", true, []string{"192.0.2.3"}, "", "192.0.2.3", ""},
-		{"proxy IPv6", true, []string{"2001:db8::8"}, "", "", "2001:db8::8"},
-		{"proxy did not supply an IP", true, nil, "", "", ""},
-		{"proxy supplied an invalid IP", true, []string{"unknown"}, "", "", ""},
-		{"proxy supplied several IPs", true, []string{"192.0.2.3", "192.0.2.4"}, "", "", ""},
+		{"direct connection ignores forwarded IP", ReportIPFromPeer, []string{"192.0.2.3"}, "", "172.30.0.2", ""},
+		{"node report takes precedence", ReportIPFromTrustedProxy, []string{"192.0.2.3"}, "192.0.2.4", "192.0.2.4", ""},
+		{"unrestricted proxy uses node probe", ReportIPFromNodeOnly, []string{"192.0.2.3"}, "192.0.2.4", "192.0.2.4", ""},
+		{"unrestricted proxy ignores header and proxy address", ReportIPFromNodeOnly, []string{"192.0.2.3"}, "", "", ""},
+		{"proxy IPv4", ReportIPFromTrustedProxy, []string{"192.0.2.3"}, "", "192.0.2.3", ""},
+		{"proxy IPv6", ReportIPFromTrustedProxy, []string{"2001:db8::8"}, "", "", "2001:db8::8"},
+		{"proxy did not supply an IP", ReportIPFromTrustedProxy, nil, "", "", ""},
+		{"proxy supplied an invalid IP", ReportIPFromTrustedProxy, []string{"unknown"}, "", "", ""},
+		{"proxy supplied several IPs", ReportIPFromTrustedProxy, []string{"192.0.2.3", "192.0.2.4"}, "", "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := metadata.NewIncomingContext(ctx, metadata.MD{"x-real-ip": tt.forwarded})
-			handler := ReportHandler{behindProxy: tt.behindProxy}
+			handler := ReportHandler{ipSource: tt.ipSource}
 			ipv4, ipv6, err := handler.registrationIPs(ctx, &nodegrpc.RegisterNodeRequest{Ipv4: tt.reported})
 			if err != nil || ipv4 != tt.want4 || ipv6 != tt.want6 {
 				t.Fatalf("registration IPs = %q, %q, %v, want %q, %q", ipv4, ipv6, err, tt.want4, tt.want6)

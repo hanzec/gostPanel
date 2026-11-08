@@ -26,18 +26,26 @@ import (
 
 const connectAuthTimeout = 3 * time.Second
 
+type ReportIPSource uint8
+
+const (
+	ReportIPFromPeer ReportIPSource = iota
+	ReportIPFromTrustedProxy
+	ReportIPFromNodeOnly
+)
+
 type ReportHandler struct {
 	nodegrpc.UnimplementedV1Server
 	db           *gorm.DB
 	traffic      *service.ObserverService
 	nodes        *service.NodeService
-	behindProxy  bool
+	ipSource     ReportIPSource
 	reportLimits reportRateLimits
 }
 
-func NewReportHandler(db *gorm.DB, behindProxy bool) *ReportHandler {
+func NewReportHandler(db *gorm.DB, ipSource ReportIPSource) *ReportHandler {
 	return &ReportHandler{
-		db: db, traffic: service.NewObserverService(db), nodes: service.NewNodeService(db), behindProxy: behindProxy,
+		db: db, traffic: service.NewObserverService(db), nodes: service.NewNodeService(db, ""), ipSource: ipSource,
 	}
 }
 
@@ -145,14 +153,17 @@ func (h *ReportHandler) registrationIPs(ctx context.Context, request *nodegrpc.R
 		return ipv4, ipv6, err
 	}
 	var ip netip.Addr
-	if h.behindProxy {
+	switch h.ipSource {
+	case ReportIPFromTrustedProxy:
 		// The report server has already verified the proxy's connection address.
 		if values := metadata.ValueFromIncomingContext(ctx, "x-real-ip"); len(values) == 1 {
 			ip, _ = netip.ParseAddr(values[0])
 		}
-	} else if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
-		endpoint, _ := netip.ParseAddrPort(p.Addr.String())
-		ip = endpoint.Addr()
+	case ReportIPFromPeer:
+		if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+			endpoint, _ := netip.ParseAddrPort(p.Addr.String())
+			ip = endpoint.Addr()
+		}
 	}
 	ip = ip.Unmap()
 	if !isNodeIP(ip) {

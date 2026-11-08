@@ -16,12 +16,14 @@ import (
 
 	"yagp/internal/config"
 	"yagp/internal/model"
+	"yagp/internal/service"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 )
@@ -106,17 +108,14 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	if err := db.AutoMigrate(&model.GostNode{}); err != nil {
 		t.Fatal(err)
 	}
-	if server, err := startReports(config.ReportConfig{}, db); err != nil || server != nil {
+	if server, pin, err := startReports(config.ReportConfig{}, db); err != nil || server != nil || pin != "" {
 		t.Fatalf("disabled reports = %v, %v", server, err)
 	}
 	cfg := config.ReportConfig{Listen: "127.0.0.1:0", Address: ":9000"}
-	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.address") {
+	if _, _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.address") {
 		t.Fatalf("invalid report address = %v", err)
 	}
 	cfg.Address = "panel.example.test:9000"
-	if _, err := startReports(cfg, db); err == nil {
-		t.Fatal("reports started without TLS files")
-	}
 	https := httptest.NewTLSServer(nil)
 	cert := https.TLS.Certificates[0]
 	https.Close()
@@ -141,9 +140,9 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	}
 	cfg.Listen = listener.Addr().String()
 	_ = listener.Close()
-	server, err := startReports(cfg, db)
-	if err != nil {
-		t.Fatal(err)
+	server, pin, err := startReports(cfg, db)
+	if err != nil || pin != "" {
+		t.Fatalf("configured TLS certificate = pin %q, %v", pin, err)
 	}
 	defer server.Stop()
 	info, ok := server.GetServiceInfo()["yagp.v1"]
@@ -172,8 +171,84 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 		t.Fatalf("listener probe should run only on the node control stream: %v", err)
 	}
 	cfg.Listen = "invalid listen address"
-	if _, err := startReports(cfg, db); err == nil {
+	if _, _, err := startReports(cfg, db); err == nil {
 		t.Fatal("invalid bind address accepted")
+	}
+}
+
+func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
+	for _, proxied := range []bool{false, true} {
+		name := "generated TLS"
+		if proxied {
+			name = "internal proxy without a fixed IP"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			db := testSQLite(t)
+			if err := db.AutoMigrate(&model.GostNode{}, &model.OperationLog{}); err != nil {
+				t.Fatal(err)
+			}
+			node := model.GostNode{Name: "enrollment"}
+			if err := db.Create(&node).Error; err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.ReportConfig{Listen: listener.Addr().String(), Address: listener.Addr().String()}
+			_ = listener.Close()
+			if proxied {
+				cfg.Address = "panel.example.test:443" + nodegrpc.PanelProxyPath
+			}
+			server, pin, err := startReports(cfg, db)
+			if err != nil || (proxied && pin != "") || (!proxied && len(pin) != 64) {
+				t.Fatalf("start reports = pin %q, %v", pin, err)
+			}
+			defer server.Stop()
+			issued, err := service.NewNodeService(db, pin).IssueRegistrationToken(t.Context(), node.ID, "admin", "127.0.0.1", "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, enrollmentPin, err := nodegrpc.ParseRegistrationToken(issued.Token)
+			if err != nil || enrollmentPin != pin {
+				t.Fatalf("enrollment certificate pin = %q, %v", enrollmentPin, err)
+			}
+			transport := insecure.NewCredentials()
+			if !proxied {
+				address, err := nodegrpc.ParsePanelAddress(cfg.Address)
+				if err != nil {
+					t.Fatal(err)
+				}
+				transport, err = address.ClientTLS("", enrollmentPin)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			conn, err := grpc.NewClient(cfg.Listen, grpc.WithTransportCredentials(transport))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			client := nodegrpc.NewV1Client(conn)
+			request := &nodegrpc.RegisterNodeRequest{Token: issued.Token}
+			if proxied {
+				ctx = metadata.AppendToOutgoingContext(ctx, "x-real-ip", "192.0.2.20")
+				if _, err := client.RegisterNode(ctx, request); status.Code(err) != codes.FailedPrecondition {
+					t.Fatalf("unauthorized forwarded IP accepted = %v", err)
+				}
+			}
+			request.Ipv4 = "192.0.2.21"
+			registered, err := client.RegisterNode(ctx, request)
+			if err != nil || registered.GetNodeId() != uint64(node.ID) {
+				t.Fatalf("register node = %v", err)
+			}
+			if err := db.First(&node, node.ID).Error; err != nil || node.IPv4 != request.Ipv4 {
+				t.Fatalf("stored enrollment address = %q, %v", node.IPv4, err)
+			}
+		})
 	}
 }
 
@@ -181,16 +256,12 @@ func TestStartReportsAllowsOnlyTheConfiguredProxy(t *testing.T) {
 	db := testSQLite(t)
 	cfg := config.ReportConfig{Listen: "127.0.0.1:0", Address: "panel.example.test:443"}
 	cfg.ProxyIP = "127.0.0.1"
-	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "/api/v1/grpc") {
+	if _, _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "/api/v1/grpc") {
 		t.Fatalf("proxied reports without a path = %v", err)
 	}
 	cfg.Address += "/api/v1/grpc"
-	cfg.ProxyIP = ""
-	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
-		t.Fatalf("direct reports with a proxy path = %v", err)
-	}
 	cfg.ProxyIP = "127.0.0.0/8"
-	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
+	if _, _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
 		t.Fatalf("proxy IP with a CIDR = %v", err)
 	}
 
@@ -209,7 +280,7 @@ func TestStartReportsAllowsOnlyTheConfiguredProxy(t *testing.T) {
 			cfg.Listen = listener.Addr().String()
 			_ = listener.Close()
 			cfg.ProxyIP = tt.proxyIP
-			server, err := startReports(cfg, db)
+			server, _, err := startReports(cfg, db)
 			if err != nil {
 				t.Fatal(err)
 			}

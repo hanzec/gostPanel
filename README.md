@@ -130,7 +130,7 @@ database:
 
 `report.address` 是节点主动连接面板的地址，也是安装命令中 `--panel-address` 的值。通过 Traefik 时使用 `主机:443/api/v1/grpc`，直连时使用 `主机:端口`。两种方式都无需添加 `https://`。
 
-**Docker Compose：** Traefik 在 `443` 终止 TLS，并把 `/api/v1/grpc/Connect` 改写为 `/yagp.v1/Connect`，通过 HTTP/2（h2c）转发到 Docker 网络内的 `39101`。节点主动建立一条双向流，流量和 IP 上报、管理命令和执行结果都走这条流。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
+**Docker Compose：** Traefik 在 `443` 终止 TLS，并把 `/api/v1/grpc/Connect` 改写为 `/yagp.v1/Connect`，通过 HTTP/2（h2c）转发到 Docker 网络内的 `39101`。节点主动建立一条双向流，流量和 IP 上报、管理命令和执行结果都走这条流。默认配置可省略 `proxy_ip`，保持 `39101` 在共享 Docker 网络内，面板记录节点自己探测上报的 IP。需要额外限制回源时，可将 `proxy_ip` 设为代理的固定 IP。只有设置了该限制，面板才会在节点未上报 IP 时采用代理发送的 `X-Real-IP`。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
 
 Compose 按真实客户端 IP 分别限制注册和建连请求。`RegisterNode` 平均每分钟 6 次、突发 5 次。`Connect` 默认平均每分钟 60 次、突发 30 次，仅在建立新流时计数。节点断线后会退避重连。多个节点共用出口 IP 时，可在 `.env` 中按需调整 `YAGP_CONNECT_RATE_PER_MINUTE` 和 `YAGP_CONNECT_RATE_BURST`。
 
@@ -153,19 +153,16 @@ entryPoints:
 report:
   listen: ":39101"
   address: "panel.example.com:443/api/v1/grpc"
-  proxy_ip: "172.30.0.2"
 ```
 
-面板和节点需要一起升级到支持双向流的版本。按[一键升级步骤](#升级已安装节点)在每台节点上运行 `upgrade --node-id`，继续使用原节点 ID 和凭据，无需重新注册。已使用 `主机:443/api/v1/grpc` 的节点可沿用原配置。从面板直连端口迁移到 Traefik 时，更新 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 并重启服务；如果改用公有 CA 签发的证书，清除原来的 `report_ca_file`。升级后可关闭节点原来的入站 gRPC 管理端口。
+面板和节点需要一起升级到支持双向流的版本。按[一键升级步骤](#升级已安装节点)在每台节点上运行 `upgrade --node-id`，继续使用原节点 ID 和凭据，无需重新注册。已使用 `主机:443/api/v1/grpc` 的节点可沿用原配置。从面板直连端口迁移到 Traefik 时，更新 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 并重启服务。如果 Traefik 使用公有 CA 签发的证书，清除节点原有的 `report_ca_file` 和 `report_cert_sha256`。升级后可关闭节点原来的入站 gRPC 管理端口。
 
-**二进制直连部署：** 不设置 `proxy_ip`，给 gRPC 监听器配置证书和私钥。证书须覆盖 `report.address` 中的主机名或 IP，并将监听端口开放给节点。
+**二进制直连部署：** 将监听端口开放给节点。面板首次启动时为 `report.address` 中的主机名或 IP 生成自签证书和私钥，保存在工作目录的 `data/report-tls.pem`，重启时复用。注册令牌包含证书指纹，节点在发送令牌前核验证书，并保存指纹用于后续重连。保留此文件以维持已有节点的信任。使用自备证书时，在 `report` 下同时配置 `cert_file` 和 `key_file`，节点按原有 CA 配置验证证书。
 
 ```yaml
 report:
   listen: ":39101"
   address: "panel.internal.example:39101"
-  cert_file: "/etc/gost-panel/panel.crt"
-  key_file: "/etc/gost-panel/panel.key"
 ```
 
 节点先通过一次性 token 注册，之后用面板发放的节点凭据建立双向流。节点验证面板的 TLS 证书。
