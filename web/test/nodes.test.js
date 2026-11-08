@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   messages = mockNodeMessages()
   api.getNodeList.mockResolvedValue(list([primary]))
-  getPublicSystemConfig.mockResolvedValue(response({ reportAddress: 'panel.example.com:39101' }))
+  getPublicSystemConfig.mockResolvedValue(response({ reportAddress: 'panel.example.com:443/api/v1/grpc' }))
   api.issueNodeRegistrationToken.mockImplementation(async () => token())
 })
 
@@ -183,6 +183,7 @@ describe('node registration and quota settings', () => {
       name: newNode.name, port: 39000, remark: '', traffic_limit_bytes: GIB / 2, traffic_reset_period: 'weekly'
     })
     expect(api.issueNodeRegistrationToken).toHaveBeenCalledWith(newNode.id)
+    expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain("--panel-address 'panel.example.com:443/api/v1/grpc'")
     expect(dialog(view, '安装节点 · 新节点').get('code').text()).toContain("--token 'secret'")
     expect(messages.success).toHaveBeenCalledWith('节点已添加')
   })
@@ -231,7 +232,7 @@ describe('node registration and quota settings', () => {
     await click(view, '安装')
     const install = dialog(view, '安装节点 · 边缘节点')
     const address = install.get('#node-panel-address')
-    for (const invalid of ['https://panel.example.com:39101', '[broken:39101', 'panel.example.com']) {
+    for (const invalid of ['https://panel.example.com:443/api/v1/grpc', 'panel.example.com:443/api/v2/grpc', '[broken:39101', 'panel.example.com']) {
       await address.setValue(invalid)
       expect(button(install, '签发注册令牌').element.disabled).toBe(true)
     }
@@ -273,7 +274,7 @@ describe('node registration and quota settings', () => {
     await flushPromises()
     expect(view.find(`[aria-label="${title}"]`).exists()).toBe(false)
     await click(view, '安装')
-    expect(dialog(view, title).get('#node-panel-address').element.value).toBe('panel.example.com:39101')
+    expect(dialog(view, title).get('#node-panel-address').element.value).toBe('panel.example.com:443/api/v1/grpc')
     await click(dialog(view, title), '签发注册令牌')
     expect(dialog(view, title).text()).toContain('正在签发注册令牌')
     await click(dialog(view, title), '关闭')

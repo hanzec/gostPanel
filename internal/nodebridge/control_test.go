@@ -137,7 +137,7 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 	}{
 		{"credentials", "node ID and credentials", func(cfg *Config) { cfg.Username = "node:invalid" }},
 		{"admin address", "loopback", func(cfg *Config) { cfg.AdminAddress = "192.0.2.1:80" }},
-		{"report address", "host and port", func(cfg *Config) { cfg.ReportAddress = ":1" }},
+		{"report address", "HOST:PORT", func(cfg *Config) { cfg.ReportAddress = ":1" }},
 		{"node certificate", "load node TLS certificate", func(cfg *Config) { cfg.TLSCertFile = key }},
 		{"panel CA", "create panel report client", func(cfg *Config) { cfg.ReportCAFile = key }},
 		{"occupied control", "listen for node control", func(cfg *Config) { cfg.ControlListen = occupied }},

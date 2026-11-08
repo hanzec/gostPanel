@@ -150,8 +150,15 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 	if cfg.Listen == "" {
 		return nil, nil
 	}
-	if host, port, err := net.SplitHostPort(cfg.Address); err != nil || host == "" || port == "" {
-		return nil, fmt.Errorf("report.address 必须是节点可以访问的主机和端口")
+	address, err := nodegrpc.ParsePanelAddress(cfg.Address)
+	if err != nil {
+		return nil, fmt.Errorf("report.address: %w", err)
+	}
+	if cfg.ProxyIP != "" && !address.Proxied() {
+		return nil, fmt.Errorf("配置 report.proxy_ip 后，report.address 必须以 %s 结尾", nodegrpc.PanelProxyPath)
+	}
+	if cfg.ProxyIP == "" && address.Proxied() {
+		return nil, fmt.Errorf("report.address 使用 %s 时必须配置 report.proxy_ip", nodegrpc.PanelProxyPath)
 	}
 	option, err := reportTransport(cfg)
 	if err != nil {

@@ -24,7 +24,7 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh \
-  | bash -s -- --panel-address 'panel.example.com:443' --token 'TOKEN_FROM_PANEL'
+  | bash -s -- --panel-address 'panel.example.com:443/api/v1/grpc' --token 'TOKEN_FROM_PANEL'
 ```
 
 ### 升级已安装节点
@@ -124,18 +124,18 @@ database:
 
 ### 启用节点注册和流量上报
 
-`report.address` 是节点注册、上报和获取 nft 模板时使用的 `主机:端口`，无需添加 `https://` 或路径。
+`report.address` 是节点注册、上报和获取 nft 模板时使用的地址，也是安装命令中 `--panel-address` 的值。通过 Traefik 时使用 `主机:端口/api/v1/grpc`，直连时使用 `主机:端口`。两种方式都无需添加 `https://`。
 
-**Docker Compose：** Traefik 在 `443` 终止 TLS，把 `/yagp.node.v1.Panel/` 下的原生 gRPC 请求原样转发到 Docker 网络内的 `39101`（HTTP/2，即 h2c）。该路由使用节点认证，网页和 API 仍使用 Authentik。面板无需单独的上报证书。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
+**Docker Compose：** Traefik 在 `443` 终止 TLS。节点的 RPC 路径以 `/api/v1/grpc/yagp.node.v1.Panel/` 开头，例如 `/api/v1/grpc/yagp.node.v1.Panel/RegisterNode`。Traefik 去掉 `/api/v1/grpc` 前缀后，将请求转发到 Docker 网络内的 `39101`（HTTP/2，即 h2c）。该路由使用节点认证，网页和管理 API 仍使用 Authentik。面板无需单独的上报证书。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
 
 ```yaml
 report:
   listen: ":39101"
-  address: "panel.example.com:443"
+  address: "panel.example.com:443/api/v1/grpc"
   proxy_ip: "172.30.0.2"
 ```
 
-迁移已有节点时，将 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 改为新地址，再重启该节点的 daemon 服务。若改用公有 CA 签发的证书，清除原来的 `report_ca_file`，让节点使用系统 CA。节点 ID、凭据和节点证书可以继续使用，无需重新注册。
+迁移已有节点时，先按[一键升级步骤](#升级已安装节点)升级 `yagp-daemon`，再将 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 改为新地址并重启对应服务。若改用公有 CA 签发的证书，清除原来的 `report_ca_file`，让节点使用系统 CA。节点 ID、凭据和节点证书可以继续使用，无需重新注册。
 
 **二进制直连部署：** 不设置 `proxy_ip`，给 gRPC 监听器配置证书和私钥。证书须覆盖 `report.address` 中的主机名或 IP，并将监听端口开放给节点。
 

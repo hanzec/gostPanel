@@ -172,7 +172,17 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 
 func TestStartReportsAllowsOnlyTheConfiguredProxy(t *testing.T) {
 	db := testSQLite(t)
-	cfg := config.ReportConfig{Listen: "127.0.0.1:0", Address: "panel.example.test:443", ProxyIP: "127.0.0.0/8"}
+	cfg := config.ReportConfig{Listen: "127.0.0.1:0", Address: "panel.example.test:443"}
+	cfg.ProxyIP = "127.0.0.1"
+	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "/api/v1/grpc") {
+		t.Fatalf("proxied reports without a path = %v", err)
+	}
+	cfg.Address += "/api/v1/grpc"
+	cfg.ProxyIP = ""
+	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
+		t.Fatalf("direct reports with a proxy path = %v", err)
+	}
+	cfg.ProxyIP = "127.0.0.0/8"
 	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
 		t.Fatalf("proxy IP with a CIDR = %v", err)
 	}
