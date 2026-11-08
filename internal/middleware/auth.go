@@ -18,6 +18,7 @@ import (
 const (
 	authentikPageKey    = "authentik_page"
 	authentikFailureKey = "authentik_failure"
+	authentikGroupsKey  = "authentik_groups"
 )
 
 // MarkAuthentikPage selects an HTML response for authentication failures on a page route.
@@ -62,8 +63,15 @@ func NewAuthentikAuth(cfg config.AuthentikConfig) (gin.HandlerFunc, error) {
 			denyAuthentik(c, invalidIdentity)
 			return
 		}
-		groups := req.Header.Values("X-Authentik-Groups")
-		if len(groups) != 1 || !slices.Contains(strings.Split(groups[0], "|"), group) {
+		groupHeaders := req.Header.Values("X-Authentik-Groups")
+		groups := []string{}
+		for _, value := range groupHeaders {
+			if value != "" {
+				groups = append(groups, strings.Split(value, "|")...)
+			}
+		}
+		if len(groupHeaders) != 1 || !slices.Contains(groups, group) {
+			c.Set(authentikGroupsKey, groups)
 			denyAuthentik(c, adminGroupRequired)
 			return
 		}

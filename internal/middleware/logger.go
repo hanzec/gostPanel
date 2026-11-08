@@ -33,10 +33,14 @@ func Logger() gin.HandlerFunc {
 		// 记录日志
 		const logFormat = "[%d] %s %s - %s - %v - %d bytes"
 		if reason := c.GetString(authentikFailureKey); reason != "" {
-			logger.WithFields(map[string]any{
+			fields := map[string]any{
 				"auth_failure": reason,
 				"remote_addr":  c.Request.RemoteAddr,
-			}).Warnf(logFormat, statusCode, method, path, clientIP, latency, bodySize)
+			}
+			if groups, ok := c.Get(authentikGroupsKey); ok {
+				fields["authentik_groups"] = groups
+			}
+			logger.WithFields(fields).Warnf(logFormat, statusCode, method, path, clientIP, latency, bodySize)
 		} else if statusCode >= 400 {
 			logger.Warnf(logFormat,
 				statusCode, method, path, clientIP, latency, bodySize)
