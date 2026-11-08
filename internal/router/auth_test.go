@@ -1,9 +1,11 @@
 package router
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"yagp/internal/config"
@@ -17,6 +19,14 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestRouterRejectsMalformedTrustedProxy(t *testing.T) {
+	if _, err := NewRouter(nil, config.AuthentikConfig{
+		TrustedProxies: []string{"not-a-proxy"}, AdminGroup: "yagp-admins",
+	}, nil); err == nil {
+		t.Fatal("router started with an invalid trusted proxy")
+	}
+}
 
 func TestAdminRouteBoundary(t *testing.T) {
 	if err := logger.Init(&logger.Config{Level: "error"}); err != nil {
@@ -57,6 +67,9 @@ func TestAdminRouteBoundary(t *testing.T) {
 		{http.MethodGet, "/", "", http.StatusUnauthorized},
 		{http.MethodGet, "/", "staff", http.StatusForbidden},
 		{http.MethodGet, "/", "yagp-admins", http.StatusOK},
+		{http.MethodGet, "/nodes/managed", "yagp-admins", http.StatusOK},
+		{http.MethodGet, "/favicon.ico", "yagp-admins", http.StatusOK},
+		{http.MethodGet, "/assets/unavailable.js", "yagp-admins", http.StatusNotFound},
 		{http.MethodGet, "/api/v1/auth/info", "yagp-admins", http.StatusOK},
 		{http.MethodGet, "/api/v1/nodes", "", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v1/nodes/1/gost/service", "", http.StatusUnauthorized},
@@ -74,6 +87,7 @@ func TestAdminRouteBoundary(t *testing.T) {
 		{http.MethodPut, "/api/v1/system/gost-allowlist", "staff", http.StatusForbidden},
 		{http.MethodPut, "/api/v1/system/gost-ruleset", "staff", http.StatusForbidden},
 		{http.MethodGet, "/api/v1/health", "", http.StatusOK},
+		{http.MethodGet, "/health", "", http.StatusOK},
 		{http.MethodPost, "/api/v1/auth/login", "", http.StatusNotFound},
 		{http.MethodPost, "/api/v1/observer/report", "", http.StatusNotFound},
 	} {
@@ -88,6 +102,13 @@ func TestAdminRouteBoundary(t *testing.T) {
 		engine.ServeHTTP(rec, req)
 		if rec.Code != tt.want {
 			t.Errorf("%s %s (%q) = %d, want %d", tt.method, tt.path, tt.group, rec.Code, tt.want)
+		}
+		if tt.path == "/nodes/managed" && (rec.Code != http.StatusOK ||
+			!strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") || !bytes.Contains(rec.Body.Bytes(), []byte(`id="app"`))) {
+			t.Fatal("a frontend deep link did not return the embedded app shell")
+		}
+		if tt.path == "/favicon.ico" && (rec.Body.Len() == 0 || strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html")) {
+			t.Fatal("favicon route did not return the embedded asset")
 		}
 		if tt.path == "/api/v1/nodes/1/registration-token" && rec.Code == http.StatusOK {
 			var reply struct {

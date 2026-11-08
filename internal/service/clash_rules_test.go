@@ -52,6 +52,12 @@ func TestParseClashRulesRejectsUnrepresentableRules(t *testing.T) {
 		{"IP-CIDR,not-an-address", "valid IPv4 or IPv6 CIDR"},
 		{"payload:\n  - 1234", "line 2: each payload entry must be one rule string"},
 		{"payload: [example.com]\n---\npayload: [second.example.com]", "single YAML document"},
+		{"payload: example.com", "single YAML document"},
+		{"DOMAIN-KEYWORD,deadbeef", "cannot match a numeric IP address"},
+		{"DOMAIN-SUFFIX,192.0.2.8", "domain rule contains an IP address"},
+		{"DOMAIN,bad_host.example", "expected a hostname"},
+		{"DOMAIN," + strings.Repeat("a", 254), "domain exceeds 253 characters"},
+		{"?KIND,example.com", "expected a Clash rule type"},
 		{"\x00\xff", "export binary rule sets to text"},
 		{"# only a comment", "no destination rules"},
 	} {
@@ -59,5 +65,12 @@ func TestParseClashRulesRejectsUnrepresentableRules(t *testing.T) {
 		if got != nil || err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("ParseClashRules(%q) = %v, %v; want no partial matchers and error containing %q", tt.input, got, err, tt.want)
 		}
+	}
+}
+
+func TestParseClashRulesNormalizesBareNetworkAndDomain(t *testing.T) {
+	got, err := ParseClashRules([]byte("203.0.113.45/24\nAbsolute.Example.\n"))
+	if err != nil || !reflect.DeepEqual(got, []string{"203.0.113.0/24", "absolute.example"}) {
+		t.Fatalf("bare rules = %v, %v", got, err)
 	}
 }
