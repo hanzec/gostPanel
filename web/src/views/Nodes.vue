@@ -102,6 +102,7 @@
                     <template #dropdown>
                       <el-dropdown-menu>
                         <el-dropdown-item command="gost">Gost 服务</el-dropdown-item>
+                        <el-dropdown-item command="upgrade">版本与升级</el-dropdown-item>
                         <el-dropdown-item command="nft">nft 配置</el-dropdown-item>
                         <el-dropdown-item command="edit">编辑节点</el-dropdown-item>
                         <el-dropdown-item command="copy">复制节点</el-dropdown-item>
@@ -187,6 +188,7 @@
     </el-dialog>
 
     <NodeGostDialog v-if="gostNode" v-model="gostDialogVisible" :node="gostNode" @closed="gostNode = null" />
+    <NodeUpgradeDialog v-if="upgradeNode" v-model="upgradeDialogVisible" :node="upgradeNode" @closed="upgradeNode = null" />
     <NodeNftDialog v-if="nftNode" v-model="nftDialogVisible" :node="nftNode" @closed="nftNode = null" />
 
     <el-dialog
@@ -248,6 +250,7 @@ import { getNodeList, createNode, updateNode, issueNodeRegistrationToken, delete
 import { getPublicSystemConfig } from '@/api/system'
 
 const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
+const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
 const NodeNftDialog = defineAsyncComponent(() => import('@/components/NodeNftDialog.vue'))
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh'
 const nodeStates = {
@@ -300,6 +303,8 @@ const configError = ref(false)
 
 const gostNode = ref(null)
 const gostDialogVisible = ref(false)
+const upgradeNode = ref(null)
+const upgradeDialogVisible = ref(false)
 const nftNode = ref(null)
 const nftDialogVisible = ref(false)
 
@@ -473,6 +478,10 @@ const handleNodeAction = (action, row) => {
   if (action === 'gost') {
     gostNode.value = row
     gostDialogVisible.value = true
+  }
+  if (action === 'upgrade') {
+    upgradeNode.value = row
+    upgradeDialogVisible.value = true
   }
   if (action === 'nft') {
     nftNode.value = row

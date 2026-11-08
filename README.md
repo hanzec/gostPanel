@@ -154,7 +154,13 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TL
 
 ### 升级已注册的节点
 
-已注册的节点可沿用原 ID、凭据和证书。升级时停止旧的 `yagp-node-<ID>` 和 `yagp-gost-<ID>` 服务，并取消旧守护服务的开机启动。将 `/etc/yagp-node/<ID>` 移到 `/etc/yagp-daemon/<ID>`，放入新版 `yagp-daemon`。systemd 选用包内的 `yagp-daemon-systemd-linux-<架构>`，OpenRC 选用 `yagp-daemon-linux-<架构>`。更新 `node.yaml` 的 `tls_cert_file` 和 `tls_key_file`，如 `report_ca_file` 指向已移动的文件，也一并更新。
+在 **节点管理 → 更多 → 版本与升级** 查看 Gost 和 `yagp-daemon` 的当前版本、最新稳定版本和升级结果。每个节点可分别开启两个组件的自动升级，开关默认关闭。面板每小时检查一次已开启自动升级的在线节点，并依次处理。也可以在对话框中手动升级任一组件。
+
+在线升级适用于 systemd 节点。面板和节点需要能通过 HTTPS 访问 GitHub。节点校验发布包的 SHA-256，再替换对应的二进制并重启服务。配置、凭据、证书和节点 ID 都会保留。Gost 重启会中断该实例正在转发的连接，新版服务启动检查失败时会尝试恢复旧版。
+
+如果现有节点尚不支持在线升级，先保留实例目录，停止 `yagp-daemon-<ID>` 服务，将新版 systemd 二进制放到 `/etc/yagp-daemon/<ID>/yagp-daemon`，再启动原服务一次。配置和证书可继续使用。
+
+如果节点仍使用改名前的 `yagp-node-<ID>` 服务，迁移时先停止该服务和 `yagp-gost-<ID>`，并取消旧守护服务的开机启动。将 `/etc/yagp-node/<ID>` 移到 `/etc/yagp-daemon/<ID>`，放入新版 `yagp-daemon`。systemd 选用包内的 `yagp-daemon-systemd-linux-<架构>`，OpenRC 选用 `yagp-daemon-linux-<架构>`。更新 `node.yaml` 的 `tls_cert_file` 和 `tls_key_file`，如 `report_ca_file` 指向已移动的文件，也一并更新。原 ID、凭据和证书可继续使用。
 
 将守护服务定义改名为 `yagp-daemon-<ID>`，更新守护服务和 `yagp-gost-<ID>` 的工作目录、程序和配置路径。systemd 下执行 `systemctl daemon-reload`，再用 `systemctl enable --now yagp-daemon-<ID>` 启动新版，由它启动 Gost。OpenRC 下将新服务加入默认运行级别，再依次启动 Gost 和 `yagp-daemon-<ID>`。
 

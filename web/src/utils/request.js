@@ -16,7 +16,7 @@ request.interceptors.response.use(
     const res = response.data
     // 业务状态码判断
     if (res.code !== 0) {
-      ElMessage.error(res.message || '请求失败')
+      if (!response.config.silentError) ElMessage.error(res.message || '请求失败')
       return Promise.reject(new Error(res.message || '请求失败'))
     }
     return res
@@ -39,7 +39,7 @@ request.interceptors.response.use(
           message = error.response.data?.message || '请求失败'
       }
     }
-    ElMessage.error(message)
+    if (!error.config?.silentError) ElMessage.error(message)
     return Promise.reject(error)
   }
 )

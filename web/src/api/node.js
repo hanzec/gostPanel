@@ -92,3 +92,15 @@ export function getNodeNftConfig(id) {
 export function applyNodeNftConfig(id, config) {
     return request.put(`/nodes/${id}/nft`, { config }, { timeout: 25000 })
 }
+
+export function getNodeUpgradeStatus(id) {
+    return request.get(`/nodes/${id}/upgrade`, { silentError: true })
+}
+
+export function updateNodeUpgradePolicy(id, policy) {
+    return request.put(`/nodes/${id}/upgrade`, policy, { silentError: true })
+}
+
+export function upgradeNodeComponent(id, component) {
+    return request.post(`/nodes/${id}/upgrade/${component}`, null, { timeout: 25000, silentError: true })
+}
