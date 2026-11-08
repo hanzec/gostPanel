@@ -180,11 +180,9 @@
       </footer>
     </section>
 
-    <el-dialog
+    <PanelDialog
       v-model="dialogVisible"
       :title="isEdit ? '编辑转发规则' : '新建转发规则'"
-      width="min(680px, calc(100vw - 24px))"
-      top="5vh"
       :close-on-click-modal="false"
       destroy-on-close
     >
@@ -276,19 +274,25 @@
           {{ isEdit ? '保存规则' : '创建规则' }}
         </el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
 
-    <el-dialog v-model="exportDialogVisible" title="导出规则" width="min(640px, calc(100vw - 24px))" top="6vh">
-      <p class="rule-json-note ops-muted">复制导出的规则配置，可在另一面板中通过 JSON 导入。</p>
+    <PanelDialog
+      v-model="exportDialogVisible"
+      title="导出规则"
+      description="复制导出的规则配置，可在另一面板中通过 JSON 导入。"
+    >
       <el-input v-model="exportJsonData" class="rule-json" type="textarea" :rows="12" aria-label="导出的 JSON 配置" readonly />
       <template #footer>
         <el-button @click="exportDialogVisible = false">关闭</el-button>
         <el-button type="primary" :icon="CopyDocument" @click="copyExportData">复制 JSON</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
 
-    <el-dialog v-model="importDialogVisible" title="导入规则" width="min(640px, calc(100vw - 24px))" top="6vh">
-      <p class="rule-json-note ops-muted">粘贴 JSON 对象或数组以创建规则。导入前请检查入口与监听端口。</p>
+    <PanelDialog
+      v-model="importDialogVisible"
+      title="导入规则"
+      description="粘贴 JSON 对象或数组以创建规则。导入前请检查入口与监听端口。"
+    >
       <el-input
         v-model="importJsonData"
         class="rule-json"
@@ -303,13 +307,15 @@
         <el-button @click="importDialogVisible = false">取消</el-button>
         <el-button type="primary" :icon="Upload" :loading="importLoading" @click="handleImport">创建导入规则</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import PanelDialog from '@/components/PanelDialog.vue'
+import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, CopyDocument, Download, Plus, Refresh, Remove, Right, Search, Switch, Upload, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -506,7 +512,7 @@ const handleRowCommand = async (row, command) => {
     return
   }
   try {
-    await ElMessageBox.confirm('确定删除规则「' + row.name + '」？', '删除规则', {
+    await confirmPanelAction('确定删除规则「' + row.name + '」？', '删除规则', {
       confirmButtonText: '删除规则',
       cancelButtonText: '取消',
       confirmButtonClass: 'el-button--danger',
@@ -942,10 +948,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-target-list > .el-button {
   justify-self: start;
-}
-
-.rule-json-note {
-  margin: 0 0 12px;
 }
 
 .rule-json :deep(textarea) {

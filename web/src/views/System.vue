@@ -134,8 +134,13 @@
       </div>
     </template>
 
-    <el-dialog v-model="testEmailVisible" title="发送测试邮件" width="min(440px, calc(100vw - 32px))" destroy-on-close>
-      <p class="settings-dialog-copy">使用当前邮件表单的连接参数发送测试邮件。</p>
+    <PanelDialog
+      v-model="testEmailVisible"
+      title="发送测试邮件"
+      description="使用当前邮件表单的连接参数发送测试邮件。"
+      size="compact"
+      destroy-on-close
+    >
       <el-form
         id="settings-test-email"
         ref="testEmailFormRef"
@@ -154,14 +159,16 @@
         <el-button @click="testEmailVisible = false">取消</el-button>
         <el-button type="primary" native-type="submit" form="settings-test-email" :loading="testEmailSending">发送</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Coin, Connection, InfoFilled, Lock, Message, Monitor } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import PanelDialog from '@/components/PanelDialog.vue'
+import { confirmPanelAction } from '@/utils/panel-dialog'
 import { backupSystem, getSystemConfig, sendTestEmail, updateSystemConfig } from '@/api/system'
 import GostAllowlistSettings from '@/components/GostAllowlistSettings.vue'
 import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
@@ -300,7 +307,7 @@ async function confirmTestEmail() {
 
 async function createBackup() {
   try {
-    await ElMessageBox.confirm('将创建一份当前数据库的备份。', '立即备份', {
+    await confirmPanelAction('将创建一份当前数据库的备份。', '立即备份', {
       confirmButtonText: '创建备份',
       cancelButtonText: '取消',
       type: 'warning'
@@ -399,7 +406,6 @@ onMounted(loadSettings)
 
 .settings-notice > .el-icon { margin-top: 3px; color: var(--ops-accent); }
 .settings-notice p { margin: 4px 0 0; color: var(--ops-muted); }
-.settings-dialog-copy { margin: 0 0 20px; color: var(--ops-muted); }
 .settings-inline-error { margin: 0; color: var(--ops-danger); }
 
 @media (max-width: 960px) {

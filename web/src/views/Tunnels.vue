@@ -144,10 +144,9 @@
       </div>
     </section>
 
-    <el-dialog
+    <PanelDialog
       v-model="dialogVisible"
       :title="isEdit ? '编辑隧道' : '添加隧道'"
-      width="min(600px, calc(100vw - 24px))"
       :close-on-click-modal="false"
     >
       <p v-if="isEdit" class="tunnel-dialog-hint ops-muted">入口和出口在创建时确定，可以在这里调整名称、协议和 Relay 端口。</p>
@@ -203,13 +202,15 @@
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加隧道' }}</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import PanelDialog from '@/components/PanelDialog.vue'
+import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, Connection, Plus, Refresh, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -352,7 +353,7 @@ const handleSubmit = async () => {
 
 const handleDelete = async (row) => {
   try {
-    await ElMessageBox.confirm('确定要删除隧道「' + row.name + '」吗？规则占用中的隧道无法删除。', '删除隧道', {
+    await confirmPanelAction('确定要删除隧道「' + row.name + '」吗？规则占用中的隧道无法删除。', '删除隧道', {
       confirmButtonText: '删除隧道',
       confirmButtonClass: 'el-button--danger',
       cancelButtonText: '取消',

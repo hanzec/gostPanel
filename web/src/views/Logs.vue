@@ -119,11 +119,9 @@
       </footer>
     </section>
 
-    <el-dialog
+    <PanelDialog
       v-model="recordVisible"
       :title="'操作记录 #' + (selectedRecord?.id || '')"
-      width="min(600px, calc(100vw - 24px))"
-      top="6vh"
     >
       <template v-if="selectedRecord">
         <dl class="audit-record">
@@ -167,11 +165,12 @@
       <template #footer>
         <el-button @click="recordVisible = false">关闭</el-button>
       </template>
-    </el-dialog>
+    </PanelDialog>
   </div>
 </template>
 
 <script setup>
+import PanelDialog from '@/components/PanelDialog.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Collection, Delete, Document, Refresh, Search, User } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'

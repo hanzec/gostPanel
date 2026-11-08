@@ -143,16 +143,83 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
   box-shadow: 0 0 0 2px var(--ops-accent) inset;
 }
 
-.el-dialog {
-  max-width: calc(100vw - 24px);
-  border: 1px solid var(--ops-border-strong);
-  border-radius: 14px;
+.panel-dialog.el-dialog, .panel-confirm.el-message-box, .panel-drawer.el-drawer {
+  --panel-dialog-gutter: clamp(16px, 4vw, 24px);
+  border: 1px solid var(--ops-border);
+  background: var(--ops-panel);
   box-shadow: 0 18px 64px #0007;
 }
 
-.el-message-box { max-width: calc(100vw - 24px); }
-.el-dialog__title, .el-drawer__title { color: var(--ops-text); font-weight: 700; }
-.console-drawer .el-drawer__header { margin-bottom: 0; padding-bottom: 12px; border-bottom: 1px solid var(--ops-border); }
+.panel-dialog-overlay.el-overlay { background: #04070bbb; }
+
+.panel-dialog.el-dialog, .panel-confirm.el-message-box {
+  flex-direction: column;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--ops-radius);
+}
+.panel-dialog.el-dialog { display: flex; }
+.panel-confirm.el-message-box { display: inline-flex; width: 440px; }
+
+:is(.panel-dialog .el-dialog__header, .panel-confirm .el-message-box__header, .panel-drawer .el-drawer__header) {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 18px 60px 16px var(--panel-dialog-gutter);
+  border-bottom: 1px solid var(--ops-border);
+}
+
+:is(.panel-dialog .el-dialog__title, .panel-confirm .el-message-box__title, .panel-drawer .el-drawer__title) {
+  margin: 0;
+  color: var(--ops-text);
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.panel-dialog-description { margin: 4px 0 0; color: var(--ops-muted); }
+
+:is(.panel-dialog .el-dialog__headerbtn, .panel-confirm .el-message-box__headerbtn) {
+  top: 8px;
+  right: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+}
+.panel-drawer .el-drawer__header { padding-inline-end: 12px; }
+.panel-drawer .el-drawer__close-btn { width: 44px; height: 44px; border-radius: 8px; }
+
+:is(.panel-dialog .el-dialog__headerbtn, .panel-confirm .el-message-box__headerbtn, .panel-drawer .el-drawer__close-btn):focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: -2px;
+}
+
+:is(.panel-dialog .el-dialog__body, .panel-confirm .el-message-box__content) {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 20px var(--panel-dialog-gutter);
+  overflow: auto;
+  overscroll-behavior: contain;
+  color: var(--ops-text);
+}
+.panel-confirm .el-message-box__message { overflow-wrap: anywhere; }
+
+:is(.panel-dialog .el-dialog__footer, .panel-confirm .el-message-box__btns) {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px var(--panel-dialog-gutter);
+  border-top: 1px solid var(--ops-border);
+  background: var(--ops-inset);
+}
+:is(.panel-dialog .el-dialog__footer, .panel-confirm .el-message-box__btns) > .el-button {
+  min-height: 44px;
+  margin: 0;
+}
 .console-drawer .el-drawer__body { padding: 0; }
 
 @media (max-width: 640px) {
@@ -161,8 +228,13 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
   .ops-toolbar, .ops-pagination { padding-inline: 12px; }
   .ops-pagination { justify-content: flex-start; }
   .el-input__inner, .el-textarea__inner { font-size: 16px; }
-  .el-dialog__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-  .el-dialog__footer .el-button { min-height: 44px; margin-left: 0; }
+}
+
+@media (max-width: 480px) {
+  :is(.panel-dialog .el-dialog__footer, .panel-confirm .el-message-box__btns) > .el-button {
+    flex: 1 1 100%;
+    white-space: normal;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
