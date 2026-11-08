@@ -142,7 +142,7 @@ func TestRepositoryForwardingRelationsAndScopedUpdates(t *testing.T) {
 	mustPersist(t, tunnels.UpdateStatus(tunnel.ID, model.TunnelStatusRunning))
 	mustPersist(t, tunnels.UpdateStatus(other.ID, model.TunnelStatusRunning))
 
-	direct := model.GostRule{Name: "direct", NodeID: &entry.ID, Type: model.RuleTypeForward, ListenPort: 9000}
+	direct := model.GostRule{Name: "direct", NodeID: &entry.ID, Type: model.RuleTypeForward, ListenIP: "127.0.0.1", ListenPort: 9000}
 	proxied := model.GostRule{Name: "proxied", TunnelID: &tunnel.ID, Type: model.RuleTypeTunnel, ListenPort: 9001}
 	otherDirect := model.GostRule{Name: "other direct", NodeID: &third.ID, Type: model.RuleTypeForward, ListenPort: 9000}
 	for _, rule := range []*model.GostRule{&direct, &proxied, &otherDirect} {
@@ -187,12 +187,28 @@ func TestRepositoryForwardingRelationsAndScopedUpdates(t *testing.T) {
 	if len(byNode) != 1 || byNode[0].ID != direct.ID || len(byTunnel) != 1 || byTunnel[0].ID != proxied.ID || len(byExit) != 2 {
 		t.Fatalf("filters: by node %+v, by tunnel %+v, by exit %+v", byNode, byTunnel, byExit)
 	}
-	used, err := rules.ExistsByPort(entry.ID, direct.ListenPort)
+	for _, tc := range []struct {
+		protocol model.RuleProtocol
+		ip       string
+		port     int
+		want     bool
+	}{
+		{model.RuleProtocolTCP, "", direct.ListenPort, true},
+		{model.RuleProtocolTCP, direct.ListenIP, direct.ListenPort, true},
+		{model.RuleProtocolTCP, "192.0.2.3", direct.ListenPort, false},
+		{model.RuleProtocolUDP, direct.ListenIP, direct.ListenPort, false},
+		{model.RuleProtocolTCP, "192.0.2.3", proxied.ListenPort, true},
+	} {
+		used, err := rules.ListenerConflicts(entry.ID, tc.protocol, tc.ip, tc.port)
+		mustPersist(t, err)
+		if used != tc.want {
+			t.Fatalf("entry %s %s:%d conflict = %v, want %v", tc.protocol, tc.ip, tc.port, used, tc.want)
+		}
+	}
+	excluded, err := rules.ListenerConflicts(entry.ID, model.RuleProtocolTCP, direct.ListenIP, direct.ListenPort, direct.ID)
 	mustPersist(t, err)
-	excluded, err := rules.ExistsByPort(entry.ID, direct.ListenPort, direct.ID)
-	mustPersist(t, err)
-	if !used || excluded {
-		t.Fatalf("entry port %d conflict check: used %v, excluding owner %v", direct.ListenPort, used, excluded)
+	if excluded {
+		t.Fatalf("entry port %d conflicts with itself", direct.ListenPort)
 	}
 	hasRules, err := tunnels.HasRules(tunnel.ID)
 	mustPersist(t, err)
@@ -343,7 +359,7 @@ func TestRepositoryListPaginationAndQueryErrors(t *testing.T) {
 	if _, err := nodes.ExistsByName("alpha"); err == nil {
 		t.Fatal("node uniqueness check hid storage failure")
 	}
-	if _, err := rules.ExistsByPort(old.ID, 9000); err == nil {
+	if _, err := rules.ListenerConflicts(old.ID, model.RuleProtocolTCP, "", 9000); err == nil {
 		t.Fatal("port conflict check hid storage failure")
 	}
 }

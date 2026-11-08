@@ -58,6 +58,10 @@ func TestForwardRuleLifecycle(t *testing.T) {
 	invalid.NodeID = &missing
 	_, err = rules.Create(&invalid, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrNodeNotFound)
+	invalid = req
+	invalid.ListenIP = "127.0.0.1:443"
+	_, err = rules.Create(&invalid, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, bizerrors.ErrRuleListenIPInvalid)
 
 	rule, err := rules.Create(&req, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
@@ -71,9 +75,11 @@ func TestForwardRuleLifecycle(t *testing.T) {
 	_, err = rules.Update(rule.ID, update, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrRulePortExists)
 	update.ListenPort = 8082
+	listenIP := " 2001:0db8::4 "
+	update.ListenIP = &listenIP
 	rule, err = rules.Update(rule.ID, update, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
-	if rule.Name != update.Name || rule.ListenPort != update.ListenPort || !reflect.DeepEqual(rule.Targets, update.Targets) {
+	if rule.Name != update.Name || rule.ListenIP != "2001:db8::4" || rule.ListenPort != update.ListenPort || !reflect.DeepEqual(rule.Targets, update.Targets) {
 		t.Fatalf("rule after update = %+v", rule)
 	}
 	requireServiceError(t, rules.Stop(rule.ID, testAdmin, testIP, testAgent), nil)
@@ -85,7 +91,7 @@ func TestForwardRuleLifecycle(t *testing.T) {
 		t.Fatalf("running rule = %+v", running)
 	}
 	service := remote.service(running.ServiceID)
-	if service.Name == "" || service.Addr != ":8082" || service.Listener.Type != "tcp" ||
+	if service.Name == "" || service.Addr != "[2001:db8::4]:8082" || service.Listener.Type != "tcp" ||
 		service.Handler.Type != "forward" || service.Observer != running.ObserverID ||
 		service.Metadata["enableStats"] != true || service.Metadata["observer.resetTraffic"] != false ||
 		len(service.Forwarder.Nodes) != 1 || service.Forwarder.Nodes[0].Addr != "new.test:8443" {
@@ -151,7 +157,7 @@ func TestTunnelAndRuleLifecycle(t *testing.T) {
 		t.Fatalf("updated tunnel = %+v", tunnel)
 	}
 
-	ruleReq := &dto.CreateRuleReq{Name: "relayed forwarding", Type: "tunnel", Protocol: "udp", ListenPort: 5353, Targets: []string{"resolver.test:53"}}
+	ruleReq := &dto.CreateRuleReq{Name: "relayed forwarding", Type: "tunnel", Protocol: "udp", ListenIP: "127.0.0.1", ListenPort: 5353, Targets: []string{"resolver.test:53"}}
 	_, err = rules.Create(ruleReq, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrTunnelRequired)
 	missing := uint(99)
@@ -208,7 +214,7 @@ func TestTunnelAndRuleLifecycle(t *testing.T) {
 		t.Fatalf("running tunneled rules = %+v, total %d", ruleList, total)
 	}
 	forwarding := entryRemote.service(ruleList[0].ServiceID)
-	if forwarding.Name == "" || forwarding.Listener.Type != "udp" || forwarding.Handler.Chain != chainID {
+	if forwarding.Name == "" || forwarding.Addr != "127.0.0.1:5353" || forwarding.Listener.Type != "udp" || forwarding.Handler.Chain != chainID {
 		t.Fatalf("tunneled forwarding service = %+v", forwarding)
 	}
 	stats, err := NewStatsService(db).GetDashboardStats()

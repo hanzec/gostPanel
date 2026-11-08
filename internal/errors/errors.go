@@ -65,6 +65,7 @@ var (
 	ErrRuleTypeInvalid = New(10108, "无效的规则类型", http.StatusBadRequest)
 	// ErrTunnelChainNotFound 隧道链不存在
 	ErrTunnelChainNotFound = New(10109, "隧道未启动或链路不存在", http.StatusBadRequest)
+	ErrRuleListenIPInvalid = New(10110, "监听 IP 必须是 IPv4 或 IPv6 地址", http.StatusBadRequest)
 )
 
 // ==================== 隧道相关错误 (102xx) ====================

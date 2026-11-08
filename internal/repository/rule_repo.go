@@ -90,11 +90,17 @@ func (r *RuleRepository) FindByTunnelID(tunnelID uint) ([]model.GostRule, error)
 	return rules, err
 }
 
-// ExistsByPort 检查端口是否已被使用
-func (r *RuleRepository) ExistsByPort(nodeID uint, port int, excludeID ...uint) (bool, error) {
+// ListenerConflicts checks whether a rule on the same ingress overlaps this bind.
+func (r *RuleRepository) ListenerConflicts(nodeID uint, protocol model.RuleProtocol, ip string, port int, excludeID ...uint) (bool, error) {
 	var count int64
+	tunnels := r.DB.Model(&model.GostTunnel{}).Select("id").Where("entry_node_id = ?", nodeID)
 	db := r.DB.Model(&model.GostRule{}).
-		Where("node_id = ? AND listen_port = ?", nodeID, port)
+		Where("protocol = ? AND listen_port = ?", protocol, port).
+		Where("((type = ? AND node_id = ?) OR (type = ? AND tunnel_id IN (?)))",
+			model.RuleTypeForward, nodeID, model.RuleTypeTunnel, tunnels)
+	if ip != "" {
+		db = db.Where("listen_ip IN ?", []string{"", ip})
+	}
 	if len(excludeID) > 0 {
 		db = db.Where("id != ?", excludeID[0])
 	}

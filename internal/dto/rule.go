@@ -12,6 +12,7 @@ type CreateRuleReq struct {
 	Name       string `json:"name" binding:"required,min=1,max=100"`          // 规则名称
 	Type       string `json:"type" binding:"required,oneof=forward tunnel"`   // 规则类型
 	Protocol   string `json:"protocol" binding:"required,oneof=tcp udp"`      // 协议类型
+	ListenIP   string `json:"listen_ip"`                                      // 监听 IP，空字符串表示所有接口
 	ListenPort int    `json:"listen_port" binding:"required,min=1,max=65535"` // 监听端口
 
 	Targets   []string `json:"targets"`                                                 // 多目标列表
@@ -23,9 +24,10 @@ type CreateRuleReq struct {
 
 // UpdateRuleReq 更新规则请求
 type UpdateRuleReq struct {
-	Name       string `json:"name" binding:"required,min=1,max=100"`          // 规则名称
-	Protocol   string `json:"protocol" binding:"required,oneof=tcp udp"`      // 协议类型
-	ListenPort int    `json:"listen_port" binding:"required,min=1,max=65535"` // 监听端口
+	Name       string  `json:"name" binding:"required,min=1,max=100"`          // 规则名称
+	Protocol   string  `json:"protocol" binding:"required,oneof=tcp udp"`      // 协议类型
+	ListenIP   *string `json:"listen_ip"`                                      // 省略时保留已有监听 IP
+	ListenPort int     `json:"listen_port" binding:"required,min=1,max=65535"` // 监听端口
 
 	Targets   []string `json:"targets"`                                                 // 多目标列表
 	Strategy  string   `json:"strategy" binding:"omitempty,oneof=round rand fifo hash"` // 负载均衡策略
