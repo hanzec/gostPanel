@@ -5,13 +5,17 @@ on:
     branches:
       - main
       - master
+  pull_request:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
 
 jobs:
   version:
-    if: ${{ !github.event.deleted && (github.ref_name == 'main' || github.ref_name == github.event.repository.default_branch) }}
+    if: ${{ github.event_name == 'push' && !github.event.deleted && (github.ref_name == 'main' || github.ref_name == github.event.repository.default_branch) }}
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.value }}
@@ -28,8 +32,72 @@ jobs:
           version=$(bash scripts/version.sh)
           printf 'value=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
+  test:
+    name: Vue and Go tests
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install frontend dependencies
+        run: npm --prefix web ci
+
+      - name: Run Vue tests and report coverage
+        working-directory: web
+        run: |
+          npm run test:coverage
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync } from "node:fs"
+            const { total } = JSON.parse(readFileSync("coverage/coverage-summary.json", "utf8"))
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, "### Vue test coverage\n\nStatement coverage: **" + total.statements.pct + "%**\n\n")
+          '
+
+      - name: Build frontend for Go tests
+        run: npm --prefix web run build
+
+      - name: Run Go tests and report coverage
+        shell: bash
+        run: |
+          output="$RUNNER_TEMP/go-coverage"
+          mkdir -p "$output"
+          go mod download
+          toolchain=$(go env GOVERSION)
+          # A separate network namespace keeps the real nftables rules off the runner.
+          docker run --rm --cap-add NET_ADMIN \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/src,readonly" \
+            --mount "type=bind,source=$(go env GOMODCACHE),target=/go/pkg/mod,readonly" \
+            --mount "type=bind,source=$output,target=/coverage" \
+            --workdir /src \
+            -e GOTOOLCHAIN=local -e YAGP_TEST_NFT=1 -e YAGP_TEST_UPGRADE=1 \
+            "golang:${toolchain#go}-alpine" sh -ec '
+              apk add --no-cache git nftables
+              mkdir -p /run/systemd/system
+              go test -count=1 -coverprofile=/coverage/go-coverage.out ./...
+            '
+          total=$(go tool cover -func "$output/go-coverage.out" | awk '/^total:/ {print $NF}')
+          printf '### Go test coverage\n\nStatement coverage: **%s**\n' "$total" >> "$GITHUB_STEP_SUMMARY"
+          if ! awk -v coverage="$total" 'BEGIN { exit !(coverage + 0 > 90) }'; then
+            printf 'Go statement coverage must exceed 90%% (actual: %s)\n' "$total" >&2
+            exit 1
+          fi
+
   build:
-    needs: version
+    needs: [version, test]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -59,42 +127,6 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: make release VERSION="$VERSION"
-
-      - name: Run Vue tests and report coverage
-        working-directory: web
-        run: |
-          npm run test:coverage
-          node --input-type=module -e '
-            import { appendFileSync, readFileSync } from "node:fs"
-            const { total } = JSON.parse(readFileSync("coverage/coverage-summary.json", "utf8"))
-            appendFileSync(process.env.GITHUB_STEP_SUMMARY, "### Vue test coverage\n\nStatement coverage: **" + total.statements.pct + "%**\n\n")
-          '
-
-      - name: Run Go tests and report coverage
-        shell: bash
-        run: |
-          output="$RUNNER_TEMP/go-coverage"
-          mkdir -p "$output"
-          go mod download
-          toolchain=$(go env GOVERSION)
-          # A separate network namespace keeps the real nftables rules off the runner.
-          docker run --rm --cap-add NET_ADMIN \
-            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/src,readonly" \
-            --mount "type=bind,source=$(go env GOMODCACHE),target=/go/pkg/mod,readonly" \
-            --mount "type=bind,source=$output,target=/coverage" \
-            --workdir /src \
-            -e GOTOOLCHAIN=local -e YAGP_TEST_NFT=1 -e YAGP_TEST_UPGRADE=1 \
-            "golang:${toolchain#go}-alpine" sh -ec '
-              apk add --no-cache git nftables
-              mkdir -p /run/systemd/system
-              go test -count=1 -coverprofile=/coverage/go-coverage.out ./...
-            '
-          total=$(go tool cover -func "$output/go-coverage.out" | awk '/^total:/ {print $NF}')
-          printf '### Go test coverage\n\nStatement coverage: **%s**\n' "$total" >> "$GITHUB_STEP_SUMMARY"
-          if ! awk -v coverage="$total" 'BEGIN { exit !(coverage + 0 > 90) }'; then
-            printf 'Go statement coverage must exceed 90%% (actual: %s)\n' "$total" >&2
-            exit 1
-          fi
 
       - name: Package binaries
         run: |
@@ -137,7 +169,7 @@ jobs:
           make_latest: ${{ steps.latest.outputs.value }}
 
   docker:
-    needs: version
+    needs: [version, test]
     permissions:
       contents: read
       packages: write
