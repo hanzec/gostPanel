@@ -1,43 +1,40 @@
 import { flushPromises } from '@vue/test-utils'
-import { ElForm, ElMessage, ElMessageBox, ElSelect } from 'element-plus'
+import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Rules from '@/views/Rules.vue'
-import { getNodeList } from '@/api/node'
-import { createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
-import { getTunnelList } from '@/api/tunnel'
+import { getNodeList, getNodeNftConfig } from '@/api/node'
+import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
-vi.mock('@/api/node', () => ({ getNodeList: vi.fn() }))
-vi.mock('@/api/tunnel', () => ({ getTunnelList: vi.fn() }))
+vi.mock('@/api/node', () => ({ getNodeList: vi.fn(), getNodeNftConfig: vi.fn(), applyNodeNftConfig: vi.fn() }))
 vi.mock('@/api/rule', () => ({
-  createRule: vi.fn(), deleteRule: vi.fn(), getRuleList: vi.fn(),
+  checkRuleListener: vi.fn(), createRule: vi.fn(), deleteRule: vi.fn(), getRuleList: vi.fn(),
   startRule: vi.fn(), stopRule: vi.fn(), updateRule: vi.fn()
 }))
 
-const entryNode = { id: 4, name: '入口 A' }
-const relay = { id: 8, name: 'Relay A', entry_node: entryNode, exit_node: { name: '出口 B' } }
+const entryNode = { id: 4, name: '入口 A', ipv4: '192.0.2.10', ipv6: '2001:db8::8' }
 const direct = {
-  id: 1, name: 'HTTPS', type: 'forward', status: 'running', node: entryNode, node_id: entryNode.id,
-  protocol: 'tcp', listen_port: 443, targets: ['primary.test:443', 'fallback.test:443'],
+  id: 1, name: 'HTTPS', status: 'running', node: entryNode, node_id: entryNode.id,
+  protocol: 'tcp', listen_ip: '192.0.2.10', listen_port: 443, targets: ['primary.test:443', 'fallback.test:443'],
   strategy: 'rand', remark: 'Office', input_bytes: 1024, output_bytes: 2048, total_bytes: 3072
 }
 const relayRule = {
-  id: 2, name: 'DNS', type: 'tunnel', status: 'stopped', tunnel: relay, tunnel_id: relay.id,
-  protocol: 'udp', listen_port: 65535, targets: ['dns.test:53']
+  id: 2, name: 'DNS', status: 'stopped', node: entryNode, node_id: entryNode.id,
+  protocol: 'udp', listen_ip: '2001:db8::8', listen_port: 65535, targets: ['dns.test:53']
 }
 const rules = [
   direct,
   relayRule,
-  { id: 3, name: 'Orphan relay', type: 'tunnel', status: 'error', listen_port: 8080 },
-  { id: 4, name: 'Orphan port', type: 'forward', listen_port: 8081 }
+  { id: 3, name: 'Relay destination', status: 'error', listen_port: 8080, linked_tunnel_id: 8, tunnel_role: 'exit' },
+  { id: 4, name: 'Unlinked port', listen_port: 8081 }
 ]
 const selectField = (wrapper, prop) => field(wrapper, prop).getComponent(ElSelect)
 const editDialog = wrapper => wrapper.get('[role="dialog"]')
 
 beforeEach(() => {
   getNodeList.mockResolvedValue(result([entryNode]))
-  getTunnelList.mockResolvedValue(result([relay, { id: 9, name: 'Offline relay' }]))
   getRuleList.mockResolvedValue(result(rules, 28))
+  checkRuleListener.mockResolvedValue({ data: { available: true } })
   for (const action of [createRule, updateRule, deleteRule, startRule, stopRule]) action.mockResolvedValue({})
 })
 
@@ -47,7 +44,7 @@ describe('forwarding rule inventory', () => {
     getRuleList.mockReturnValueOnce(response.promise)
     const wrapper = mountInventory(Rules)
     await flushPromises()
-    expect(wrapper.get('[role="status"]').text()).toContain('正在读取转发规则')
+    expect(wrapper.get('[role="status"]').text()).toContain('正在读取入口规则')
     expect(wrapper.findAll('.metric-strip-value').map(item => item.text())).toEqual(['—', '—', '—', '—'])
     response.resolve(result(rules, 28))
     await flushPromises()
@@ -55,13 +52,17 @@ describe('forwarding rule inventory', () => {
     expect(row(wrapper, 'HTTPS').get('details li').text()).toBe('fallback.test:443')
     expect(row(wrapper, 'HTTPS').get('.rule-traffic-total').text()).toBe('3 KB')
     expect(row(wrapper, 'DNS').text()).toContain('入口 A')
-    expect(row(wrapper, 'DNS').text()).toContain('Relay A')
-    expect(row(wrapper, 'Orphan relay').text()).toContain('未知入口')
-    expect(row(wrapper, 'Orphan port').text()).toContain('未知')
-    expect(row(wrapper, 'Orphan port').get('.rule-traffic-total').text()).toBe('0 B')
+    expect(row(wrapper, 'HTTPS').text()).toContain('192.0.2.10:443')
+    expect(row(wrapper, 'DNS').text()).toContain('[2001:db8::8]:65535')
+    expect(row(wrapper, 'Relay destination').text()).toContain('隧道目的端')
+    expect(row(wrapper, 'Relay destination').find('[aria-label="启动 Relay destination"]').exists()).toBe(false)
+    expect(row(wrapper, 'Relay destination').find('[aria-label="编辑 Relay destination"]').exists()).toBe(false)
+    expect(row(wrapper, 'Relay destination').text()).toContain('隧道管理')
+    expect(row(wrapper, 'Unlinked port').text()).toContain('未知节点')
+    expect(row(wrapper, 'Unlinked port').get('.rule-traffic-total').text()).toBe('0 B')
 
     await changePage(wrapper, 2)
-    expect(getRuleList).toHaveBeenLastCalledWith({ page: 2, pageSize: 10, keyword: '', node_id: '', type: '', status: '' })
+    expect(getRuleList).toHaveBeenLastCalledWith({ page: 2, pageSize: 10, keyword: '', node_id: '', status: '' })
     getRuleList.mockRejectedValueOnce(new Error('offline'))
     await button(wrapper, '刷新').trigger('click')
     await flushPromises()
@@ -70,25 +71,23 @@ describe('forwarding rule inventory', () => {
 
     await wrapper.get('#rule-keyword').setValue('  office  ')
     await choose(select(wrapper, 'rule-node'), 4)
-    await choose(select(wrapper, 'rule-type'), 'forward')
     await choose(select(wrapper, 'rule-status'), 'running')
     getRuleList.mockResolvedValueOnce({ data: {} })
     await wrapper.get('form[aria-label="规则筛选"]').trigger('submit')
     await flushPromises()
-    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: 'office', node_id: 4, type: 'forward', status: 'running' })
+    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: 'office', node_id: 4, status: 'running' })
     expect(wrapper.get('.rule-placeholder').text()).toContain('没有匹配的规则')
     getRuleList.mockResolvedValueOnce(result())
     await button(wrapper, '清除筛选').trigger('click')
     await flushPromises()
-    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', node_id: '', type: '', status: '' })
-    expect(wrapper.get('.rule-placeholder').text()).toContain('还没有转发规则')
+    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', node_id: '', status: '' })
+    expect(wrapper.get('.rule-placeholder').text()).toContain('还没有入口规则')
   })
 
   it('pauses automatic polling for background tabs or failures and resumes after a manual retry', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     getNodeList.mockRejectedValueOnce(new Error('nodes unavailable'))
-    getTunnelList.mockRejectedValueOnce(new Error('tunnels unavailable'))
     getRuleList.mockRejectedValueOnce(new Error('rules unavailable'))
     const wrapper = mountInventory(Rules)
     await flushPromises()
@@ -123,50 +122,111 @@ describe('forwarding rule inventory', () => {
 })
 
 describe('forwarding rule editor and actions', () => {
-  it('validates the selected entry, switches routing type, and normalizes targets on create', async () => {
+  it('creates a standalone endpoint after validating the node and port, then checks that listener', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
     await button(wrapper, '新建规则').trigger('click')
     const dialog = editDialog(wrapper)
     await field(dialog, 'name').get('input').setValue('  internal API  ')
+    expect(field(dialog, 'listen_port').get('input').element.value).toBe('')
     await button(dialog, '创建规则').trigger('click')
     await flushPromises()
-    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['node_id', false, '请选择入口节点'])
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['node_id', false, '请选择所在节点'])
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['listen_port', false, '请输入监听端口'])
     expect(createRule).not.toHaveBeenCalled()
-
-    await choose(selectField(dialog, 'node_id'), 4)
-    await choose(selectField(dialog, 'type'), 'tunnel')
-    await button(dialog, '创建规则').trigger('click')
-    await flushPromises()
-    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['tunnel_id', false, '请选择转发隧道'])
-    await choose(selectField(dialog, 'tunnel_id'), 8)
-    await choose(selectField(dialog, 'type'), 'forward')
-    expect(selectField(dialog, 'node_id').props('modelValue')).toBe('')
+    expect(checkRuleListener).not.toHaveBeenCalled()
     await choose(selectField(dialog, 'node_id'), 4)
     await choose(selectField(dialog, 'protocol'), 'udp')
+    const listenIP = selectField(dialog, 'listen_ip')
+    expect(listenIP.findAllComponents(ElOption).map(option => option.props('label'))).toEqual([
+      '所有接口', 'IPv4 回环 · 127.0.0.1', 'IPv6 回环 · ::1',
+      '入口探测地址 · 192.0.2.10', '入口探测地址 · 2001:db8::8'
+    ])
+    await choose(listenIP, entryNode.ipv4)
     await field(dialog, 'listen_port').get('input').setValue('5353')
+    expect(dialog.get('#rule-listen-endpoint').text()).toContain('192.0.2.10:5353')
     await dialog.get('[aria-label="目标地址 1"]').setValue(' api.test:53 ')
     await button(dialog, '添加目标地址').trigger('click')
     await button(dialog, '添加目标地址').trigger('click')
     await dialog.get('[aria-label="目标地址 3"]').setValue('dns.test:53')
     await dialog.get('[aria-label="移除目标地址 3"]').trigger('click')
+    const created = { ...relayRule, id: 99, name: 'internal API', listen_ip: entryNode.ipv4, listen_port: 5353 }
+    createRule.mockResolvedValueOnce({ data: created })
+    getRuleList.mockResolvedValueOnce(result([created]))
+    checkRuleListener.mockResolvedValueOnce({ data: { available: false, reason: 'occupied' } })
     await button(dialog, '创建规则').trigger('click')
     await flushPromises()
 
     expect(createRule).toHaveBeenCalledWith({
-      type: 'forward', node_id: 4, tunnel_id: null, name: 'internal API', protocol: 'udp',
-      listen_port: 5353, targets: ['api.test:53'], strategy: 'round', remark: ''
+      node_id: 4, name: 'internal API', protocol: 'udp',
+      listen_ip: '192.0.2.10', listen_port: 5353, use_clash_ruleset: false,
+      targets: ['api.test:53'], strategy: 'round', remark: ''
     })
     expect(ElMessage.success).toHaveBeenCalledWith('规则已创建')
+    expect(checkRuleListener).toHaveBeenCalledWith(99)
+    expect(vi.mocked(createRule).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(checkRuleListener).mock.invocationCallOrder[0])
+    expect(row(wrapper, 'internal API').text()).toContain('监听地址已被占用')
+    await command(row(wrapper, 'internal API'), 'listener-check')
+    expect(row(wrapper, 'internal API').text()).toContain('监听地址可用')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
-  it('keeps edits on a failed save and creates a copy without moving its tunnel', async () => {
+  it('configures a local TCP source with Clash before a tunnel is assigned', async () => {
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '新建规则').trigger('click')
+    const dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('透明入口')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    expect(dialog.get('#rule-target-mode-help').text()).toContain('需要 TCP 与 127.0.0.1')
+    const listenIP = selectField(dialog, 'listen_ip')
+    expect(listenIP.findAllComponents(ElOption).map(option => option.props('value'))).toContain(entryNode.ipv6)
+    const custom = listenIP.get('input')
+    await custom.setValue(' 10.0.0.4 ')
+    await custom.trigger('keydown', { key: 'Enter', code: 'Enter' })
+    await field(dialog, 'listen_port').get('input').setValue('443')
+    expect(dialog.get('#rule-listen-endpoint').text()).toContain('10.0.0.4:443')
+    await choose(listenIP, '127.0.0.1')
+    expect(dialog.get('#rule-listen-endpoint').text()).toContain('127.0.0.1:443')
+    await dialog.get('[aria-label="目标地址 1"]').setValue('unused.test:443')
+    await choose(selectField(dialog, 'use_clash_ruleset'), true)
+    expect(dialog.find('[aria-label="目标地址 1"]').exists()).toBe(false)
+    await choose(selectField(dialog, 'protocol'), 'udp')
+    await button(dialog, '创建规则').trigger('click')
+    await flushPromises()
+    expect(createRule).not.toHaveBeenCalled()
+    expect(field(dialog, 'use_clash_ruleset').text()).toContain('Clash 分流需要 TCP 与 127.0.0.1')
+    await choose(selectField(dialog, 'protocol'), 'tcp')
+    await button(dialog, '创建规则').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledWith({
+      node_id: entryNode.id, name: '透明入口', protocol: 'tcp',
+      listen_ip: '127.0.0.1', listen_port: 443, use_clash_ruleset: true,
+      targets: [], strategy: 'round', remark: ''
+    })
+  })
+
+  it('opens the selected loopback port template on the tunnel entry node', async () => {
+    getRuleList.mockResolvedValueOnce(result([{
+      ...relayRule, protocol: 'tcp', listen_ip: '127.0.0.1', listen_port: 443,
+      use_clash_ruleset: true, targets: [], status: 'running', linked_tunnel_id: 8, tunnel_role: 'entry'
+    }]))
+    getNodeNftConfig.mockResolvedValueOnce({ data: { table: 'yagp_node_4', template: '{"nftables":[]}' } })
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    expect(row(wrapper, 'DNS').text()).toContain('Clash 规则集')
+    expect(row(wrapper, 'DNS').text()).toContain('隧道源端')
+    expect(row(wrapper, 'DNS').find('[aria-label="停止 DNS"]').exists()).toBe(false)
+    await command(row(wrapper, 'DNS'), 'nft-template')
+    expect(getNodeNftConfig).toHaveBeenCalledWith(entryNode.id, 443)
+    expect(editDialog(wrapper).attributes('aria-label')).toContain('入口 A')
+  })
+
+  it('keeps edits on a failed save and requires a port when copying', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
     await wrapper.get('[aria-label="编辑 HTTPS"]').trigger('click')
     const dialog = editDialog(wrapper)
-    expect(selectField(dialog, 'type').props('disabled')).toBe(true)
     expect(selectField(dialog, 'node_id').props('disabled')).toBe(true)
     await field(dialog, 'name').get('input').setValue('HTTPS updated')
     updateRule.mockRejectedValueOnce(new Error('port conflict'))
@@ -177,19 +237,22 @@ describe('forwarding rule editor and actions', () => {
     await button(dialog, '保存规则').trigger('click')
     await flushPromises()
     expect(updateRule).toHaveBeenLastCalledWith(1, {
-      type: 'forward', node_id: 4, tunnel_id: null, name: 'HTTPS updated', protocol: 'tcp',
-      listen_port: 443, targets: direct.targets, strategy: 'rand', remark: 'Office'
+      node_id: 4, name: 'HTTPS updated', protocol: 'tcp',
+      listen_ip: '192.0.2.10', listen_port: 443, use_clash_ruleset: false,
+      targets: direct.targets, strategy: 'rand', remark: 'Office'
     })
     expect(ElMessage.success).toHaveBeenCalledWith('规则已保存')
 
     await command(row(wrapper, 'DNS'), 'copy')
     expect(field(editDialog(wrapper), 'name').get('input').element.value).toBe('DNS-copy')
-    expect(field(editDialog(wrapper), 'listen_port').get('input').element.value).toBe('65535')
+    expect(field(editDialog(wrapper), 'listen_port').get('input').element.value).toBe('')
+    await field(editDialog(wrapper), 'listen_port').get('input').setValue('5354')
     await button(editDialog(wrapper), '创建规则').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenCalledWith({
-      type: 'tunnel', node_id: null, tunnel_id: 8, name: 'DNS-copy', protocol: 'udp',
-      listen_port: 65535, targets: ['dns.test:53'], strategy: 'round', remark: ''
+      node_id: 4, name: 'DNS-copy', protocol: 'udp',
+      listen_ip: '2001:db8::8', listen_port: 5354, use_clash_ruleset: false,
+      targets: ['dns.test:53'], strategy: 'round', remark: ''
     })
   })
 
@@ -239,10 +302,11 @@ describe('forwarding rule JSON exchange', () => {
     const exported = JSON.parse(json)
     expect(exported).toHaveLength(101)
     expect(exported[0]).toEqual({
-      name: 'HTTPS', type: 'forward', node_id: 4, protocol: 'tcp',
-      listen_port: 443, targets: direct.targets, strategy: 'rand', remark: 'Office'
+      name: 'HTTPS', node_id: 4, protocol: 'tcp',
+      listen_ip: '192.0.2.10', listen_port: 443, use_clash_ruleset: false,
+      targets: direct.targets, strategy: 'rand', remark: 'Office'
     })
-    expect(exported.at(-1)).toMatchObject({ name: 'DNS', tunnel_id: 8, remark: '' })
+    expect(exported.at(-1)).toMatchObject({ name: 'DNS', node_id: 4, remark: '' })
     const writeText = vi.fn().mockResolvedValueOnce().mockRejectedValueOnce(new Error('denied'))
     const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
@@ -296,14 +360,16 @@ describe('forwarding rule JSON exchange', () => {
     await importJson('{"listen_port":0}')
     expect(editDialog(wrapper).get('#rule-import-error').text()).toContain('导入失败。')
     expect(createRule).toHaveBeenLastCalledWith({
-      name: '导入规则', type: 'forward', node_id: undefined, tunnel_id: undefined,
-      protocol: 'tcp', listen_port: 0, targets: [], strategy: 'round', remark: ''
+      name: '导入规则', node_id: undefined,
+      protocol: 'tcp', listen_ip: '', listen_port: 0, use_clash_ruleset: false,
+      targets: [], strategy: 'round', remark: ''
     })
     createRule.mockRejectedValueOnce(new Error('port conflict'))
-    await importJson('[{"name":"duplicate"},{"name":"new DNS","type":"tunnel","tunnel_id":8,"protocol":"udp","listen_port":53,"targets":["dns.test:53"],"strategy":"hash","remark":"DNS"}]')
+    await importJson('[{"name":"duplicate"},{"name":"new proxy","node_id":4,"protocol":"tcp","listen_ip":"127.0.0.1","listen_port":443,"use_clash_ruleset":true,"strategy":"hash","remark":"TLS"}]')
     expect(createRule).toHaveBeenLastCalledWith({
-      name: 'new DNS', type: 'tunnel', node_id: undefined, tunnel_id: 8, protocol: 'udp',
-      listen_port: 53, targets: ['dns.test:53'], strategy: 'hash', remark: 'DNS'
+      name: 'new proxy', node_id: 4, protocol: 'tcp',
+      listen_ip: '127.0.0.1', listen_port: 443, use_clash_ruleset: true,
+      targets: [], strategy: 'hash', remark: 'TLS'
     })
     expect(ElMessage.warning).toHaveBeenCalledWith('已导入 1 条，失败 1 条')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)

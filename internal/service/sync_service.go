@@ -189,25 +189,29 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 		if chainName == "" {
 			chainName = managedName
 		}
-		chain, exists := chainsByName[chainName]
-		s.syncTunnelStatus(t, exists)
+		_, exists := chainsByName[chainName]
+		if t.EntryRuleID == nil {
+			s.syncTunnelStatus(t, exists)
+		}
 		if !exists || chainName != managedName {
 			continue
 		}
-		exitHost := exitAddresses[t.ExitNodeID]
-		addr, ok := chain.TunnelRelayAddress()
-		oldHost, _, err := net.SplitHostPort(addr)
-		if !ok || err != nil || exitHost == "" || oldHost == exitHost {
-			continue
-		}
-		updated, err := client.UpdateTunnelRelayHost(chainName, exitHost)
-		if err != nil {
-			logger.Warnf("[Sync] 更新隧道 %d 出口地址失败: %v", t.ID, err)
-			continue
-		}
-		if updated {
-			changed = true
-			logger.Infof("[Sync] 隧道 %d 出口地址变更: %s -> %s", t.ID, oldHost, exitHost)
+		exitHost := relayHost(&t, exitAddresses[t.ExitNodeID])
+		for _, name := range []string{chainName, clashTunnelChainName(t.ID)} {
+			addr, ok := chainsByName[name].TunnelRelayAddress()
+			oldHost, _, err := net.SplitHostPort(addr)
+			if !ok || err != nil || exitHost == "" || oldHost == exitHost {
+				continue
+			}
+			updated, err := client.UpdateTunnelRelayHost(name, exitHost)
+			if err != nil {
+				logger.Warnf("[Sync] 更新隧道 %d 转发链 %s 出口地址失败: %v", t.ID, name, err)
+				continue
+			}
+			if updated {
+				changed = true
+				logger.Infof("[Sync] 隧道 %d 转发链 %s 出口地址变更: %s -> %s", t.ID, name, oldHost, exitHost)
+			}
 		}
 	}
 	if _, unsaved := s.unsavedChains.Load(nodeID); changed || unsaved {

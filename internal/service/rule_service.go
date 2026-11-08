@@ -21,55 +21,45 @@ import (
 	"gorm.io/gorm"
 )
 
-// RuleService 规则服务
-// 入口选择：NodeID 或 TunnelID 二选一
-// - 端口转发 (forward)：选择 NodeID，直接在该节点上创建转发服务
-// - 隧道转发 (tunnel)：选择 TunnelID，在隧道的入口节点上创建转发服务，使用隧道的 Chain
+// RuleService 管理节点入口和旧的隧道转发规则。
 type RuleService struct {
-	ruleRepo      *repository.RuleRepository
-	nodeRepo      *repository.NodeRepository
-	tunnelRepo    *repository.TunnelRepository
-	logService    *LogService
-	tunnelService *TunnelService
+	ruleRepo       *repository.RuleRepository
+	nodeRepo       *repository.NodeRepository
+	tunnelRepo     *repository.TunnelRepository
+	logService     *LogService
+	rulesetService *GostRulesetService
 }
 
 // NewRuleService 创建规则服务
 func NewRuleService(db *gorm.DB) *RuleService {
 	return &RuleService{
-		ruleRepo:      repository.NewRuleRepository(db),
-		nodeRepo:      repository.NewNodeRepository(db),
-		tunnelRepo:    repository.NewTunnelRepository(db),
-		logService:    NewLogService(db),
-		tunnelService: NewTunnelService(db),
+		ruleRepo:       repository.NewRuleRepository(db),
+		nodeRepo:       repository.NewNodeRepository(db),
+		tunnelRepo:     repository.NewTunnelRepository(db),
+		logService:     NewLogService(db),
+		rulesetService: NewGostRulesetService(db),
 	}
 }
 
-// Create 创建规则
-// 根据类型验证入口：端口转发需要 NodeID，隧道转发需要 TunnelID
+// Create 创建规则。新入口使用 NodeID，旧的隧道规则使用 TunnelID。
 func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent string) (*model.GostRule, error) {
+	kind := model.RuleType(req.Type)
+	if kind == "" {
+		kind = model.RuleTypeForward
+	}
 	var entryNodeID uint
-
-	// 根据规则类型验证入口
-	if req.Type == string(model.RuleTypeForward) {
-		// 端口转发：需要 NodeID
-		if req.NodeID == nil || *req.NodeID == 0 {
-			return nil, errors.ErrNodeRequired
-		}
-		// 检查节点是否存在
-		_, err := s.nodeRepo.FindByID(*req.NodeID)
+	var nodeID, tunnelID *uint
+	switch kind {
+	case model.RuleTypeForward:
+		node, err := s.findRuleNode(req.NodeID)
 		if err != nil {
-			if stderrors.Is(err, gorm.ErrRecordNotFound) {
-				return nil, errors.ErrNodeNotFound
-			}
 			return nil, err
 		}
-		entryNodeID = *req.NodeID
-	} else if req.Type == string(model.RuleTypeTunnel) {
-		// 隧道转发：需要 TunnelID
+		nodeID, entryNodeID = req.NodeID, node.ID
+	case model.RuleTypeTunnel:
 		if req.TunnelID == nil || *req.TunnelID == 0 {
 			return nil, errors.ErrTunnelRequired
 		}
-		// 检查隧道是否存在
 		tunnel, err := s.tunnelRepo.FindByID(*req.TunnelID)
 		if err != nil {
 			if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -77,14 +67,16 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 			}
 			return nil, err
 		}
-		// 使用隧道的入口节点
-		entryNodeID = tunnel.EntryNodeID
-	} else {
+		tunnelID, entryNodeID = req.TunnelID, tunnel.EntryNodeID
+	default:
 		return nil, errors.ErrRuleTypeInvalid
 	}
 
 	listenIP, err := normalizeRuleListenIP(req.ListenIP)
 	if err != nil {
+		return nil, err
+	}
+	if err = validateClashTarget(req.UseClashRuleset, model.RuleProtocol(req.Protocol), listenIP, req.Targets); err != nil {
 		return nil, err
 	}
 	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort)
@@ -97,18 +89,19 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 
 	// 创建规则
 	rule := &model.GostRule{
-		NodeID:     req.NodeID,
-		TunnelID:   req.TunnelID,
-		Name:       req.Name,
-		Type:       model.RuleType(req.Type),
-		Protocol:   model.RuleProtocol(req.Protocol),
-		ListenIP:   listenIP,
-		ListenPort: req.ListenPort,
-		Targets:    req.Targets,
-		Strategy:   req.Strategy,
-		EnableTLS:  req.EnableTLS,
-		Remark:     req.Remark,
-		Status:     model.RuleStatusStopped,
+		NodeID:          nodeID,
+		TunnelID:        tunnelID,
+		Name:            req.Name,
+		Type:            kind,
+		Protocol:        model.RuleProtocol(req.Protocol),
+		ListenIP:        listenIP,
+		ListenPort:      req.ListenPort,
+		Targets:         req.Targets,
+		UseClashRuleset: req.UseClashRuleset,
+		Strategy:        req.Strategy,
+		EnableTLS:       req.EnableTLS,
+		Remark:          req.Remark,
+		Status:          model.RuleStatusStopped,
 	}
 
 	if err = s.ruleRepo.Create(rule); err != nil {
@@ -129,14 +122,14 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 	return rule, nil
 }
 
-// Update 更新规则（不能修改类型和入口）
+// Update 更新未绑定隧道的规则。
 func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, userAgent string) (*model.GostRule, error) {
-	rule, err := s.ruleRepo.FindByID(id)
+	rule, err := s.GetByID(id)
 	if err != nil {
-		if stderrors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.ErrRuleNotFound
-		}
 		return nil, err
+	}
+	if rule.LinkedTunnelID != nil {
+		return nil, errors.ErrRuleTunnelLinked
 	}
 
 	// 检查是否在运行中
@@ -145,7 +138,14 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	}
 
 	// 获取入口节点 ID（用于端口冲突检查）
-	entryNodeID := s.getEntryNodeID(rule)
+	entryNodeID := ruleEntryNodeID(rule)
+	if rule.Type == model.RuleTypeForward && req.NodeID != nil {
+		node, err := s.findRuleNode(req.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		rule.Node, rule.NodeID, entryNodeID = node, req.NodeID, node.ID
+	}
 
 	listenIP := rule.ListenIP
 	if req.ListenIP != nil {
@@ -153,6 +153,13 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 		if err != nil {
 			return nil, err
 		}
+	}
+	useClashRuleset := rule.UseClashRuleset
+	if req.UseClashRuleset != nil {
+		useClashRuleset = *req.UseClashRuleset
+	}
+	if err = validateClashTarget(useClashRuleset, model.RuleProtocol(req.Protocol), listenIP, req.Targets); err != nil {
+		return nil, err
 	}
 	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort, id)
 	if err != nil {
@@ -162,12 +169,12 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 		return nil, errors.ErrRulePortExists
 	}
 
-	// 更新规则（不修改类型和入口）
 	rule.Name = req.Name
 	rule.Protocol = model.RuleProtocol(req.Protocol)
 	rule.ListenIP = listenIP
 	rule.ListenPort = req.ListenPort
 	rule.Targets = req.Targets
+	rule.UseClashRuleset = useClashRuleset
 	rule.Strategy = req.Strategy
 	rule.EnableTLS = req.EnableTLS
 	rule.Remark = req.Remark
@@ -188,6 +195,17 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	return rule, nil
 }
 
+func (s *RuleService) findRuleNode(id *uint) (*model.GostNode, error) {
+	if id == nil || *id == 0 {
+		return nil, errors.ErrNodeRequired
+	}
+	node, err := s.nodeRepo.FindByID(*id)
+	if stderrors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errors.ErrNodeNotFound
+	}
+	return node, err
+}
+
 func normalizeRuleListenIP(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -206,12 +224,12 @@ func normalizeRuleListenIP(value string) (string, error) {
 
 // Delete 删除规则
 func (s *RuleService) Delete(id uint, username, ip, userAgent string) error {
-	rule, err := s.ruleRepo.FindByID(id)
+	rule, err := s.GetByID(id)
 	if err != nil {
-		if stderrors.Is(err, gorm.ErrRecordNotFound) {
-			return errors.ErrRuleNotFound
-		}
 		return err
+	}
+	if rule.LinkedTunnelID != nil {
+		return errors.ErrRuleTunnelLinked
 	}
 
 	// 如果正在运行，先停止
@@ -248,7 +266,32 @@ func (s *RuleService) GetByID(id uint) (*model.GostRule, error) {
 		}
 		return nil, err
 	}
+	if err := s.loadEntranceBinding(rule); err != nil {
+		return nil, err
+	}
 	return rule, nil
+}
+
+func (s *RuleService) loadEntranceBinding(rule *model.GostRule) error {
+	tunnel, err := s.tunnelRepo.FindByEntranceID(rule.ID)
+	if stderrors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if tunnel.EntryRuleID != nil && *tunnel.EntryRuleID == rule.ID {
+		setEntranceBinding(rule, tunnel.ID, "entry")
+	} else {
+		setEntranceBinding(rule, tunnel.ID, "exit")
+	}
+	return nil
+}
+
+func setEntranceBinding(rule *model.GostRule, tunnelID uint, role string) {
+	if rule != nil {
+		rule.LinkedTunnelID, rule.TunnelRole = &tunnelID, role
+	}
 }
 
 // List 获取规则列表
@@ -281,7 +324,29 @@ func (s *RuleService) List(req *dto.RuleListReq) ([]model.GostRule, int64, error
 		}
 	}
 
-	return s.ruleRepo.List(opt)
+	rules, total, err := s.ruleRepo.List(opt)
+	if err != nil || len(rules) == 0 {
+		return rules, total, err
+	}
+	ids := make([]uint, 0, len(rules))
+	byID := make(map[uint]*model.GostRule, len(rules))
+	for i := range rules {
+		ids = append(ids, rules[i].ID)
+		byID[rules[i].ID] = &rules[i]
+	}
+	bindings, err := s.ruleRepo.EntranceBindings(ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, tunnel := range bindings {
+		if tunnel.EntryRuleID != nil {
+			setEntranceBinding(byID[*tunnel.EntryRuleID], tunnel.ID, "entry")
+		}
+		if tunnel.ExitRuleID != nil {
+			setEntranceBinding(byID[*tunnel.ExitRuleID], tunnel.ID, "exit")
+		}
+	}
+	return rules, total, nil
 }
 
 // Start 启动规则
@@ -290,14 +355,20 @@ func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.requireUnlinkedEntrance(rule); err != nil {
+		return err
+	}
 
 	// 已在运行中则跳过
 	if rule.Status == model.RuleStatusRunning {
 		return nil
 	}
+	if rule.Type == model.RuleTypeForward && (rule.UseClashRuleset || len(rule.Targets) == 0) {
+		return errors.ErrRuleTargetRequired
+	}
 
 	// 获取入口节点
-	entryNodeID := s.getEntryNodeID(rule)
+	entryNodeID := ruleEntryNodeID(rule)
 	node, err := s.nodeRepo.FindByID(entryNodeID)
 	if err != nil {
 		return errors.ErrNodeNotFound
@@ -306,16 +377,13 @@ func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 		return errors.ErrNodeOffline
 	}
 
-	client := utils.GetGostClient(node)
-	serviceName := fmt.Sprintf("rule-%d", rule.ID)
-
 	// 根据规则类型处理
 	if rule.Type == model.RuleTypeTunnel {
-		if err = s.startTunnelRule(rule, node, client, serviceName); err != nil {
+		if err = s.startTunnelRule(rule, node); err != nil {
 			return err
 		}
 	} else {
-		if err = s.buildAndStartService(client, node, rule, serviceName, ""); err != nil {
+		if err = s.buildAndStartService(utils.GetGostClient(node), node, rule, "", rule.Targets); err != nil {
 			return err
 		}
 	}
@@ -333,8 +401,18 @@ func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 	return nil
 }
 
+func (s *RuleService) requireUnlinkedEntrance(rule *model.GostRule) error {
+	if err := s.loadEntranceBinding(rule); err != nil {
+		return err
+	}
+	if rule.LinkedTunnelID != nil {
+		return errors.ErrRuleTunnelLinked
+	}
+	return nil
+}
+
 // startTunnelRule 启动隧道转发规则（通过隧道链路）
-func (s *RuleService) startTunnelRule(rule *model.GostRule, node *model.GostNode, client *gost.Client, serviceName string) error {
+func (s *RuleService) startTunnelRule(rule *model.GostRule, node *model.GostNode) error {
 	if rule.TunnelID == nil {
 		return errors.ErrTunnelRequired
 	}
@@ -349,15 +427,29 @@ func (s *RuleService) startTunnelRule(rule *model.GostRule, node *model.GostNode
 	if tunnel.Status != model.TunnelStatusRunning {
 		return errors.ErrTunnelNotRunning
 	}
+	return s.startSelectedEntrance(rule, node, tunnel, nil)
+}
 
-	// 检查隧道是否有 Chain ID
+// startSelectedEntrance provisions the ingress against a tunnel's ready relay chain.
+func (s *RuleService) startSelectedEntrance(rule *model.GostRule, node *model.GostNode, tunnel *model.GostTunnel, targets []string) error {
 	if tunnel.ChainID == "" {
 		_ = s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusError)
 		return errors.ErrTunnelChainNotFound
 	}
 
-	// 使用通用逻辑启动服务，传入 Chain ID
-	return s.buildAndStartService(client, node, rule, serviceName, tunnel.ChainID)
+	chainID := tunnel.ChainID
+	client := utils.GetGostClient(node)
+	if rule.UseClashRuleset {
+		var err error
+		chainID, err = s.prepareClashChain(client, tunnel)
+		if err != nil {
+			return err
+		}
+	}
+	if targets == nil {
+		targets = rule.Targets
+	}
+	return s.buildAndStartService(client, node, rule, chainID, targets)
 }
 
 // Stop 停止规则
@@ -366,37 +458,18 @@ func (s *RuleService) Stop(id uint, username, ip, userAgent string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.requireUnlinkedEntrance(rule); err != nil {
+		return err
+	}
 
 	if rule.Status != model.RuleStatusRunning {
 		return nil
 	}
 
-	// 获取入口节点
-	entryNodeID := s.getEntryNodeID(rule)
-	node, err := s.nodeRepo.FindByID(entryNodeID)
-	if err != nil {
-		// 节点不存在，直接更新状态
+	if err := s.stopSelectedEntrance(rule); err != nil {
+		logger.Warnf("停止 Gost 服务失败: %v", err)
 		_ = s.ruleRepo.UpdateStatus(id, model.RuleStatusStopped)
-		return nil
 	}
-
-	if node.Status == model.NodeStatusOffline {
-		// 节点离线，直接更新状态
-		_ = s.ruleRepo.UpdateStatus(id, model.RuleStatusStopped)
-		return nil
-	}
-
-	client := utils.GetGostClient(node)
-
-	// 删除服务
-	if rule.ServiceID != "" {
-		if err = client.DeleteService(rule.ServiceID); err != nil {
-			logger.Warnf("删除 Gost 服务失败: %v", err)
-		}
-	}
-
-	_ = s.ruleRepo.UpdateStatus(id, model.RuleStatusStopped)
-	_ = client.SaveConfig()
 
 	s.logService.Record(
 		username,
@@ -411,16 +484,32 @@ func (s *RuleService) Stop(id uint, username, ip, userAgent string) error {
 	return nil
 }
 
-// getEntryNodeID 获取规则的入口节点 ID
-func (s *RuleService) getEntryNodeID(rule *model.GostRule) uint {
-	if rule.Type == model.RuleTypeTunnel && rule.TunnelID != nil {
-		// 隧道转发：使用隧道的入口节点
-		nodeID, err := s.tunnelService.GetEntryNodeID(*rule.TunnelID)
-		if err == nil {
-			return nodeID
+// stopSelectedEntrance is used by the owning tunnel to stop its ingress service.
+func (s *RuleService) stopSelectedEntrance(rule *model.GostRule) error {
+	node, err := s.nodeRepo.FindByID(ruleEntryNodeID(rule))
+	if err != nil && !stderrors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if node != nil && node.Status == model.NodeStatusOnline && rule.ServiceID != "" {
+		client := utils.GetGostClient(node)
+		if err := client.DeleteService(rule.ServiceID); err != nil {
+			return err
+		}
+		if err := client.SaveConfig(); err != nil {
+			return err
 		}
 	}
-	// 端口转发：使用规则的 NodeID
+	if err := s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusStopped); err != nil {
+		return err
+	}
+	rule.Status = model.RuleStatusStopped
+	return nil
+}
+
+func ruleEntryNodeID(rule *model.GostRule) uint {
+	if rule.Type == model.RuleTypeTunnel && rule.Tunnel != nil {
+		return rule.Tunnel.EntryNodeID
+	}
 	if rule.NodeID != nil {
 		return *rule.NodeID
 	}
@@ -462,15 +551,17 @@ func (s *RuleService) setupRuleObserver(client *gost.Client, rule *model.GostRul
 }
 
 // buildAndStartService 构建并启动 Gost 服务 (处理通用逻辑)
-func (s *RuleService) buildAndStartService(client *gost.Client, node *model.GostNode, rule *model.GostRule, serviceName string, chainID string) error {
-	targets := rule.Targets
+func (s *RuleService) buildAndStartService(client *gost.Client, node *model.GostNode, rule *model.GostRule, chainID string, targets []string) error {
+	serviceName := fmt.Sprintf("rule-%d", rule.ID)
 	strategy := rule.Strategy
 	if strategy == "" || len(targets) == 1 {
 		strategy = "round"
 	}
 
 	var svc *gost.ServiceConfig
-	if rule.Protocol == model.RuleProtocolTCP {
+	if rule.UseClashRuleset {
+		svc = gost.BuildClashRedirectService(serviceName)
+	} else if rule.Protocol == model.RuleProtocolTCP {
 		svc = gost.BuildTCPForwardService(serviceName, rule.ListenPort, targets, strategy)
 	} else {
 		svc = gost.BuildUDPForwardService(serviceName, rule.ListenPort, targets, strategy)
@@ -495,9 +586,21 @@ func (s *RuleService) buildAndStartService(client *gost.Client, node *model.Gost
 		return errors.ErrRuleStartFailed
 	}
 
-	_ = client.SaveConfig()
-	_ = s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusRunning)
-	_ = s.ruleRepo.UpdateServiceID(rule.ID, serviceName)
+	// The tunnel rolls back the live service if its configuration cannot be saved.
+	rule.ServiceID = serviceName
+	selected := rule.Type == model.RuleTypeForward && chainID != ""
+	if err := client.SaveConfig(); err != nil && selected {
+		_ = s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusError)
+		return errors.ErrRuleStartFailed
+	}
+	if err := s.ruleRepo.UpdateRuntime(rule.ID, serviceName, model.RuleStatusRunning); err != nil {
+		if !selected {
+			_ = client.DeleteService(serviceName)
+			_ = client.SaveConfig()
+		}
+		return err
+	}
+	rule.Status = model.RuleStatusRunning
 
 	return nil
 }

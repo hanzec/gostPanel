@@ -151,11 +151,23 @@ func (s *GostRulesetService) refresh(ctx context.Context) {
 
 func (s *GostRulesetService) sync(ctx context.Context, unsaved map[uint]bool) {
 	cfg, err := s.Get(ctx)
-	if err != nil || cfg.URL == "" || len(cfg.NodeIDs) == 0 {
+	if err != nil || cfg.URL == "" {
+		return
+	}
+	var entryIDs []uint
+	if err := s.db.WithContext(ctx).Table("tunnels").
+		Distinct("tunnels.entry_node_id").
+		Joins("JOIN rules ON (rules.tunnel_id = tunnels.id OR rules.id = tunnels.entry_rule_id)").
+		Where("rules.use_clash_ruleset = ? AND rules.status = ? AND rules.deleted_at IS NULL AND tunnels.deleted_at IS NULL", true, model.RuleStatusRunning).
+		Pluck("tunnels.entry_node_id", &entryIDs).Error; err != nil {
+		logger.Warnf("读取使用 Clash 分流的入口失败: %v", err)
+	}
+	nodeIDs := slices.Concat(cfg.NodeIDs, entryIDs)
+	if len(nodeIDs) == 0 {
 		return
 	}
 	var nodes []model.GostNode
-	if err := s.db.WithContext(ctx).Where("id IN ? AND status = ?", cfg.NodeIDs, model.NodeStatusOnline).Find(&nodes).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("id IN ? AND status = ?", nodeIDs, model.NodeStatusOnline).Find(&nodes).Error; err != nil {
 		return
 	}
 	for i := range nodes {

@@ -1,9 +1,9 @@
 <template>
   <div class="ops-page">
     <PageHeader
-      eyebrow="TRAFFIC POLICY"
-      title="规则管理"
-      description="配置转发入口、监听协议与目标，并查看每条规则的运行状态和累计流量。"
+      eyebrow="TRAFFIC ENTRY"
+      title="入口管理"
+      description="分别配置每个节点的监听端点，再到隧道管理连接源端与目的端。"
     >
       <template #actions>
         <el-button :icon="Upload" @click="showImportDialog">导入 JSON</el-button>
@@ -12,13 +12,13 @@
       </template>
     </PageHeader>
 
-    <MetricStrip label="转发规则摘要" :items="summary" />
+    <MetricStrip label="入口规则摘要" :items="summary" />
 
     <section class="ops-panel rule-panel" aria-labelledby="rule-list-title" :aria-busy="loading">
       <header class="rule-section-head">
         <div>
-          <h2 id="rule-list-title">转发规则</h2>
-          <p class="ops-muted">按入口、类型与状态定位规则</p>
+          <h2 id="rule-list-title">入口规则</h2>
+          <p class="ops-muted">按节点和运行状态定位规则</p>
         </div>
         <div class="rule-section-actions">
           <span class="ops-status" :class="listError ? 'is-warning' : 'is-success'">
@@ -37,13 +37,6 @@
           <label for="rule-node">入口节点</label>
           <el-select id="rule-node" v-model="filters.node_id" aria-label="入口节点" placeholder="所有节点" clearable>
             <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
-          </el-select>
-        </div>
-        <div class="rule-filter">
-          <label for="rule-type">转发类型</label>
-          <el-select id="rule-type" v-model="filters.type" aria-label="转发类型" placeholder="所有类型" clearable>
-            <el-option label="端口转发" value="forward" />
-            <el-option label="隧道转发" value="tunnel" />
           </el-select>
         </div>
         <div class="rule-filter">
@@ -68,11 +61,11 @@
         <el-button :loading="loading" @click="fetchData()">重试</el-button>
       </div>
 
-      <div v-if="!ruleList.length && loading" class="rule-placeholder" role="status">正在读取转发规则…</div>
+      <div v-if="!ruleList.length && loading" class="rule-placeholder" role="status">正在读取入口规则…</div>
       <div v-else-if="!ruleList.length && !listError" class="rule-placeholder">
         <el-icon aria-hidden="true"><Switch /></el-icon>
-        <strong>{{ hasFilters ? '没有匹配的规则' : '还没有转发规则' }}</strong>
-        <p>{{ hasFilters ? '调整条件，或清除当前筛选查看全部规则。' : '创建规则以定义从监听端口到目标地址的转发路径。' }}</p>
+        <strong>{{ hasFilters ? '没有匹配的规则' : '还没有入口规则' }}</strong>
+        <p>{{ hasFilters ? '调整条件，或清除当前筛选查看全部规则。' : '创建规则以设置入口监听地址和转发路径。' }}</p>
         <el-button v-if="hasFilters" @click="clearFilters">清除筛选</el-button>
         <el-button v-else :icon="Plus" @click="openDialog()">新建规则</el-button>
       </div>
@@ -82,13 +75,13 @@
         class="ops-table-scroll rule-table-scroll"
         tabindex="0"
         role="region"
-        aria-label="转发规则列表"
+        aria-label="入口规则列表"
       >
         <table class="rule-table" role="table">
           <thead role="rowgroup">
             <tr role="row">
               <th scope="col" role="columnheader">规则</th>
-              <th scope="col" role="columnheader">转发路径</th>
+              <th scope="col" role="columnheader">节点与目标</th>
               <th scope="col" role="columnheader">监听</th>
               <th scope="col" role="columnheader">累计流量</th>
               <th scope="col" role="columnheader">状态</th>
@@ -101,19 +94,18 @@
                 <strong>{{ row.name }}</strong>
                 <span class="rule-secondary">
                   <span class="ops-mono">#{{ row.id }}</span>
-                  <span>{{ row.type === 'tunnel' ? '隧道转发' : '端口转发' }}</span>
+                  <span v-if="row.tunnel_role">{{ row.tunnel_role === 'entry' ? '隧道源端' : '隧道目的端' }}</span>
                 </span>
               </th>
-              <td class="rule-path" role="cell" data-label="转发路径">
+              <td class="rule-path" role="cell" data-label="节点与目标">
                 <span class="rule-path-entry">
-                  {{ row.type === 'tunnel' ? row.tunnel?.entry_node?.name || '未知入口' : row.node?.name || '未知入口' }}
-                  <span v-if="row.tunnel" class="ops-muted">· {{ row.tunnel.name }}</span>
+                  {{ row.node?.name || row.tunnel?.entry_node?.name || '未知节点' }}
                 </span>
                 <span class="rule-path-target ops-mono">
                   <el-icon aria-hidden="true"><Right /></el-icon>
-                  {{ row.targets?.[0] || '—' }}
+                  {{ row.use_clash_ruleset ? 'Clash 规则集' : row.targets?.[0] || '未配置目标' }}
                 </span>
-                <details v-if="row.targets?.length > 1" class="rule-target-details">
+                <details v-if="!row.use_clash_ruleset && row.targets?.length > 1" class="rule-target-details">
                   <summary>另有 {{ row.targets.length - 1 }} 个目标</summary>
                   <ul class="ops-mono">
                     <li v-for="(target, index) in row.targets.slice(1)" :key="index">{{ target }}</li>
@@ -122,7 +114,10 @@
               </td>
               <td role="cell" data-label="监听">
                 <span class="rule-protocol ops-mono">{{ (row.protocol || 'tcp').toUpperCase() }}</span>
-                <span class="ops-mono">:{{ row.listen_port }}</span>
+                <span class="ops-mono">{{ listenEndpoint(row.listen_ip, row.listen_port) }}</span>
+                <span v-if="listenerChecks.has(row.id) && row.status !== 'running'" class="rule-secondary" role="status">
+                  {{ listenerChecks.get(row.id).label }}
+                </span>
               </td>
               <td role="cell" data-label="累计流量">
                 <strong class="ops-mono rule-traffic-total">{{ formatBytes(row.total_bytes) }}</strong>
@@ -139,6 +134,7 @@
               <td class="rule-actions-cell" role="cell" data-label="操作">
                 <div class="rule-row-actions">
                   <el-button
+                    v-if="!row.linked_tunnel_id && !row.use_clash_ruleset && row.targets?.length"
                     text
                     :type="row.status === 'running' ? 'warning' : 'success'"
                     :loading="pendingRuleIds.has(row.id)"
@@ -147,7 +143,8 @@
                   >
                     {{ row.status === 'running' ? '停止' : '启动' }}
                   </el-button>
-                  <el-button text :aria-label="'编辑 ' + row.name" @click="openDialog(row)">编辑</el-button>
+                  <el-button v-if="!row.linked_tunnel_id" text :aria-label="'编辑 ' + row.name" @click="openDialog(row)">编辑</el-button>
+                  <RouterLink v-else class="rule-form-link" to="/tunnels">隧道管理</RouterLink>
                   <el-dropdown trigger="click" @command="handleRowCommand(row, $event)">
                     <el-button text :aria-label="row.name + '的更多操作'">
                       更多 <el-icon aria-hidden="true"><ArrowDown /></el-icon>
@@ -155,7 +152,13 @@
                     <template #dropdown>
                       <el-dropdown-menu>
                         <el-dropdown-item command="copy">复制规则</el-dropdown-item>
-                        <el-dropdown-item command="delete" divided :disabled="pendingRuleIds.has(row.id)">删除规则</el-dropdown-item>
+                        <el-dropdown-item
+                          v-if="!row.tunnel_id && row.status !== 'running'"
+                          command="listener-check"
+                          :disabled="listenerChecks.get(row.id)?.pending"
+                        >检查监听</el-dropdown-item>
+                        <el-dropdown-item v-if="row.use_clash_ruleset && row.status === 'running'" command="nft-template">nftables 模板</el-dropdown-item>
+                        <el-dropdown-item command="delete" divided :disabled="pendingRuleIds.has(row.id) || !!row.linked_tunnel_id">删除规则</el-dropdown-item>
                       </el-dropdown-menu>
                     </template>
                   </el-dropdown>
@@ -182,7 +185,7 @@
 
     <PanelDialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑转发规则' : '新建转发规则'"
+      :title="isEdit ? '编辑入口规则' : '新建入口规则'"
       :close-on-click-modal="false"
       destroy-on-close
     >
@@ -190,31 +193,15 @@
         <section class="rule-form-section" aria-labelledby="rule-entry-title">
           <header>
             <h3 id="rule-entry-title">入口与监听</h3>
-            <p class="ops-muted">选择流量入口，指定对外监听的协议与端口。</p>
+            <p class="ops-muted">选择节点并设置监听地址。两端创建后，可到 <RouterLink class="rule-form-link" to="/tunnels">隧道管理</RouterLink> 建立链路。</p>
           </header>
           <div class="rule-form-grid">
             <el-form-item label="规则名称" prop="name" class="rule-form-wide">
               <el-input v-model.trim="form.name" placeholder="例如 办公网络入口" maxlength="100" />
             </el-form-item>
-            <el-form-item label="转发类型" prop="type">
-              <el-select v-model="form.type" :disabled="isEdit" @change="handleTypeChange">
-                <el-option label="端口转发" value="forward" />
-                <el-option label="隧道转发" value="tunnel" />
-              </el-select>
-            </el-form-item>
-            <el-form-item v-if="form.type === 'forward'" label="入口节点" prop="node_id">
-              <el-select v-model="form.node_id" placeholder="选择直接转发节点" :disabled="isEdit">
+            <el-form-item label="所在节点" prop="node_id">
+              <el-select v-model="form.node_id" placeholder="选择监听所在的节点" :disabled="isEdit" filterable>
                 <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
-              </el-select>
-            </el-form-item>
-            <el-form-item v-else label="转发隧道" prop="tunnel_id">
-              <el-select v-model="form.tunnel_id" placeholder="选择隧道链路" :disabled="isEdit">
-                <el-option
-                  v-for="tunnel in tunnelList"
-                  :key="tunnel.id"
-                  :label="tunnel.name + '（' + (tunnel.entry_node?.name || '—') + ' → ' + (tunnel.exit_node?.name || '—') + '）'"
-                  :value="tunnel.id"
-                />
               </el-select>
             </el-form-item>
             <el-form-item label="协议" prop="protocol">
@@ -223,8 +210,30 @@
                 <el-option label="UDP" value="udp" />
               </el-select>
             </el-form-item>
+            <el-form-item label="监听 IP" prop="listen_ip">
+              <el-select
+                :model-value="form.listen_ip"
+                :empty-values="[null, undefined]"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="选择或输入监听 IP"
+                aria-describedby="rule-listen-ip-help"
+                @update:model-value="form.listen_ip = $event.trim()"
+              >
+                <el-option v-for="[ip, label] in listenAddressOptions" :key="ip" :label="label" :value="ip" />
+              </el-select>
+              <p id="rule-listen-ip-help" class="rule-form-hint ops-muted">
+                {{ form.listen_ip === '127.0.0.1' || form.listen_ip === '::1'
+                  ? '回环地址仅接受本机连接。可在入口节点配置 nftables 重定向。'
+                  : '可输入自定义 IPv4 或 IPv6。探测地址经过 NAT 时，请选择入口节点本机的地址。' }}
+              </p>
+            </el-form-item>
             <el-form-item label="监听端口" prop="listen_port">
-              <el-input-number v-model="form.listen_port" :min="1" :max="65535" controls-position="right" />
+              <el-input-number v-model="form.listen_port" :min="1" :max="65535" :step-strictly="true" placeholder="填写端口" controls-position="right" aria-describedby="rule-listen-endpoint" />
+              <p v-if="form.listen_port" id="rule-listen-endpoint" class="rule-form-hint ops-muted">
+                监听地址 <span class="ops-mono">{{ listenEndpoint(form.listen_ip, form.listen_port) }}</span>
+              </p>
             </el-form-item>
           </div>
         </section>
@@ -232,10 +241,22 @@
         <section class="rule-form-section" aria-labelledby="rule-target-title">
           <header>
             <h3 id="rule-target-title">目标与策略</h3>
-            <p class="ops-muted">目标地址填写主机名或 IP 与端口。多目标可指定负载均衡策略。</p>
+            <p class="ops-muted">单独转发或作为隧道源端时设置目标。作为隧道目的端时，固定目标留空。</p>
           </header>
           <div class="rule-form-grid">
-            <el-form-item label="目标地址" class="rule-form-wide">
+            <el-form-item label="目标类型" prop="use_clash_ruleset" class="rule-form-wide">
+              <el-select v-model="form.use_clash_ruleset" aria-describedby="rule-target-mode-help">
+                <el-option label="固定目标地址" :value="false" />
+                <el-option label="Clash 规则集（透明分流）" :value="true" :disabled="!canUseClashRuleset" />
+              </el-select>
+              <p id="rule-target-mode-help" class="rule-form-hint ops-muted">
+                {{ canUseClashRuleset ? 'Clash 分流使用系统设置中的规则集。' : 'Clash 分流需要 TCP 与 127.0.0.1。' }}
+                <template v-if="form.use_clash_ruleset && canUseClashRuleset">
+                  在隧道管理将本入口选为源端。匹配的流量经过隧道，其余流量直连。隧道启动后，可从「更多」打开 nftables 模板。
+                </template>
+              </p>
+            </el-form-item>
+            <el-form-item v-if="!form.use_clash_ruleset" label="目标地址" class="rule-form-wide">
               <div class="rule-target-list">
                 <div v-for="(item, index) in form.targetList" :key="index" class="rule-target-item">
                   <el-input
@@ -254,7 +275,7 @@
                 <el-button :icon="Plus" @click="addTarget">添加目标地址</el-button>
               </div>
             </el-form-item>
-            <el-form-item label="负载均衡" prop="strategy">
+            <el-form-item v-if="!form.use_clash_ruleset" label="负载均衡" prop="strategy">
               <el-select v-model="form.strategy">
                 <el-option label="轮询" value="round" />
                 <el-option label="随机" value="rand" />
@@ -275,6 +296,14 @@
         </el-button>
       </template>
     </PanelDialog>
+
+    <NodeNftDialog
+      v-if="nftEntry"
+      v-model="nftDialogVisible"
+      :node="nftEntry.node"
+      :loopback-port="nftEntry.port"
+      @closed="nftEntry = null"
+    />
 
     <PanelDialog
       v-model="exportDialogVisible"
@@ -318,13 +347,12 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, CopyDocument, Download, Plus, Refresh, Remove, Right, Search, Switch, Upload, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
+import NodeNftDialog from '@/components/NodeNftDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { getNodeList } from '@/api/node'
-import { createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
-import { getTunnelList } from '@/api/tunnel'
+import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 
 const nodeList = ref([])
-const tunnelList = ref([])
 const ruleList = ref([])
 const loading = ref(false)
 const listError = ref(false)
@@ -332,7 +360,7 @@ const page = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
 
-const emptyFilters = { keyword: '', node_id: '', type: '', status: '' }
+const emptyFilters = { keyword: '', node_id: '', status: '' }
 const filters = reactive({ ...emptyFilters })
 const activeFilters = ref({ ...emptyFilters })
 const hasFilters = computed(() => Object.values(activeFilters.value).some(Boolean))
@@ -340,6 +368,13 @@ const hasFilters = computed(() => Object.values(activeFilters.value).some(Boolea
 const statusClass = { running: 'is-success', stopped: 'is-muted', error: 'is-danger' }
 const statusText = { running: '运行中', stopped: '已停止', error: '异常' }
 const pendingRuleIds = reactive(new Set())
+const listenerChecks = reactive(new Map())
+const listenerReasons = {
+  occupied: '监听地址已被占用',
+  address_unavailable: '所选 IP 无法在此节点绑定',
+  permission_denied: '节点无权绑定此监听地址',
+  bind_failed: '节点绑定监听地址失败'
+}
 const summary = computed(() => {
   const unavailable = (loading.value || listError.value) && !ruleList.value.length
   const count = status => unavailable ? null : ruleList.value.filter(rule => rule.status === status).length
@@ -352,39 +387,51 @@ const summary = computed(() => {
 })
 
 const dialogVisible = ref(false)
+const nftDialogVisible = ref(false)
+const nftEntry = ref(null)
 const isEdit = ref(false)
 const editId = ref(null)
 const submitLoading = ref(false)
 const formRef = ref(null)
 const form = reactive({
-  type: 'forward',
   node_id: '',
-  tunnel_id: null,
   name: '',
   protocol: 'tcp',
-  listen_port: 8000,
+  listen_ip: '',
+  listen_port: null,
+  use_clash_ruleset: false,
   targetList: [{ address: '' }],
   strategy: 'round',
   remark: ''
 })
 
-const validateEntry = (rule, value, callback) => {
-  if (form.type === 'forward' && !form.node_id) {
-    callback(new Error('请选择入口节点'))
-  } else if (form.type === 'tunnel' && !form.tunnel_id) {
-    callback(new Error('请选择转发隧道'))
-  } else {
-    callback()
+const canUseClashRuleset = computed(() => form.protocol === 'tcp' && form.listen_ip === '127.0.0.1')
+const listenEndpoint = (ip, port) => (ip?.includes(':') ? '[' + ip + ']' : ip || '*') + ':' + port
+const listenAddressOptions = computed(() => {
+  const entry = nodeList.value.find(item => item.id === form.node_id)
+  const options = new Map([
+    ['', '所有接口'],
+    ['127.0.0.1', 'IPv4 回环 · 127.0.0.1'],
+    ['::1', 'IPv6 回环 · ::1']
+  ])
+  for (const ip of [entry?.ipv4, entry?.ipv6]) {
+    if (ip && !options.has(ip)) options.set(ip, '入口探测地址 · ' + ip)
   }
-}
+  if (form.listen_ip && !options.has(form.listen_ip)) options.set(form.listen_ip, '自定义地址 · ' + form.listen_ip)
+  return options
+})
 
 const formRules = {
-  type: [{ required: true, message: '请选择转发类型', trigger: 'change' }],
-  node_id: [{ validator: validateEntry, trigger: 'change' }],
-  tunnel_id: [{ validator: validateEntry, trigger: 'change' }],
+  node_id: [{ required: true, message: '请选择所在节点', trigger: 'change' }],
   name: [{ required: true, message: '请输入规则名称', trigger: 'blur' }],
   protocol: [{ required: true, message: '请选择协议', trigger: 'change' }],
-  listen_port: [{ required: true, message: '请输入监听端口', trigger: 'change' }]
+  listen_port: [{ required: true, message: '请输入监听端口', trigger: 'change' }],
+  use_clash_ruleset: [{
+    validator: (_rule, useClash, callback) => callback(useClash && !canUseClashRuleset.value
+      ? new Error('Clash 分流需要 TCP 与 127.0.0.1')
+      : undefined),
+    trigger: 'change'
+  }]
 }
 
 const exportDialogVisible = ref(false)
@@ -441,12 +488,12 @@ const openDialog = (row = null, copy = false) => {
   editId.value = isEdit.value ? row.id : null
 
   Object.assign(form, {
-    type: row?.type || 'forward',
-    node_id: row?.node_id || '',
-    tunnel_id: row?.tunnel_id || null,
+    node_id: row?.node_id || row?.tunnel?.entry_node_id || '',
     name: row ? row.name + (copy ? '-copy' : '') : '',
     protocol: row?.protocol || 'tcp',
-    listen_port: copy ? Math.min(row.listen_port + 1, 65535) : row?.listen_port || 8000,
+    listen_ip: row?.listen_ip || '',
+    listen_port: isEdit.value ? row.listen_port : null,
+    use_clash_ruleset: row?.use_clash_ruleset || false,
     targetList: row?.targets?.length ? row.targets.map(address => ({ address })) : [{ address: '' }],
     strategy: row?.strategy || 'round',
     remark: row?.remark || ''
@@ -462,20 +509,22 @@ const handleSubmit = async () => {
   submitLoading.value = true
   try {
     const payload = {
-      type: form.type,
-      node_id: form.type === 'forward' ? form.node_id : null,
-      tunnel_id: form.type === 'tunnel' ? form.tunnel_id : null,
+      node_id: form.node_id,
       name: form.name,
       protocol: form.protocol,
+      listen_ip: form.listen_ip,
       listen_port: form.listen_port,
-      targets: form.targetList.map(item => item.address).filter(Boolean),
+      use_clash_ruleset: form.use_clash_ruleset,
+      targets: form.use_clash_ruleset ? [] : form.targetList.map(item => item.address).filter(Boolean),
       strategy: form.strategy,
       remark: form.remark
     }
     if (isEdit.value) {
       await updateRule(editId.value, payload)
+      listenerChecks.delete(editId.value)
     } else {
-      await createRule(payload)
+      const result = await createRule(payload)
+      if (result.data?.id) checkListener(result.data, true)
     }
     ElMessage.success(isEdit.value ? '规则已保存' : '规则已创建')
     dialogVisible.value = false
@@ -492,12 +541,34 @@ const runRuleAction = async (row, action, successMessage) => {
   pendingRuleIds.add(row.id)
   try {
     await action(row.id)
+    listenerChecks.delete(row.id)
     ElMessage.success(successMessage)
     fetchData()
   } catch {
     // The request interceptor displays the backend error.
   } finally {
     pendingRuleIds.delete(row.id)
+  }
+}
+
+const checkListener = async (row, notify = false) => {
+  if (listenerChecks.get(row.id)?.pending) return
+  const pending = { pending: true, label: '正在检查监听…' }
+  listenerChecks.set(row.id, pending)
+  let available = false
+  let label
+  try {
+    const { data } = await checkRuleListener(row.id)
+    available = data.available
+    label = available ? '监听地址可用' : listenerReasons[data.reason] || '监听地址不可用'
+  } catch (error) {
+    label = error.response?.data?.message || '暂时无法检查监听地址'
+  }
+  if (!listenerChecks.get(row.id)?.pending) return
+  listenerChecks.set(row.id, { label })
+  if (notify) {
+    if (available) ElMessage.success(label)
+    else ElMessage.warning(label)
   }
 }
 
@@ -509,6 +580,17 @@ const toggleRule = row => {
 const handleRowCommand = async (row, command) => {
   if (command === 'copy') {
     openDialog(row, true)
+    return
+  }
+  if (command === 'listener-check') return checkListener(row)
+  if (command === 'nft-template') {
+    const node = row.node ?? nodeList.value.find(item => item.id === row.node_id) ?? row.tunnel?.entry_node
+    if (!node?.id) {
+      ElMessage.warning('找不到所在节点，无法打开 nftables 模板。')
+      return
+    }
+    nftEntry.value = { node, port: row.listen_port }
+    nftDialogVisible.value = true
     return
   }
   try {
@@ -542,11 +624,11 @@ const handleExport = async () => {
 
     exportJsonData.value = JSON.stringify(rows.map(rule => ({
       name: rule.name,
-      type: rule.type,
-      node_id: rule.node_id,
-      tunnel_id: rule.tunnel_id,
+      node_id: rule.node_id || rule.tunnel?.entry_node_id,
       protocol: rule.protocol,
+      listen_ip: rule.listen_ip ?? '',
       listen_port: rule.listen_port,
+      use_clash_ruleset: rule.use_clash_ruleset ?? false,
       targets: rule.targets,
       strategy: rule.strategy,
       remark: rule.remark || ''
@@ -600,11 +682,11 @@ const handleImport = async () => {
     try {
       await createRule({
         name: rule.name || '导入规则',
-        type: rule.type || 'forward',
         node_id: rule.node_id,
-        tunnel_id: rule.tunnel_id,
         protocol: rule.protocol || 'tcp',
+        listen_ip: rule.listen_ip ?? '',
         listen_port: rule.listen_port || 0,
+        use_clash_ruleset: rule.use_clash_ruleset ?? false,
         targets: rule.targets || [],
         strategy: rule.strategy || 'round',
         remark: rule.remark || ''
@@ -617,7 +699,7 @@ const handleImport = async () => {
   importLoading.value = false
 
   if (!successCount) {
-    importError.value = '导入失败。请核对入口节点、隧道和监听端口。'
+    importError.value = '导入失败。请核对节点和监听端口。'
     return
   }
   importDialogVisible.value = false
@@ -632,19 +714,11 @@ const handleImport = async () => {
 
 const addTarget = () => form.targetList.push({ address: '' })
 const removeTarget = index => form.targetList.splice(index, 1)
-const handleTypeChange = type => {
-  if (type === 'forward') {
-    form.tunnel_id = null
-  } else {
-    form.node_id = ''
-  }
-}
 
 let refreshTimer
 watch([page, pageSize], () => fetchData())
 onMounted(() => {
   getNodeList({ pageSize: 100 }).then(({ data }) => { nodeList.value = data.list || [] }).catch(() => {})
-  getTunnelList({ pageSize: 100 }).then(({ data }) => { tunnelList.value = data.list || [] }).catch(() => {})
   fetchData()
   refreshTimer = setInterval(() => {
     if (!document.hidden && !loading.value && !listError.value) fetchData(true)
@@ -688,7 +762,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-filters {
   display: grid;
-  grid-template-columns: minmax(140px, 1.5fr) repeat(3, minmax(110px, 1fr)) auto;
+  grid-template-columns: minmax(140px, 1.5fr) repeat(2, minmax(110px, 1fr)) auto;
   gap: 12px;
   align-items: end;
   padding: 16px 20px;
@@ -928,6 +1002,14 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-form-wide {
   grid-column: 1 / -1;
 }
+
+.rule-form-hint {
+  margin: 4px 0 0;
+  line-height: 1.45;
+  font-size: .75rem;
+}
+
+.rule-form-link { color: var(--ops-accent); }
 
 .rule-form-grid :deep(.el-select),
 .rule-form-grid :deep(.el-input-number),

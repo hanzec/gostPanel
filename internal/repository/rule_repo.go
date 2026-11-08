@@ -90,6 +90,14 @@ func (r *RuleRepository) FindByTunnelID(tunnelID uint) ([]model.GostRule, error)
 	return rules, err
 }
 
+// EntranceBindings finds the tunnels selecting any of the listed rule IDs.
+func (r *RuleRepository) EntranceBindings(ruleIDs []uint) ([]model.GostTunnel, error) {
+	var tunnels []model.GostTunnel
+	err := r.DB.Select("id", "entry_rule_id", "exit_rule_id").
+		Where("entry_rule_id IN ? OR exit_rule_id IN ?", ruleIDs, ruleIDs).Find(&tunnels).Error
+	return tunnels, err
+}
+
 // ListenerConflicts checks whether a rule on the same ingress overlaps this bind.
 func (r *RuleRepository) ListenerConflicts(nodeID uint, protocol model.RuleProtocol, ip string, port int, excludeID ...uint) (bool, error) {
 	var count int64
@@ -121,11 +129,11 @@ func (r *RuleRepository) UpdateServiceID(id uint, serviceID string) error {
 	return r.UpdateField(&model.GostRule{}, id, "service_id", serviceID)
 }
 
-// UpdateServiceInfo 更新服务信息 (包含 ChainID)
-func (r *RuleRepository) UpdateServiceInfo(id uint, serviceID, chainID string) error {
+// UpdateRuntime updates the service ID and status together.
+func (r *RuleRepository) UpdateRuntime(id uint, serviceID string, status model.RuleStatus) error {
 	return r.UpdateFields(&model.GostRule{}, id, map[string]interface{}{
 		"service_id": serviceID,
-		"chain_id":   chainID,
+		"status":     status,
 	})
 }
 

@@ -1,12 +1,14 @@
 import { flushPromises } from '@vue/test-utils'
-import { ElForm, ElMessage, ElMessageBox, ElSelect } from 'element-plus'
+import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Tunnels from '@/views/Tunnels.vue'
 import { getNodeList } from '@/api/node'
+import { getRuleList } from '@/api/rule'
 import { createTunnel, deleteTunnel, getTunnelList, startTunnel, stopTunnel, updateTunnel } from '@/api/tunnel'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
 vi.mock('@/api/node', () => ({ getNodeList: vi.fn() }))
+vi.mock('@/api/rule', () => ({ getRuleList: vi.fn() }))
 vi.mock('@/api/tunnel', () => ({
   createTunnel: vi.fn(), deleteTunnel: vi.fn(), getTunnelList: vi.fn(),
   startTunnel: vi.fn(), stopTunnel: vi.fn(), updateTunnel: vi.fn()
@@ -14,21 +16,33 @@ vi.mock('@/api/tunnel', () => ({
 
 const ingress = { id: 4, name: '入口 A' }
 const egress = { id: 9, name: '出口 B' }
+const source = { id: 21, name: 'Web A', node: ingress, node_id: ingress.id, protocol: 'tcp', listen_ip: '127.0.0.1', listen_port: 443, status: 'stopped', use_clash_ruleset: true }
+const destination = { id: 22, name: 'Relay B', node: egress, node_id: egress.id, protocol: 'udp', listen_ip: '', listen_port: 9553, status: 'stopped', targets: [] }
+const relaySource = { ...source, id: 31, name: 'Office A', status: 'running', linked_tunnel_id: 12 }
+const relayDestination = { ...destination, id: 32, name: 'Office B', protocol: 'tcp', listen_port: 65535, status: 'running', linked_tunnel_id: 12 }
+const mediaSource = { ...source, id: 41, linked_tunnel_id: 13 }
+const mediaDestination = { ...destination, id: 42, linked_tunnel_id: 13 }
+const entrances = [source, destination, relaySource, relayDestination, mediaSource, mediaDestination,
+  { ...destination, id: 23, node: ingress, node_id: ingress.id },
+  { ...destination, id: 24, listen_ip: '127.0.0.2' },
+  { ...source, id: 25, status: 'running' }, { ...source, id: 26, tunnel_id: 30 }]
 const relay = {
-  id: 12, name: 'Office relay', status: 'running', protocol: 'tls', relay_port: 65535,
-  entry_node: ingress, entry_node_id: ingress.id, exit_node: egress, exit_node_id: egress.id, remark: 'Private network'
+  id: 12, name: 'Office relay', status: 'running', protocol: 'tcp', relay_port: 65535,
+  entry_node: ingress, entry_node_id: ingress.id, exit_node: egress, exit_node_id: egress.id, remark: 'Private network',
+  entry_rule_id: relaySource.id, entry_rule: relaySource, exit_rule_id: relayDestination.id, exit_rule: relayDestination
 }
 const udpRelay = {
-  id: 13, name: 'Media relay', status: 'stopped', protocol: 'udp', relay_port: 8443,
-  entry_node_id: ingress.id, exit_node_id: egress.id
+  id: 13, name: 'Media relay', status: 'stopped', protocol: 'udp', relay_port: 9553,
+  entry_node_id: ingress.id, exit_node_id: egress.id, entry_rule_id: mediaSource.id, exit_rule_id: mediaDestination.id
 }
-const missingRelay = { id: 14, name: 'Unknown relay', entry_node_id: 31, exit_node_id: 32 }
+const missingRelay = { id: 14, name: 'Unknown relay', entry_node_id: 31, exit_node_id: 32, relay_port: 8443 }
 const tunnels = [relay, udpRelay, { ...missingRelay, id: 15, name: 'Broken relay', status: 'error' }, missingRelay]
 const dialog = wrapper => wrapper.get('[role="dialog"]')
 const selectField = (wrapper, prop) => field(wrapper, prop).getComponent(ElSelect)
 
 beforeEach(() => {
   getNodeList.mockResolvedValue(result([ingress, egress]))
+  getRuleList.mockResolvedValue(result(entrances))
   getTunnelList.mockResolvedValue(result(tunnels, 32))
   for (const action of [createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel]) action.mockResolvedValue({})
 })
@@ -39,6 +53,7 @@ describe('Relay tunnel inventory', () => {
     const list = Promise.withResolvers()
     getTunnelList.mockReturnValueOnce(list.promise)
     getNodeList.mockRejectedValueOnce(new Error('nodes offline'))
+    getRuleList.mockRejectedValueOnce(new Error('entrances offline'))
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
     expect(wrapper.get('[role="status"]').text()).toContain('正在加载隧道')
@@ -53,19 +68,25 @@ describe('Relay tunnel inventory', () => {
     expect(getTunnelList).toHaveBeenCalledTimes(1)
 
     await button(wrapper, '添加隧道').trigger('click')
-    expect(dialog(wrapper).text()).toContain('无法加载节点选项')
-    await button(dialog(wrapper), '重新加载节点').trigger('click')
+    await flushPromises()
+    expect(dialog(wrapper).text()).toContain('无法加载入口选项')
+    await button(dialog(wrapper), '重新加载入口').trigger('click')
+    await flushPromises()
+    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 1000 })
+    expect(dialog(wrapper).text()).not.toContain('无法加载入口选项')
+    await button(dialog(wrapper), '取消').trigger('click')
+    await button(wrapper, '重新加载节点').trigger('click')
     await flushPromises()
     expect(getNodeList).toHaveBeenLastCalledWith({ pageSize: 100 })
-    expect(dialog(wrapper).text()).not.toContain('无法加载节点选项')
-    await button(dialog(wrapper), '取消').trigger('click')
 
     await button(wrapper, '重新加载').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('.metric-strip-value').map(item => item.text())).toEqual(['32', '1', '1', '1'])
     expect(row(wrapper, 'Office relay').text()).toContain('Private network')
     expect(row(wrapper, 'Office relay').text()).toContain('出口 B')
-    expect(row(wrapper, 'Office relay').text()).toContain('TLS')
+    expect(row(wrapper, 'Office relay').text()).toContain('Office A')
+    expect(row(wrapper, 'Office relay').text()).toContain('Office B')
+    expect(row(wrapper, 'Office relay').text()).toContain('TCP')
     expect(row(wrapper, 'Unknown relay').text()).toContain('节点 #31')
     expect(row(wrapper, 'Unknown relay').text()).toContain('未知')
     expect(row(wrapper, 'Unknown relay').text()).toContain('—')
@@ -93,79 +114,90 @@ describe('Relay tunnel inventory', () => {
     expect(wrapper.text()).toContain('尚未建立隧道')
   })
 
-  it('links to node management when fewer than two nodes are available', async () => {
-    getNodeList.mockResolvedValueOnce({ data: {} })
+  it('links to entrance management when no endpoint pair is available', async () => {
+    getRuleList.mockResolvedValueOnce({ data: {} })
     getTunnelList.mockResolvedValueOnce(result())
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
     await button(wrapper.get('.inventory-state'), '添加隧道').trigger('click')
-    expect(dialog(wrapper).text()).toContain('建立隧道至少需要两个节点')
+    await flushPromises()
+    expect(dialog(wrapper).text()).toContain('源端或目的端缺少可用入口')
     await dialog(wrapper).get('.tunnel-link').trigger('click')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 })
 
 describe('Relay tunnel configuration', () => {
-  it('validates a new tunnel and preserves its form after a failed save', async () => {
+  it('validates endpoint roles and preserves the selected pair after a failed create', async () => {
     const error = new Error('relay already listening')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
     await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
     const editor = dialog(wrapper)
     await field(editor, 'name').get('input').setValue('New UDP relay')
-    await button(editor, '添加隧道').trigger('click')
+    await button(editor, '添加并启动').trigger('click')
     await flushPromises()
-    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['entry_node_id', false, '请选择入口节点'])
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['entry_rule_id', false, '请选择源端入口'])
     expect(createTunnel).not.toHaveBeenCalled()
 
-    await choose(selectField(editor, 'entry_node_id'), 4)
-    await choose(selectField(editor, 'exit_node_id'), 9)
-    await choose(selectField(editor, 'protocol'), 'quic')
-    await field(editor, 'relay_port').get('input').setValue('9553')
+    const sourceSelect = selectField(editor, 'entry_rule_id')
+    const destinationSelect = selectField(editor, 'exit_rule_id')
+    expect(sourceSelect.findAllComponents(ElOption).map(option => option.props('value'))).toEqual([source.id])
+    expect(sourceSelect.getComponent(ElOption).props('label')).toContain('TCP 127.0.0.1:443')
+    await choose(sourceSelect, source.id)
+    expect(destinationSelect.findAllComponents(ElOption).map(option => [option.props('value'), option.props('disabled')])).toEqual([
+      [destination.id, false], [23, true]
+    ])
+    await choose(destinationSelect, destination.id)
     await field(editor, 'remark').get('textarea').setValue('new service')
     createTunnel.mockRejectedValueOnce(error)
-    await button(editor, '添加隧道').trigger('click')
+    await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(log).toHaveBeenCalledWith('保存隧道失败:', error)
+    expect(getRuleList).toHaveBeenCalledTimes(2)
     expect(field(dialog(wrapper), 'name').get('input').element.value).toBe('New UDP relay')
-    await button(editor, '添加隧道').trigger('click')
+    await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(createTunnel).toHaveBeenLastCalledWith({
-      name: 'New UDP relay', entry_node_id: 4, exit_node_id: 9,
-      protocol: 'quic', relay_port: 9553, remark: 'new service'
+      name: 'New UDP relay', entry_rule_id: source.id, exit_rule_id: destination.id, remark: 'new service'
     })
-    expect(ElMessage.success).toHaveBeenCalledWith('隧道已添加')
+    expect(ElMessage.success).toHaveBeenCalledWith('隧道已添加并启动')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
-  it('keeps endpoints fixed on edit and adjusts the listening port on copies', async () => {
+  it('protects running tunnels, reassigns stopped endpoints, and keeps legacy transport editing', async () => {
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
     await command(row(wrapper, 'Office relay'), 'edit')
-    const editor = dialog(wrapper)
-    expect(editor.text()).toContain('入口和出口在创建时确定')
-    expect(selectField(editor, 'entry_node_id').props('disabled')).toBe(true)
-    expect(selectField(editor, 'exit_node_id').props('disabled')).toBe(true)
-    await field(editor, 'name').get('input').setValue('Office TLS')
-    await button(editor, '保存更改').trigger('click')
-    await flushPromises()
-    expect(updateTunnel).toHaveBeenLastCalledWith(12, {
-      name: 'Office TLS', entry_node_id: 4, exit_node_id: 9, protocol: 'tls',
-      relay_port: 65535, remark: 'Private network'
-    })
-    expect(ElMessage.success).toHaveBeenCalledWith('隧道已更新')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(updateTunnel).not.toHaveBeenCalled()
 
     await command(row(wrapper, 'Office relay'), 'copy')
     expect(field(dialog(wrapper), 'name').get('input').element.value).toBe('Office relay-copy')
-    expect(field(dialog(wrapper), 'relay_port').get('input').element.value).toBe('8443')
+    expect(selectField(dialog(wrapper), 'entry_rule_id').props('modelValue')).toBe(null)
+    expect(selectField(dialog(wrapper), 'exit_rule_id').props('modelValue')).toBe(null)
     await button(dialog(wrapper), '取消').trigger('click')
-    await command(row(wrapper, 'Media relay'), 'copy')
-    expect(field(dialog(wrapper), 'relay_port').get('input').element.value).toBe('8444')
-    await button(dialog(wrapper), '取消').trigger('click')
+    await command(row(wrapper, 'Media relay'), 'edit')
+    expect(selectField(dialog(wrapper), 'entry_rule_id').props('modelValue')).toBe(mediaSource.id)
+    await choose(selectField(dialog(wrapper), 'entry_rule_id'), source.id)
+    await choose(selectField(dialog(wrapper), 'exit_rule_id'), destination.id)
+    await button(dialog(wrapper), '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnel).toHaveBeenLastCalledWith(13, {
+      name: 'Media relay', entry_rule_id: source.id, exit_rule_id: destination.id, remark: ''
+    })
+    expect(ElMessage.success).toHaveBeenCalledWith('隧道已更新')
     await command(row(wrapper, 'Unknown relay'), 'edit')
     expect(selectField(dialog(wrapper), 'protocol').props('modelValue')).toBe('tcp')
     expect(field(dialog(wrapper), 'relay_port').get('input').element.value).toBe('8443')
+    await choose(selectField(dialog(wrapper), 'protocol'), 'tls')
+    await button(dialog(wrapper), '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnel).toHaveBeenLastCalledWith(14, {
+      name: 'Unknown relay', protocol: 'tls', relay_port: 8443, remark: ''
+    })
   })
 
   it('disables competing toggles during a pending start and confirms deletions', async () => {

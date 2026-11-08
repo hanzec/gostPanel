@@ -247,6 +247,10 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `C
 
 启用配额需要支持该功能的 `yagp-daemon` 和 `nftables`。节点使用独立的 nftables 规则，达额时由内核立即拦截数据包，包括已经建立的 TCP 连接上的数据。Gost 进程持续运行。在线节点约每 5 秒同步用量和周期策略。面板与节点断开期间继续执行现有配额，周期重置和设置变更在恢复连接后生效。卸载节点会清理该节点的配额规则。
 
+### 查看实时流量
+
+**运行总览** 每 5 秒自动更新流量和速率。每条隧道单独显示出口 Gost Relay 的流量，顶部合计各隧道出口的流量。同一出口节点上的多条隧道分别统计，入口直连流量不计入。已运行的隧道会在下次正常启动后开始采集出口流量。
+
 ### 管理节点的 nftables 配置
 
 在装有 `nftables` 的 Linux 节点上，通过 **节点管理 → 更多 → nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。节点也可运行 `/etc/yagp-daemon/<ID>/yagp-daemon nft-template -c /etc/yagp-daemon/<ID>/node.yaml`，经 TLS 从面板获取同一份模板。
@@ -261,9 +265,16 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `C
 
 ### Clash 规则集订阅
 
-在 **系统设置 → Clash 规则集** 填写 HTTPS 规则集链接并选择要同步的边缘节点。面板保存转换结果，之后每小时刷新，并将 Gost 的 `yagp-transparent-proxy` 白名单同步到所选在线节点。下载或转换失败时保留最近一次成功的规则。取消选择某个节点会停止给该节点自动更新，并保留最近下发的白名单。
+在 **系统设置 → Clash 规则集** 填写 HTTPS 规则集链接。面板保存转换结果，之后每小时刷新。使用此规则集的入口会自动收到更新；也可以在设置中额外选择其他边缘节点。下载或转换失败时保留最近一次成功的规则。
 
-支持 `payload:` YAML 和文本规则集，包含域名、域名后缀、可等价转换的关键词、IP 和 CIDR 条目。在既有 Gost 透明代理转发链的第一跳设置 `bypass: yagp-transparent-proxy`，匹配目标走该转发链，其余目标直连。域名匹配依赖现有透明代理从 HTTP Host 或 TLS SNI 识别目标，纯 IP 流量使用 IP/CIDR 条目。[Gost 分流配置](https://v3.gost.run/en/concepts/bypass/) · [Gost 透明代理](https://v3.gost.run/en/tutorials/redirect/)
+支持 `payload:` YAML 和文本规则集，包含域名、域名后缀、可等价转换的关键词、IP 和 CIDR 条目。Gost 从 HTTP Host 或 TLS SNI 识别域名，纯 IP 流量使用 IP/CIDR 条目。[Gost 分流配置](https://v3.gost.run/en/concepts/bypass/) · [Gost 透明代理](https://v3.gost.run/en/tutorials/redirect/)
+
+### 配置入口 A 和出口 B
+
+1. 注册 A 和 B，在 **入口管理** 各建一个入口。为两端分别选择节点、监听协议、IP 和端口。保存后面板会让对应的 `yagp-daemon` 检查监听地址是否可用，保存本身不启动转发。旧版守护进程需要升级后才支持监听检查。
+2. 在 A 配置 **固定目标地址**，或选择 TCP、`127.0.0.1` 和 **Clash 规则集** 做本机透明分流。B 选择 **仅监听**，使用 A 可访问的地址。B 监听所有接口时，A 会自动跟随 B 上报的 IP 变化。
+3. 在 **隧道管理** 新建隧道，选择 A 作为来源、B 作为出口。创建时面板保存 A 的转发配置和 B 的 Gost Relay 配置。使用 Clash 时，命中订阅的连接经过 B，其余连接从 A 直连。
+4. 若使用回环透明分流，在运行中的 A 入口打开 **更多 → nftables 模板**，核对并应用到 A。模板使用你选的监听端口，只接管指定进程组的本机 IPv4 TCP 流量。`skgid` 默认示例为 `65534`，请改成实际应用进程组 ID；可单独修改 `dport` 来选择需要接管的原始目的端口。停用隧道前，先移除该重定向。
 
 ---
 
