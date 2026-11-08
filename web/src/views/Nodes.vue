@@ -223,58 +223,39 @@
     <PanelDialog
       v-model="installDialogVisible"
       :title="'安装节点 · ' + (installNode?.name || '')"
+      :description="'节点 #' + (installNode?.id || '') + ' · 在目标服务器上以 root 身份执行安装命令。'"
       :close-on-click-modal="false"
       @close="resetInstall"
     >
-      <p class="install-intro ops-muted">在目标服务器上以 root 身份执行安装命令。节点首次通过 TLS 注册时会自动获取节点 ID 和凭据，并探测 IP。</p>
-      <dl v-if="installNode" class="install-meta">
-        <div><dt>节点 ID</dt><dd class="ops-mono">#{{ installNode.id }}</dd></div>
-      </dl>
-      <el-form label-position="top" @submit.prevent>
-        <el-form-item
-          label="面板注册地址"
-          for="node-panel-address"
-          :error="panelAddress && !panelAddressValid ? '请输入主机:端口，通过 Traefik 时加上 /api/v1/grpc。' : ''"
-        >
-          <el-input
-            id="node-panel-address"
-            v-model.trim="panelAddress"
-            placeholder="panel.example.com:443/api/v1/grpc"
-            :disabled="loadingPanelAddress"
+      <p v-if="installLoading" class="install-feedback ops-muted" role="status">正在生成注册令牌…</p>
+      <p v-else-if="installError" class="install-feedback install-error" role="alert">{{ installError }}</p>
+      <div v-else-if="registration" class="install-content">
+        <section class="install-field" aria-labelledby="node-registration-token">
+          <h3 id="node-registration-token">注册令牌</h3>
+          <code class="install-token ops-mono">{{ registration.token }}</code>
+          <p class="install-hint ops-muted">一次性使用 · <time :datetime="registration.expiresAt">{{ formatTime(registration.expiresAt) }}</time> 到期</p>
+        </section>
+        <div class="install-field">
+          <label for="node-install-command">安装命令</label>
+          <textarea
+            id="node-install-command"
+            ref="installCommandField"
+            class="install-command ops-mono"
+            :value="installCommand"
+            readonly
             spellcheck="false"
-          />
-        </el-form-item>
-      </el-form>
-
-      <div class="install-registration">
-        <p class="ops-muted" role="status">
-          <template v-if="loadingPanelAddress">正在读取面板注册地址。</template>
-          <template v-else-if="issuingToken">正在签发注册令牌。</template>
-          <template v-else-if="registrationToken">
-            令牌到期时间 <time :datetime="registrationExpiresAt">{{ formatTime(registrationExpiresAt) }}</time>
-          </template>
-          <template v-else-if="registrationExpiresAt">令牌已过期，请重新签发。</template>
-          <template v-else>令牌在注册成功后立即失效。</template>
-        </p>
-        <el-button :type="installCommand ? '' : 'primary'" :loading="issuingToken" :disabled="!panelAddressValid" @click="issueRegistrationToken">
-          {{ registrationExpiresAt ? '重新签发令牌' : '签发注册令牌' }}
-        </el-button>
-      </div>
-      <p v-if="registrationError" class="install-error" role="alert">签发失败，节点已保存。请重试签发。</p>
-
-      <section class="install-command" aria-labelledby="node-install-command">
-        <div class="install-command-heading">
-          <h3 id="node-install-command">安装命令</h3>
-          <el-button :type="installCommand ? 'primary' : ''" :icon="CopyDocument" :disabled="!installCommand || issuingToken" @click="copyInstallCommand">复制命令</el-button>
+            rows="3"
+          ></textarea>
         </div>
-        <pre v-if="installCommand" class="config-code"><code>{{ installCommand }}</code></pre>
-        <p v-else class="ops-muted">填写面板地址并签发令牌后即可复制命令。</p>
-      </section>
-      <p class="install-hint ops-muted">请妥善保管安装命令。重新签发会撤销该节点上一枚未使用的令牌。</p>
-      <p class="install-hint ops-muted">已安装的节点使用新令牌注册后会更换凭据，旧实例将失去访问权限。</p>
+        <p v-if="copyFeedback" class="install-copy-feedback" role="status">{{ copyFeedback }}</p>
+        <p class="install-hint ops-muted">生成新令牌会撤销上一枚未使用的令牌。</p>
+        <p v-if="installNode?.username" class="install-replace-note">重新注册会使旧实例失去访问权限。</p>
+      </div>
 
       <template #footer>
         <el-button @click="installDialogVisible = false">关闭</el-button>
+        <el-button v-if="installError" type="primary" @click="prepareInstall">重试生成</el-button>
+        <el-button v-else type="primary" :icon="CopyDocument" :disabled="!installCommand" @click="copyInstallCommand">复制安装命令</el-button>
       </template>
     </PanelDialog>
   </div>
@@ -380,12 +361,12 @@ const nftDialogVisible = ref(false)
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
 const installNode = computed(() => nodeList.value.find(node => node.id === currentInstallNode.value?.id) || currentInstallNode.value)
-const panelAddress = ref('')
-const loadingPanelAddress = ref(false)
-const registrationToken = ref('')
-const registrationExpiresAt = ref('')
-const issuingToken = ref(false)
-const registrationError = ref(false)
+const registration = ref(null)
+const installLoading = ref(false)
+const installError = ref('')
+const installCommandField = ref(null)
+const copyFeedback = ref('')
+const pendingInstallTokens = new Map()
 let createdInstallNode
 let installSession = 0
 let registrationTimer
@@ -408,82 +389,113 @@ const configSummary = (tab, entry) => {
 
 const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "'"
 
-const panelAddressValid = computed(() => {
-  const address = panelAddress.value.replace(/\/api\/v1\/grpc$/, '')
-  if (!address || /[\s/@?#\\]/.test(address)) return false
-  try {
-    const { hostname, port } = new URL('tcp://' + address)
-    return Boolean(hostname && Number(port) > 0)
-  } catch {
-    return false
-  }
-})
-
 const installCommand = computed(() => {
-  if (!panelAddressValid.value || !registrationToken.value) return ''
+  if (!registration.value) return ''
+  const { address, token } = registration.value
   return 'curl -fsSL ' + shellQuote(INSTALL_SCRIPT_URL) + ' | bash -s -- ' +
-    '--panel-address ' + shellQuote(panelAddress.value) + ' --token ' + shellQuote(registrationToken.value)
+    '--panel-address ' + shellQuote(address) + ' --token ' + shellQuote(token)
 })
 
-const showInstallCommand = async (row, autoIssue = false) => {
+const showInstallCommand = (row) => {
   resetInstall()
-  const session = installSession
   currentInstallNode.value = row
-  panelAddress.value = ''
-  loadingPanelAddress.value = true
   installDialogVisible.value = true
-
-  const res = await getPublicSystemConfig().catch(() => null)
-  if (session !== installSession || !installDialogVisible.value) return
-  panelAddress.value = res?.data?.reportAddress?.trim() || ''
-  loadingPanelAddress.value = false
-  if (autoIssue && panelAddressValid.value) await issueRegistrationToken()
-}
-
-const clearRegistration = () => {
-  clearTimeout(registrationTimer)
-  registrationToken.value = ''
-  registrationExpiresAt.value = ''
+  prepareInstall()
 }
 
 const resetInstall = () => {
   installSession++
-  loadingPanelAddress.value = false
-  issuingToken.value = false
-  registrationError.value = false
-  clearRegistration()
+  clearTimeout(registrationTimer)
+  registration.value = null
+  installLoading.value = false
+  installError.value = ''
+  copyFeedback.value = ''
 }
 
-const issueRegistrationToken = async () => {
-  const node = currentInstallNode.value
-  if (!node || !panelAddressValid.value || issuingToken.value) return
-  const session = installSession
-  issuingToken.value = true
-  registrationError.value = false
-  const res = await issueNodeRegistrationToken(node.id).catch(() => null)
-  if (session !== installSession || !installDialogVisible.value) return
-  issuingToken.value = false
-  if (!res) {
-    registrationError.value = true
-    return
-  }
+const requestInstallToken = (nodeId) => {
+  const pending = pendingInstallTokens.get(nodeId)
+  if (pending) return pending
 
-  clearRegistration()
-  registrationExpiresAt.value = res.data.expires_at
-  const remaining = Date.parse(registrationExpiresAt.value) - Date.now()
-  if (!(remaining > 0)) return
-  registrationToken.value = res.data.token
-  registrationTimer = setTimeout(() => { registrationToken.value = '' }, remaining)
+  // A reopened dialog shares the in-flight request. Another POST could invalidate the token it shows.
+  const request = issueNodeRegistrationToken(nodeId).finally(() => pendingInstallTokens.delete(nodeId))
+  pendingInstallTokens.set(nodeId, request)
+  return request
+}
+
+const expireRegistration = () => {
+  clearTimeout(registrationTimer)
+  registration.value = null
+  copyFeedback.value = ''
+  installError.value = '令牌已过期，请重新生成。'
+}
+
+const prepareInstall = async () => {
+  const node = currentInstallNode.value
+  if (!node || installLoading.value) return
+  const session = installSession
+  const current = () => session === installSession && installDialogVisible.value
+  installLoading.value = true
+  installError.value = ''
+
+  try {
+    const config = await getPublicSystemConfig().catch(() => null)
+    if (!current()) return
+    if (!config) {
+      installError.value = '无法读取面板注册地址，请重试。'
+      return
+    }
+    const address = config.data?.reportAddress?.trim()
+    if (!address) {
+      installError.value = '请在面板配置中设置 report.address 后重试。'
+      return
+    }
+
+    const result = await requestInstallToken(node.id).catch(() => null)
+    if (!current()) return
+    const token = result?.data?.token
+    const expiresAt = result?.data?.expires_at
+    if (!token || !expiresAt) {
+      installError.value = '签发注册令牌失败，请重试。'
+      return
+    }
+    const remaining = Date.parse(expiresAt) - Date.now()
+    if (!(remaining > 0)) {
+      expireRegistration()
+      return
+    }
+    registration.value = { address, token, expiresAt }
+    registrationTimer = setTimeout(expireRegistration, remaining)
+  } finally {
+    if (current()) installLoading.value = false
+  }
 }
 
 const copyInstallCommand = async () => {
-  if (!installCommand.value || Date.parse(registrationExpiresAt.value) <= Date.now()) return
-  try {
-    await navigator.clipboard.writeText(installCommand.value)
-    ElMessage.success('安装命令已复制')
-  } catch {
-    ElMessage.error('复制失败，请手动选择命令')
+  const command = installCommand.value
+  const field = installCommandField.value
+  if (!command || !field) return
+  if (Date.parse(registration.value.expiresAt) <= Date.now()) {
+    expireRegistration()
+    return
   }
+
+  const session = installSession
+  let copied = false
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(command)
+      copied = true
+    } catch {}
+  }
+  if (session !== installSession || !installDialogVisible.value || installCommand.value !== command) return
+  if (!copied) {
+    field.focus({ preventScroll: true })
+    field.select()
+    try {
+      copied = document.execCommand?.('copy') === true
+    } catch {}
+  }
+  copyFeedback.value = copied ? '安装命令已复制' : '已选中安装命令，请使用系统复制功能。'
 }
 
 const fetchData = async (isSilent = false) => {
@@ -566,7 +578,7 @@ const openCreatedNodeInstall = () => {
   if (!createdInstallNode) return
   const row = createdInstallNode
   createdInstallNode = null
-  showInstallCommand(row, true)
+  showInstallCommand(row)
 }
 
 const handleDelete = async (row) => {
@@ -656,24 +668,34 @@ onBeforeUnmount(() => {
   font: 12px/1.6 var(--ops-mono);
 }
 .config-entry .config-code { margin: 0 8px 8px; }
-.install-intro { margin: 0 0 12px; }
-.install-meta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 12px;
+.install-content { display: grid; gap: 16px; min-width: 0; }
+.install-field { display: grid; min-width: 0; gap: 8px; }
+.install-field h3, .install-field label { margin: 0; color: var(--ops-text); font-size: 14px; font-weight: 650; }
+.install-token, .install-command {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ops-border);
   border-radius: 8px;
   background: var(--ops-inset);
-  padding: 12px;
-  margin: 0 0 14px;
+  color: var(--ops-text);
+  overflow-wrap: anywhere;
+  font: 13px/1.6 var(--ops-mono);
 }
-.install-meta dt { font-size: 12px; color: var(--ops-muted); }
-.install-meta dd { margin: 3px 0 0; overflow-wrap: anywhere; }
-.install-registration { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-.install-registration p { margin: 0; }
-.install-error { color: var(--ops-danger); margin: 0 0 12px; }
-.install-command { border: 1px solid var(--ops-border); border-radius: 8px; padding: 12px; }
-.install-command-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.install-command-heading h3 { font-size: 14px; margin: 0; }
-.install-command > :not(:first-child) { margin-top: 8px; }
-.install-hint { font-size: 12px; margin: 10px 0 0; }
+.install-token { color: var(--ops-accent); user-select: all; }
+.install-command { resize: vertical; white-space: pre-wrap; }
+.install-feedback { margin: 0; padding: 12px 0; }
+.install-error { color: var(--ops-danger); }
+.install-copy-feedback { margin: 0; color: var(--ops-accent); font-size: 13px; }
+.install-hint { margin: 0; font-size: 12px; }
+.install-replace-note {
+  margin: 0;
+  padding: 8px 12px;
+  border-inline-start: 2px solid var(--ops-warning);
+  border-radius: 6px;
+  background: var(--ops-inset);
+  color: var(--ops-warning);
+  font-size: 13px;
+}
 </style>
