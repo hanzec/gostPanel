@@ -1,7 +1,10 @@
 services:
   yagp:
-    image: ghcr.io/hanzec/yagp:latest
+    image: &yagp-image ghcr.io/hanzec/yagp:latest
     container_name: yagp
+    depends_on:
+      yagp-config-init:
+        condition: service_completed_successfully
     networks:
       - proxy
     volumes:
@@ -79,6 +82,30 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
+
+  yagp-config-init:
+    image: *yagp-image
+    network_mode: none
+    healthcheck:
+      disable: true
+    labels:
+      traefik.enable: "false"
+    # Mount elsewhere so the bundled template under /app/config stays visible.
+    volumes:
+      - type: bind
+        source: ${PWD:-.}/config
+        target: /config-init
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        target=/config-init/config.yaml
+        if [ -e "$$target" ] || [ -L "$$target" ]; then
+          exit 0
+        fi
+        tmp=$$(mktemp /config-init/.config.yaml.XXXXXX)
+        trap 'rm -f "$$tmp"' EXIT
+        cat /app/config/config.yaml > "$$tmp"
+        mv -nT "$$tmp" "$$target"
 
 networks:
   proxy:

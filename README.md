@@ -62,7 +62,7 @@ TRAEFIK_HTTPS_ENTRYPOINT=websecure
 AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
 ```
 
-按下文配置 [Authentik 正向认证](#authentik-正向认证) 和 [节点注册与上报](#启用节点注册和流量上报)，再从当前目录拉取并启动 Compose 中指定的 [GHCR 镜像](https://github.com/hanzec/yagp/pkgs/container/yagp)：
+从部署目录启动 Compose 中指定的 [GHCR 镜像](https://github.com/hanzec/yagp/pkgs/container/yagp)。
 
 ```bash
 docker compose up -d
@@ -70,7 +70,9 @@ docker compose up -d
 
 镜像支持 Linux amd64 和 arm64。要固定版本，可在 `docker-compose.yml` 中将 `latest` 改为指定标签。
 
-Compose 将当前目录的 `config/`、`data/` 和 `logs/` 分别绑定到容器中的 `/app/config`、`/app/data` 和 `/app/logs`。`config/` 只读，数据库和日志可写。从其他目录使用 `-f` 指定 Compose 文件时，确保 `PWD` 环境变量指向所需目录，并在其中准备 `config/config.yaml`（PowerShell 可用 `$env:PWD = (Get-Location).Path`）。如果未设置 `PWD`，则使用 Compose 项目目录。
+Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板容器中的 `/app/config`、`/app/data` 和 `/app/logs`。启动时，初始化服务会在 `config/config.yaml` 缺失时从镜像复制模板。面板以只读方式挂载配置，已有配置会继续使用。
+
+按下文配置 [Authentik 正向认证](#authentik-正向认证) 和 [节点注册与上报](#启用节点注册和流量上报)，保存后执行 `docker compose restart yagp`。从其他目录使用 `-f` 指定 Compose 文件时，将 `PWD` 环境变量设为部署目录。PowerShell 可用 `$env:PWD = (Get-Location).Path`。如果未设置 `PWD`，则使用 Compose 项目目录。
 
 面板网页、API 和节点 gRPC 共用 Traefik 的 HTTPS 域名和 `443` 端口。Compose 不向宿主机发布面板的 `39100` 或 `39101` 端口。
 
