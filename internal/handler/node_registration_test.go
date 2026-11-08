@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.GostNode{}, &model.OperationLog{}); err != nil {
+	if err := db.AutoMigrate(&model.GostNode{}, &model.OperationLog{}, &model.GostAllowlist{}); err != nil {
 		t.Fatal(err)
 	}
 	node := model.GostNode{Name: "test", Port: 39000}
@@ -173,6 +174,53 @@ func TestNodeRegistration(t *testing.T) {
 	newAuth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(first.reply.GetUsername(), first.reply.GetPassword()))
 	if _, err := client.Report(ctx, report, newAuth); err != nil {
 		t.Fatalf("report using refreshed credentials: %v", err)
+	}
+	allowlist := service.NewGostAllowlistService(db)
+	if _, err := allowlist.Update(ctx, []uint{node.ID}); err != nil {
+		t.Fatal(err)
+	}
+	ipUpdate := &nodegrpc.NodeIPsRequest{NodeId: uint64(node.ID), Ipv6: "2001:db8::8"}
+	if _, err := client.UpdateNodeIPs(ctx, ipUpdate); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("IP update without credentials = %v", err)
+	}
+	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, initialAuth); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("IP update using rotated credentials = %v", err)
+	}
+	ipUpdate.Ipv4 = "2001:db8::9"
+	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("IP update with wrong address family = %v", err)
+	}
+	assertIPs := func(address, ipv4, ipv6 string, allowed []string) {
+		t.Helper()
+		if err := db.First(&enrolled, node.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if enrolled.Address != address || enrolled.IPv4 != ipv4 || enrolled.IPv6 != ipv6 {
+			t.Fatalf("stored address, IPv4, IPv6 = %q, %q, %q; want %q, %q, %q", enrolled.Address, enrolled.IPv4, enrolled.IPv6, address, ipv4, ipv6)
+		}
+		config, err := allowlist.Get(ctx)
+		if err != nil || !slices.Equal(config.NodeIDs, []uint{node.ID}) || !slices.Equal(config.Addresses, allowed) {
+			t.Fatalf("resolved allowlist = %+v, err = %v; want %v for the same node", config, err, allowed)
+		}
+	}
+	assertIPs("2001:db8::7", "", "2001:db8::7", []string{"2001:db8::7"})
+	ipUpdate.Ipv4 = ""
+	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); err != nil {
+		t.Fatalf("IP update using current credentials: %v", err)
+	}
+	assertIPs("2001:db8::8", "", "2001:db8::8", []string{"2001:db8::8"})
+	ipUpdate.Ipv4, ipUpdate.Ipv6 = "198.51.100.9", ""
+	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); err != nil {
+		t.Fatalf("IP update with IPv4 only: %v", err)
+	}
+	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::8", []string{"198.51.100.9", "2001:db8::8"})
+	ipUpdate.Ipv4, ipUpdate.Ipv6 = "", "2001:db8::a"
+	if _, err := client.UpdateNodeIPs(ctx, ipUpdate, newAuth); err != nil {
+		t.Fatalf("IP update with IPv6 only: %v", err)
+	}
+	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::a", []string{"198.51.100.9", "2001:db8::a"})
+	if enrolled.Password != first.reply.GetPassword() || enrolled.TLSCertificatePEM != certPEM || enrolled.RegistrationTokenHash != "" {
+		t.Fatal("updating IPs changed the enrollment state")
 	}
 	requestTemplate := &nodegrpc.NftTemplateRequest{NodeId: reply.GetNodeId()}
 	if _, err := client.GetNftTemplate(ctx, requestTemplate); status.Code(err) != codes.Unauthenticated {

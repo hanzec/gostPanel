@@ -68,6 +68,28 @@ func (r *NodeRepository) ConsumeRegistrationToken(ctx context.Context, node *mod
 	})
 }
 
+func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string) error {
+	updates := make(map[string]any)
+	if ipv6 != "" && ipv6 != node.IPv6 {
+		updates["ipv6"] = ipv6
+		updates["address"] = gorm.Expr("COALESCE(NULLIF(ipv4, ''), ?)", ipv6)
+	}
+	if ipv4 != "" && ipv4 != node.IPv4 {
+		updates["ipv4"] = ipv4
+		updates["address"] = ipv4
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	// Re-enrollment rotates the password. Don't apply an in-flight report from the previous enrollment.
+	result := r.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Model(&model.GostNode{}).
+		Where("id = ? AND password = ?", node.ID, node.Password).Updates(updates)
+	if result.Error == nil && result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
+}
+
 // Delete 删除节点
 func (r *NodeRepository) Delete(id uint) error {
 	return r.DB.Delete(&model.GostNode{}, id).Error

@@ -30,7 +30,7 @@ func (s *GostAllowlistService) Get(ctx context.Context) (model.GostAllowlist, er
 	if err := s.db.WithContext(ctx).Find(&config, gostAllowlistID).Error; err != nil {
 		return model.GostAllowlist{}, err
 	}
-	// Selections survive re-registration, so resolve their current addresses on each sync.
+	// Nodes can report new IPs at runtime; resolve their current addresses on each sync.
 	addresses, err := s.resolveAddresses(ctx, config.NodeIDs, false)
 	if err != nil {
 		return model.GostAllowlist{}, err
@@ -66,7 +66,7 @@ func (s *GostAllowlistService) resolveAddresses(ctx context.Context, nodeIDs []u
 	}
 	for _, node := range nodes {
 		if strict && node.IPv4 == "" && node.IPv6 == "" {
-			return nil, bizerrors.New(40000, fmt.Sprintf("节点 %q 暂无注册 IP，请先注册该节点", node.Name), http.StatusBadRequest)
+			return nil, bizerrors.New(40000, fmt.Sprintf("节点 %q 暂无 IP，请先注册节点或等待已注册的节点上报", node.Name), http.StatusBadRequest)
 		}
 		if node.IPv4 != "" {
 			addresses = append(addresses, node.IPv4)

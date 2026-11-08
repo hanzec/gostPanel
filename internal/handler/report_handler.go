@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"gorm.io/gorm"
 )
 
@@ -62,23 +63,38 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 	}, nil
 }
 
+func (h *ReportHandler) UpdateNodeIPs(ctx context.Context, request *nodegrpc.NodeIPsRequest) (*emptypb.Empty, error) {
+	node, err := h.authenticateNode(ctx, request.GetNodeId())
+	if err != nil {
+		return nil, err
+	}
+	ipv4, ipv6, err := reportedIPs(request.GetIpv4(), request.GetIpv6())
+	if err != nil {
+		return nil, err
+	}
+	if ipv4 == "" && ipv6 == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing node IP addresses")
+	}
+	if err := h.nodes.UpdateIPs(ctx, node, ipv4, ipv6); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
+		}
+		logger.Errorf("更新节点 %d IP 失败: %v", node.ID, err)
+		return nil, status.Error(codes.Internal, "could not update node IP addresses")
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func registrationIPs(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (string, string, error) {
-	ipv4, valid := parseReportedIP(request.GetIpv4(), 32)
-	if !valid {
-		return "", "", status.Error(codes.InvalidArgument, "invalid registration IPv4")
-	}
-	ipv6, valid := parseReportedIP(request.GetIpv6(), 128)
-	if !valid {
-		return "", "", status.Error(codes.InvalidArgument, "invalid registration IPv6")
-	}
-	if ipv4 != "" || ipv6 != "" {
-		return ipv4, ipv6, nil
+	ipv4, ipv6, err := reportedIPs(request.GetIpv4(), request.GetIpv6())
+	if err != nil || ipv4 != "" || ipv6 != "" {
+		return ipv4, ipv6, err
 	}
 	// A registration proxy can have a different address from the node itself.
 	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
 		endpoint, err := netip.ParseAddrPort(p.Addr.String())
 		ip := endpoint.Addr().Unmap()
-		if err == nil && isRegistrationIP(ip) {
+		if err == nil && isNodeIP(ip) {
 			if ip.Is4() {
 				return ip.String(), "", nil
 			}
@@ -88,19 +104,31 @@ func registrationIPs(ctx context.Context, request *nodegrpc.RegisterNodeRequest)
 	return "", "", nil
 }
 
+func reportedIPs(v4, v6 string) (string, string, error) {
+	ipv4, valid := parseReportedIP(v4, 32)
+	if !valid {
+		return "", "", status.Error(codes.InvalidArgument, "invalid node IPv4")
+	}
+	ipv6, valid := parseReportedIP(v6, 128)
+	if !valid {
+		return "", "", status.Error(codes.InvalidArgument, "invalid node IPv6")
+	}
+	return ipv4, ipv6, nil
+}
+
 func parseReportedIP(value string, bits int) (string, bool) {
 	if value == "" {
 		return "", true
 	}
 	ip, err := netip.ParseAddr(value)
 	ip = ip.Unmap()
-	if err != nil || ip.BitLen() != bits || !isRegistrationIP(ip) {
+	if err != nil || ip.BitLen() != bits || !isNodeIP(ip) {
 		return "", false
 	}
 	return ip.String(), true
 }
 
-func isRegistrationIP(ip netip.Addr) bool {
+func isNodeIP(ip netip.Addr) bool {
 	return ip.Zone() == "" && (ip.IsGlobalUnicast() || ip.IsLoopback())
 }
 

@@ -92,11 +92,18 @@ func Run(ctx context.Context, cfg Config) error {
 	})
 	observation := grpc.NewServer()
 	defer observation.Stop()
+	panel := nodegrpc.NewPanelClient(reportConn)
 	observer.RegisterObserverServer(observation, &observerServer{
 		nodeID: cfg.NodeID,
 		token:  nodegrpc.ObserverToken(cfg.Username, cfg.Password),
-		panel:  nodegrpc.NewPanelClient(reportConn),
+		panel:  panel,
 	})
+
+	ipTicks := time.NewTicker(5 * time.Minute)
+	defer ipTicks.Stop()
+	reportCtx, cancelReports := context.WithCancel(ctx)
+	defer cancelReports()
+	go reportPublicIPChanges(reportCtx, cfg.NodeID, panel, DetectPublicIPs, ipTicks.C)
 
 	serveErrors := make(chan error, 2)
 	go func() { serveErrors <- control.Serve(controlListener) }()

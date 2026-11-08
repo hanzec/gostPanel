@@ -86,7 +86,7 @@ func registerNode(ctx context.Context, address, token, stateDir, output string) 
 		return 0, err
 	}
 	defer conn.Close()
-	ipv4, ipv6 := detectPublicIPs(ctx)
+	ipv4, ipv6 := nodebridge.DetectPublicIPs(ctx)
 	rpcCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	reply, err := nodegrpc.NewPanelClient(conn).RegisterNode(rpcCtx, &nodegrpc.RegisterNodeRequest{

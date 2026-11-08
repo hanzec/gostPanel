@@ -354,6 +354,7 @@ const (
 	Panel_Report_FullMethodName         = "/yagp.node.v1.Panel/Report"
 	Panel_RegisterNode_FullMethodName   = "/yagp.node.v1.Panel/RegisterNode"
 	Panel_GetNftTemplate_FullMethodName = "/yagp.node.v1.Panel/GetNftTemplate"
+	Panel_UpdateNodeIPs_FullMethodName  = "/yagp.node.v1.Panel/UpdateNodeIPs"
 )
 
 // PanelClient is the client API for Panel service.
@@ -363,6 +364,7 @@ type PanelClient interface {
 	Report(ctx context.Context, in *ReportRequest, opts ...grpc.CallOption) (*proto.ObserveReply, error)
 	RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeReply, error)
 	GetNftTemplate(ctx context.Context, in *NftTemplateRequest, opts ...grpc.CallOption) (*NftConfig, error)
+	UpdateNodeIPs(ctx context.Context, in *NodeIPsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type panelClient struct {
@@ -403,6 +405,16 @@ func (c *panelClient) GetNftTemplate(ctx context.Context, in *NftTemplateRequest
 	return out, nil
 }
 
+func (c *panelClient) UpdateNodeIPs(ctx context.Context, in *NodeIPsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, Panel_UpdateNodeIPs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PanelServer is the server API for Panel service.
 // All implementations must embed UnimplementedPanelServer
 // for forward compatibility.
@@ -410,6 +422,7 @@ type PanelServer interface {
 	Report(context.Context, *ReportRequest) (*proto.ObserveReply, error)
 	RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeReply, error)
 	GetNftTemplate(context.Context, *NftTemplateRequest) (*NftConfig, error)
+	UpdateNodeIPs(context.Context, *NodeIPsRequest) (*emptypb.Empty, error)
 	mustEmbedUnimplementedPanelServer()
 }
 
@@ -428,6 +441,9 @@ func (UnimplementedPanelServer) RegisterNode(context.Context, *RegisterNodeReque
 }
 func (UnimplementedPanelServer) GetNftTemplate(context.Context, *NftTemplateRequest) (*NftConfig, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetNftTemplate not implemented")
+}
+func (UnimplementedPanelServer) UpdateNodeIPs(context.Context, *NodeIPsRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateNodeIPs not implemented")
 }
 func (UnimplementedPanelServer) mustEmbedUnimplementedPanelServer() {}
 func (UnimplementedPanelServer) testEmbeddedByValue()               {}
@@ -504,6 +520,24 @@ func _Panel_GetNftTemplate_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Panel_UpdateNodeIPs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NodeIPsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PanelServer).UpdateNodeIPs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Panel_UpdateNodeIPs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PanelServer).UpdateNodeIPs(ctx, req.(*NodeIPsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Panel_ServiceDesc is the grpc.ServiceDesc for Panel service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -522,6 +556,10 @@ var Panel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetNftTemplate",
 			Handler:    _Panel_GetNftTemplate_Handler,
+		},
+		{
+			MethodName: "UpdateNodeIPs",
+			Handler:    _Panel_UpdateNodeIPs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

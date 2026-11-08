@@ -19,7 +19,7 @@ const (
 type GostNode struct {
 	ID       uint       `gorm:"primaryKey" json:"id"`
 	Name     string     `gorm:"size:100;not null" json:"name"`         // 节点名称
-	Address  string     `gorm:"size:255;not null" json:"address"`      // 注册时确定的连接地址
+	Address  string     `gorm:"size:255;not null" json:"address"`      // 面板连接地址，优先使用 IPv4
 	Port     int        `gorm:"not null" json:"port"`                  // 端口
 	Username string     `gorm:"size:50" json:"username"`               // API 认证用户名
 	Password string     `gorm:"size:255" json:"-"`                     // API 认证密码

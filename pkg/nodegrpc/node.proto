@@ -80,8 +80,15 @@ message RegisterNodeReply {
   uint32 control_port = 4;
 }
 
+message NodeIPsRequest {
+  uint64 node_id = 1;
+  string ipv4 = 2;
+  string ipv6 = 3;
+}
+
 service Panel {
   rpc Report(ReportRequest) returns (proto.ObserveReply);
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeReply);
   rpc GetNftTemplate(NftTemplateRequest) returns (NftConfig);
+  rpc UpdateNodeIPs(NodeIPsRequest) returns (google.protobuf.Empty);
 }

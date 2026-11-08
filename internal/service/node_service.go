@@ -176,6 +176,10 @@ func registrationTokenHash(token string) string {
 	return hex.EncodeToString(hash[:])
 }
 
+func (s *NodeService) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string) error {
+	return s.nodeRepo.UpdateIPs(ctx, node, ipv4, ipv6)
+}
+
 // Delete 删除节点
 // 删除前会检查节点是否存在以及是否有关联的转发规则
 func (s *NodeService) Delete(id uint, username, ip, userAgent string) error {
