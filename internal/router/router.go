@@ -14,19 +14,21 @@ import (
 
 // Router 路由配置
 type Router struct {
-	db        *gorm.DB
-	adminAuth gin.HandlerFunc
+	db          *gorm.DB
+	adminAuth   gin.HandlerFunc
+	nodeUpgrade *service.NodeUpgradeService
 }
 
 // NewRouter 创建路由实例
-func NewRouter(db *gorm.DB, cfg config.AuthentikConfig) (*Router, error) {
+func NewRouter(db *gorm.DB, cfg config.AuthentikConfig, nodeUpgrade *service.NodeUpgradeService) (*Router, error) {
 	adminAuth, err := middleware.NewAuthentikAuth(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return &Router{
-		db:        db,
-		adminAuth: adminAuth,
+		db:          db,
+		adminAuth:   adminAuth,
+		nodeUpgrade: nodeUpgrade,
 	}, nil
 }
 
@@ -63,7 +65,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 	backupService := service.NewBackupService(r.db)
 
 	// 初始化控制器
-	nodeHandler := handler.NewNodeHandler(nodeService)
+	nodeHandler := handler.NewNodeHandler(nodeService, r.nodeUpgrade)
 	ruleHandler := handler.NewRuleHandler(ruleService)
 	tunnelHandler := handler.NewTunnelHandler(tunnelService)
 	statsHandler := handler.NewStatsHandler(statsService)
@@ -89,6 +91,9 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.PUT("/nodes/:id", nodeHandler.Update)
 		authRoutes.DELETE("/nodes/:id", nodeHandler.Delete)
 		authRoutes.GET("/nodes/:id/config", nodeHandler.GetConfig)
+		authRoutes.GET("/nodes/:id/upgrade", nodeHandler.GetUpgrade)
+		authRoutes.PUT("/nodes/:id/upgrade", nodeHandler.SetUpgradePolicy)
+		authRoutes.POST("/nodes/:id/upgrade/:component", nodeHandler.StartUpgrade)
 		authRoutes.GET("/nodes/:id/gost/service", nodeHandler.GostServiceStatus)
 		authRoutes.POST("/nodes/:id/gost/restart", nodeHandler.RestartGostService)
 		authRoutes.GET("/nodes/:id/gost/logs", nodeHandler.GostLogs)

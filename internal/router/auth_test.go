@@ -9,6 +9,7 @@ import (
 	"yagp/internal/config"
 	"yagp/internal/dto"
 	"yagp/internal/model"
+	"yagp/internal/service"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
@@ -40,7 +41,7 @@ func TestAdminRouteBoundary(t *testing.T) {
 	routes, err := NewRouter(db, config.AuthentikConfig{
 		TrustedProxies: []string{"192.0.2.20"},
 		AdminGroup:     "yagp-admins",
-	})
+	}, service.NewNodeUpgradeService(db))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +62,9 @@ func TestAdminRouteBoundary(t *testing.T) {
 		{http.MethodGet, "/api/v1/nodes/1/gost/service", "", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v1/nodes/1/gost/logs", "staff", http.StatusForbidden},
 		{http.MethodPost, "/api/v1/nodes/1/gost/restart", "staff", http.StatusForbidden},
+		{http.MethodGet, "/api/v1/nodes/1/upgrade", "", http.StatusUnauthorized},
+		{http.MethodPut, "/api/v1/nodes/1/upgrade", "staff", http.StatusForbidden},
+		{http.MethodPost, "/api/v1/nodes/1/upgrade/gost", "staff", http.StatusForbidden},
 		{http.MethodGet, "/api/v1/nodes/1/nft", "", http.StatusUnauthorized},
 		{http.MethodPut, "/api/v1/nodes/1/nft", "staff", http.StatusForbidden},
 		{http.MethodPost, "/api/v1/nodes/1/registration-token", "", http.StatusUnauthorized},

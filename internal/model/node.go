@@ -15,6 +15,11 @@ const (
 	NodeStatusError   NodeStatus = "error"   // 错误
 )
 
+type NodeUpgradePolicy struct {
+	AutoUpgradeGost   bool `gorm:"not null;default:false" json:"auto_upgrade_gost"`
+	AutoUpgradeDaemon bool `gorm:"not null;default:false" json:"auto_upgrade_daemon"`
+}
+
 // GostNode Gost 节点模型
 type GostNode struct {
 	ID       uint       `gorm:"primaryKey" json:"id"`
@@ -27,9 +32,10 @@ type GostNode struct {
 	IPv4     string     `gorm:"column:ipv4;size:45" json:"ipv4"`
 	IPv6     string     `gorm:"column:ipv6;size:45" json:"ipv6"`
 
-	RegistrationTokenHash string     `gorm:"size:64" json:"-"`
-	RegistrationExpiresAt *time.Time `json:"-"`
-	TLSCertificatePEM     string     `gorm:"type:text" json:"-"`
+	RegistrationTokenHash string            `gorm:"size:64" json:"-"`
+	RegistrationExpiresAt *time.Time        `json:"-"`
+	TLSCertificatePEM     string            `gorm:"type:text" json:"-"`
+	UpgradePolicy         NodeUpgradePolicy `gorm:"embedded" json:"-"`
 
 	// 流量统计
 	TotalBytes  int64 `gorm:"default:0" json:"total_bytes"`

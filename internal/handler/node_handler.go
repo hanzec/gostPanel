@@ -13,12 +13,13 @@ import (
 // NodeHandler 节点控制器
 // 处理节点相关的 HTTP 请求
 type NodeHandler struct {
-	nodeService *service.NodeService
+	nodeService    *service.NodeService
+	upgradeService *service.NodeUpgradeService
 }
 
 // NewNodeHandler 创建节点控制器
-func NewNodeHandler(nodeService *service.NodeService) *NodeHandler {
-	return &NodeHandler{nodeService: nodeService}
+func NewNodeHandler(nodeService *service.NodeService, upgradeService *service.NodeUpgradeService) *NodeHandler {
+	return &NodeHandler{nodeService: nodeService, upgradeService: upgradeService}
 }
 
 // Create 创建节点

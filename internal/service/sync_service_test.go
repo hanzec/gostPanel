@@ -51,7 +51,7 @@ func TestRuleSyncRetargetsRunningTunnel(t *testing.T) {
 	const original = `{"name":"tunnel-1-chain","metadata":{"retries":2},"hops":[{"name":"hop-0","selector":{"strategy":"fifo"},"nodes":[{"name":"exit-relay","addr":"[2001:db8::8]:8443","connector":{"type":"relay","metadata":{"nodelay":true}},"dialer":{"type":"tls","tls":{"serverName":"relay.example"}}}]}]}`
 	updated := strings.Replace(original, "[2001:db8::8]:8443", "[2001:db8::9]:8443", 1)
 	api := &tunnelSyncNode{t: t, chain: json.RawMessage(original)}
-	entry := startTunnelSyncNode(t, api)
+	entry := startServiceTestNode(t, api)
 	exit := model.GostNode{Name: "exit", Address: "2001:db8::8", Port: 39000, IPv6: "2001:db8::8"}
 	for _, node := range []*model.GostNode{&entry, &exit} {
 		if err := db.Create(node).Error; err != nil {
@@ -153,7 +153,7 @@ func (s *tunnelSyncNode) Execute(ctx context.Context, request *nodegrpc.CommandR
 	return response, nil
 }
 
-func startTunnelSyncNode(t *testing.T, server nodegrpc.NodeServer) model.GostNode {
+func startServiceTestNode(t *testing.T, server nodegrpc.NodeServer) model.GostNode {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

@@ -89,7 +89,8 @@ func main() {
 		logger.Fatalf("反向代理配置无效: %v", err)
 	}
 
-	r, err := router.NewRouter(db, cfg.Authentik)
+	nodeUpgrade := service.NewNodeUpgradeService(db)
+	r, err := router.NewRouter(db, cfg.Authentik, nodeUpgrade)
 	if err != nil {
 		logger.Fatalf("Authentik 配置无效: %v", err)
 	}
@@ -118,9 +119,10 @@ func main() {
 	// 启动规则状态同步服务
 	syncService := service.NewRuleSyncService(db)
 	syncService.Start()
-	rulesetCtx, stopRuleset := context.WithCancel(context.Background())
-	defer stopRuleset()
-	go service.NewGostRulesetService(db).Run(rulesetCtx)
+	backgroundCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	go service.NewGostRulesetService(db).Run(backgroundCtx)
+	go nodeUpgrade.Run(backgroundCtx)
 
 	// 启动自动备份服务
 	backupService := service.NewBackupService(db)
@@ -134,7 +136,7 @@ func main() {
 	logger.Info("yagp 正在关闭...")
 
 	// 停止相关的后台服务
-	stopRuleset()
+	stopBackground()
 	healthService.Stop()
 	syncService.Stop()
 	backupService.Stop()
