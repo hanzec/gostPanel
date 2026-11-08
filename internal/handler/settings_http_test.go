@@ -23,6 +23,20 @@ import (
 	"gorm.io/gorm"
 )
 
+const configuredSystemConfigPayload = `{
+	"email":{"host":"mail.example","port":587,"username":"mail-user","password":"mail-password","fromEmail":"admin@example.org"},
+	"config":{"siteTitle":"Forwarding panel","logoUrl":"https://example.org/logo.svg","copyright":"Example"},
+	"log":{"retentionDays":30,"level":"debug"},
+	"backup":{"autoBackup":true,"retentionCount":1}
+}`
+
+const clearSystemConfigPayload = `{
+	"email":{"host":"","port":0,"username":"","password":"","fromEmail":""},
+	"config":{"siteTitle":"","logoUrl":"","copyright":""},
+	"log":{"retentionDays":0,"level":""},
+	"backup":{"autoBackup":false,"retentionCount":0}
+}`
+
 func TestSystemHTTPSettingsAndRulesets(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
 	f.registerSettings()
@@ -32,12 +46,7 @@ func TestSystemHTTPSettingsAndRulesets(t *testing.T) {
 	}
 
 	f.request(t, "PUT", "/system/config", "{", 400)
-	f.request(t, "PUT", "/system/config", `{
-		"email":{"host":"mail.example","port":587,"username":"mail-user","password":"mail-password","fromEmail":"admin@example.org"},
-		"config":{"siteTitle":"Forwarding panel","logoUrl":"https://example.org/logo.svg","copyright":"Example"},
-		"log":{"retentionDays":30,"level":"debug"},
-		"backup":{"autoBackup":true,"retentionCount":1}
-	}`, 200)
+	f.request(t, "PUT", "/system/config", configuredSystemConfigPayload, 200)
 	full := handlerData[dto.SystemConfigResp](t, f.request(t, "GET", "/system/config", "", 200))
 	if full.Config.SiteTitle != "Forwarding panel" || full.Email.Port != 587 || full.Log.RetentionDays != 30 ||
 		!full.Backup.Supported || !full.Backup.AutoBackup || full.Backup.RetentionCount != 1 {
@@ -70,11 +79,49 @@ func TestSystemHTTPSettingsAndRulesets(t *testing.T) {
 	}
 
 	f.request(t, "PUT", "/system/gost-ruleset", "{", 400)
-	f.request(t, "PUT", "/system/gost-ruleset", fmt.Sprintf(`{"node_ids":[%d]}`, node.ID), 400)
-	f.request(t, "PUT", "/system/gost-ruleset", `{"url":"http://example.org/rules.yaml"}`, 400)
+	f.request(t, "PUT", "/system/gost-ruleset", fmt.Sprintf(`{"url":"","node_ids":[%d]}`, node.ID), 400)
+	f.request(t, "PUT", "/system/gost-ruleset", `{"url":"http://example.org/rules.yaml","node_ids":[]}`, 400)
 	f.request(t, "PUT", "/system/gost-ruleset", `{"url":"","node_ids":[]}`, 200)
 	if rules := handlerData[model.GostRuleset](t, f.request(t, "GET", "/system/gost-ruleset", "", 200)); rules.UpdatedAt.IsZero() || rules.URL != "" || len(rules.NodeIDs) != 0 {
 		t.Fatalf("cleared ruleset: %+v", rules)
+	}
+}
+
+func TestSystemConfigUpdateRequiresExplicitFields(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerSettings()
+	const path = "/system/config"
+	f.request(t, "PUT", path, configuredSystemConfigPayload, 200)
+	before := handlerData[dto.SystemConfigResp](t, f.request(t, "GET", path, "", 200))
+
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"empty object", `{}`},
+		{"null body", `null`},
+		{"omitted section", strings.Replace(configuredSystemConfigPayload, `"log":{"retentionDays":30,"level":"debug"},`, "", 1)},
+		{"null section", strings.Replace(configuredSystemConfigPayload, `"log":{"retentionDays":30,"level":"debug"}`, `"log":null`, 1)},
+		{"empty sections", `{"email":{},"config":{},"log":{},"backup":{}}`},
+		{"omitted email password", strings.Replace(configuredSystemConfigPayload, `"password":"mail-password",`, "", 1)},
+		{"omitted site title", strings.Replace(configuredSystemConfigPayload, `"siteTitle":"Forwarding panel",`, "", 1)},
+		{"null log retention", strings.Replace(configuredSystemConfigPayload, `"retentionDays":30`, `"retentionDays":null`, 1)},
+		{"omitted backup switch", strings.Replace(configuredSystemConfigPayload, `"autoBackup":true,`, "", 1)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f.request(t, "PUT", path, test.body, 400)
+			after := handlerData[dto.SystemConfigResp](t, f.request(t, "GET", path, "", 200))
+			if after != before {
+				t.Fatal("rejected update changed system config")
+			}
+		})
+	}
+
+	f.request(t, "PUT", path, clearSystemConfigPayload, 200)
+	cleared := handlerData[dto.SystemConfigResp](t, f.request(t, "GET", path, "", 200))
+	if cleared != (dto.SystemConfigResp{Backup: dto.BackupConfigResp{Supported: true}}) {
+		t.Fatal("explicit empty values did not clear system config")
 	}
 }
 

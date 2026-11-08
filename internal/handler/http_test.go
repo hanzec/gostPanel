@@ -313,7 +313,7 @@ func TestHTTPReportsUnavailableDatabase(t *testing.T) {
 	} {
 		f.request(t, "GET", path, "", 500)
 	}
-	f.request(t, "PUT", "/system/config", "{}", 500)
+	f.request(t, "PUT", "/system/config", clearSystemConfigPayload, 500)
 }
 
 func TestForwardingHTTPStartIsIdempotent(t *testing.T) {

@@ -26,14 +26,14 @@ func (h *GostRulesetHandler) Get(c *gin.Context) {
 
 func (h *GostRulesetHandler) Update(c *gin.Context) {
 	var req struct {
-		URL     string `json:"url" binding:"max=4096"`
-		NodeIDs []uint `json:"node_ids" binding:"max=500"`
+		URL     *string `json:"url" binding:"required,max=4096"`
+		NodeIDs []uint  `json:"node_ids" binding:"required,max=500"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "规则集配置无效")
 		return
 	}
-	ruleset, err := h.service.Update(c.Request.Context(), req.URL, req.NodeIDs)
+	ruleset, err := h.service.Update(c.Request.Context(), *req.URL, req.NodeIDs)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
