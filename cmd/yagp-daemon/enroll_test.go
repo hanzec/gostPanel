@@ -69,21 +69,11 @@ func TestRegisterNodeWritesEnrolledCredentials(t *testing.T) {
 	stateDir := t.TempDir()
 	token := "42." + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	detect := func(context.Context) (string, string) { return "192.0.2.15", "2001:db8::15" }
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlPort := uint32(listener.Addr().(*net.TCPAddr).Port)
-	_ = listener.Close()
-
 	panel := enrollmentPanel{register: func(req *nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
 		if req.Token != token || req.Ipv4 != "192.0.2.15" || req.Ipv6 != "2001:db8::15" {
 			t.Errorf("unexpected registration token or addresses: %s %s", req.Ipv4, req.Ipv6)
 		}
-		if err := nodegrpc.ValidateNodeCertificate(req.NodeCertificatePem); err != nil {
-			t.Errorf("invalid node certificate: %v", err)
-		}
-		return &nodegrpc.RegisterNodeReply{NodeId: 42, Username: "registered", Password: "test-secret", ControlPort: controlPort}, nil
+		return &nodegrpc.RegisterNodeReply{NodeId: 42, Username: "registered", Password: "test-secret"}, nil
 	}}
 	address, ca := testPanel(t, panel)
 	t.Setenv("YAGP_PANEL_CA_FILE", ca)
@@ -102,11 +92,9 @@ func TestRegisterNodeWritesEnrolledCredentials(t *testing.T) {
 		!nodebridge.IsLoopbackAddress(cfg.AdminAddress) || !nodebridge.IsLoopbackAddress(cfg.ObserverListen) {
 		t.Fatalf("invalid staged node configuration: %+v", cfg)
 	}
-	if cfg.TLSCertFile != filepath.Join(stateDir, "42", "node.crt") || cfg.TLSKeyFile != filepath.Join(stateDir, "42", "node.key") {
-		t.Fatalf("incorrect installed certificate paths: %s %s", cfg.TLSCertFile, cfg.TLSKeyFile)
-	}
-	if _, err := tls.LoadX509KeyPair(filepath.Join(output, "node.crt"), filepath.Join(output, "node.key")); err != nil {
-		t.Fatalf("invalid staged key pair: %v", err)
+	entries, err := os.ReadDir(output)
+	if err != nil || len(entries) != 2 || entries[0].Name() != "gost.yaml" || entries[1].Name() != "node.yaml" {
+		t.Fatalf("unexpected staged files: %v, %v", entries, err)
 	}
 	gost, err := os.ReadFile(filepath.Join(output, "gost.yaml"))
 	if err != nil || !strings.Contains(string(gost), cfg.AdminAddress) || !strings.Contains(string(gost), "pathPrefix: /api") {
@@ -146,8 +134,8 @@ func TestRegisterNodeRejectsInvalidInputAndPanelReply(t *testing.T) {
 		err      error
 		want     string
 	}{
-		{"wrong node", &nodegrpc.RegisterNodeReply{NodeId: 41, Username: "valid", Password: "valid", ControlPort: 42}, nil, "invalid node enrollment data"},
-		{"invalid credentials", &nodegrpc.RegisterNodeReply{NodeId: 42, Username: "bad:name", Password: "valid", ControlPort: 42}, nil, "invalid node enrollment data"},
+		{"wrong node", &nodegrpc.RegisterNodeReply{NodeId: 41, Username: "valid", Password: "valid"}, nil, "invalid node enrollment data"},
+		{"invalid credentials", &nodegrpc.RegisterNodeReply{NodeId: 42, Username: "bad:name", Password: "valid"}, nil, "invalid node enrollment data"},
 		{"rejected token", nil, status.Error(codes.PermissionDenied, "token expired"), "token expired"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -165,7 +153,7 @@ func TestRegisterNodeRejectsInvalidInputAndPanelReply(t *testing.T) {
 	}
 }
 
-func TestPanelCASelectionAndEnrollmentPortConflict(t *testing.T) {
+func TestPanelCASelection(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("YAGP_PANEL_CA_FILE", "")
 	if got, err := panelCAFile(dir); err != nil || got != "" {
@@ -181,13 +169,5 @@ func TestPanelCASelectionAndEnrollmentPortConflict(t *testing.T) {
 	token := "42." + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	if _, err := registerNode(context.Background(), "127.0.0.1:42", token, dir, t.TempDir(), nil); err == nil || !strings.Contains(err.Error(), "load panel CA") {
 		t.Fatalf("invalid local CA = %v", err)
-	}
-	lis, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lis.Close()
-	if err := writeEnrollment(t.TempDir(), nodebridge.Config{ControlListen: lis.Addr().String()}, nil, nil); err == nil {
-		t.Fatal("enrollment overwrote an occupied control port")
 	}
 }

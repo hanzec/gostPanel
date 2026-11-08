@@ -18,7 +18,7 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 ### 安装新节点
 
-先在面板配置 [TLS 注册和上报地址](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写 gRPC 端口。同一台服务器上的多个节点使用不同端口。配置了 `report.address` 后，添加节点会打开安装窗口并生成一次性令牌。点击 **复制命令**，在目标 Linux 主机以 root 身份执行。
+先在面板配置 [TLS 注册和上报地址](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写节点名称。配置了 `report.address` 后，添加节点会打开安装窗口并生成一次性令牌。点击 **复制命令**，在目标 Linux 主机以 root 身份执行。
 
 也可用下面的模板，把地址和令牌替换为面板提供的值。令牌有效期为 15 分钟，注册成功后立即失效。重新签发会撤销上一枚未使用的令牌。[节点安装脚本](./scripts/install_node.sh)
 
@@ -126,9 +126,20 @@ database:
 
 ### 启用节点注册和流量上报
 
-`report.address` 是节点注册、上报和获取 nft 模板时使用的地址，也是安装命令中 `--panel-address` 的值。通过 Traefik 时使用 `主机:端口/api/v1/grpc`，直连时使用 `主机:端口`。两种方式都无需添加 `https://`。
+`report.address` 是节点主动连接面板的地址，也是安装命令中 `--panel-address` 的值。通过 Traefik 时使用 `主机:443/api/v1/grpc`，直连时使用 `主机:端口`。两种方式都无需添加 `https://`。
 
-**Docker Compose：** Traefik 在 `443` 终止 TLS。节点使用 `/api/v1/grpc/<方法>`，例如 `/api/v1/grpc/RegisterNode`。Traefik 将该路径改写为面板 gRPC 服务的原生路径 `/yagp.v1/RegisterNode`，再通过 HTTP/2（h2c）转发到 Docker 网络内的 `39101`。这四个 RPC 使用节点认证，网页和管理 API 仍使用 Authentik。面板无需单独的上报证书。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
+**Docker Compose：** Traefik 在 `443` 终止 TLS，并把 `/api/v1/grpc/Connect` 改写为 `/yagp.v1/Connect`，通过 HTTP/2（h2c）转发到 Docker 网络内的 `39101`。节点主动建立一条双向流，流量和 IP 上报、管理命令和执行结果都走这条流。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
+
+在 Traefik 的静态配置中，将 HTTPS 入口的请求读取和响应写入超时设为 `0s`。读取超时默认是 60 秒，双向流的请求体会持续打开。[Traefik 入口超时配置](https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#configuration-options)
+
+```yaml
+entryPoints:
+  websecure:
+    transport:
+      respondingTimeouts:
+        readTimeout: 0s
+        writeTimeout: 0s
+```
 
 ```yaml
 report:
@@ -137,7 +148,7 @@ report:
   proxy_ip: "172.30.0.2"
 ```
 
-面板和节点需要一起升级到支持 `yagp.v1` 的版本。按[一键升级步骤](#升级已安装节点)升级 `yagp-daemon`。如果节点已使用 `主机:端口/api/v1/grpc`，无需改配置；如果从独立端口迁移到 Traefik，则更新 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 并重启对应服务。若改用公有 CA 签发的证书，清除原来的 `report_ca_file`，让节点使用系统 CA。节点 ID、凭据和节点证书可以继续使用，无需重新注册。
+面板和节点需要一起升级到支持双向流的版本。按[一键升级步骤](#升级已安装节点)在每台节点上运行 `upgrade --node-id`，继续使用原节点 ID 和凭据，无需重新注册。已使用 `主机:443/api/v1/grpc` 的节点可沿用原配置。从面板直连端口迁移到 Traefik 时，更新 `/etc/yagp-daemon/<ID>/node.yaml` 的 `report_address` 并重启服务；如果改用公有 CA 签发的证书，清除原来的 `report_ca_file`。升级后可关闭节点原来的入站 gRPC 管理端口。
 
 **二进制直连部署：** 不设置 `proxy_ip`，给 gRPC 监听器配置证书和私钥。证书须覆盖 `report.address` 中的主机名或 IP，并将监听端口开放给节点。
 
@@ -149,7 +160,7 @@ report:
   key_file: "/etc/gost-panel/panel.key"
 ```
 
-节点先通过一次性 token 注册，之后使用面板发放的节点凭据。面板保存注册时提交的节点证书，并用它验证发往该节点桥的独立 TLS 连接。
+节点先通过一次性 token 注册，之后用面板发放的节点凭据建立双向流。节点验证面板的 TLS 证书。
 
 ---
 
@@ -186,13 +197,13 @@ report:
 
 节点在线后即可创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 `Report` RPC。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
-首次注册时，`yagp-daemon` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `RegisterNode` RPC 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-daemon/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
+首次注册时，`yagp-daemon` 验证面板 TLS 证书，再通过 `RegisterNode` RPC 提交 token 和探测到的 IP。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-daemon/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据。
 
-参照 Komari，`yagp-daemon` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。两种地址均未获取时，面板使用可信 Traefik 转发的节点 IP，或在直连部署中使用注册连接的来源 IP。面板优先使用记录到的 IPv4，其次使用 IPv6。节点的 gRPC 端口须能通过该地址从面板访问。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
+参照 Komari，`yagp-daemon` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。两种地址均未获取时，面板使用可信 Traefik 转发的节点 IP，或在直连部署中使用注册连接的来源 IP。转发和隧道优先使用记录到的 IPv4，其次使用 IPv6。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
 
 `yagp-daemon` 启动时立即探测一次，随后每 5 分钟探测。节点用现有凭据通过 TLS 上报地址变化，面板自动更新连接地址。某一地址族探测失败时保留其上次记录；上报失败则在下一轮重试。[Komari 上报周期](https://komari-monitor.github.io/komari-document/dev/agent.html)
 
-Gost 的管理 Web API 绑定在节点本机。面板通过节点的 TLS gRPC 监听器调用 `yagp.v1` 下的反向管理方法，例如 `/yagp.v1/Execute`。节点注册、上报和反向管理共用 `yagp.v1` 服务名，各自的监听器只处理对应方向的 RPC。Traefik 只对外提供节点注册和上报使用的四个方法。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
+Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `Connect` 双向流下发配置、读取日志和触发升级，节点执行后沿同一条流返回结果。节点断线后会自动重连，进行中的命令会报告连接错误。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
 如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-daemon/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载最新版 `yagp-daemon-linux-<架构>.tar.gz`，可用 `YAGP_DAEMON_VERSION` 指定发布版本。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_DAEMON_BIN=/path/to/yagp-daemon` 指定对应的二进制。
 
@@ -208,7 +219,7 @@ Gost 的管理 Web API 绑定在节点本机。面板通过节点的 TLS gRPC �
 
 在线升级适用于 systemd 节点。面板和节点需要能通过 HTTPS 访问 GitHub。节点校验发布包的 SHA-256，再替换对应的二进制并重启服务。配置、凭据、证书和节点 ID 都会保留。Gost 重启会中断该实例正在转发的连接，新版服务启动检查失败时会尝试恢复旧版。
 
-如果已安装的节点尚不支持在线升级，请先执行 [一键升级命令](#升级已安装节点)。`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 的 systemd 实例，默认使用最新发布包。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 指定版本时，请选择 `0.1.77` 或更新版本。
+如果已安装的节点尚不支持在线升级，请先执行 [一键升级命令](#升级已安装节点)。`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 的 systemd 实例，默认使用最新发布包。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 时，请选择与面板对应的版本。
 
 如果节点仍使用改名前的 `yagp-node-<ID>` 服务，迁移时先停止该服务和 `yagp-gost-<ID>`，并取消旧守护服务的开机启动。将 `/etc/yagp-node/<ID>` 移到 `/etc/yagp-daemon/<ID>`，放入新版 `yagp-daemon`。systemd 选用包内的 `yagp-daemon-systemd-linux-<架构>`，OpenRC 选用 `yagp-daemon-linux-<架构>`。更新 `node.yaml` 的 `tls_cert_file` 和 `tls_key_file`，如 `report_ca_file` 指向已移动的文件，也一并更新。原 ID、凭据和证书可继续使用。
 
@@ -252,7 +263,7 @@ Gost 的管理 Web API 绑定在节点本机。面板通过节点的 TLS gRPC �
 
 发布包以 `yagp-` 开头。面板支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。节点安装包支持 Linux（amd64、arm64）。[查看 yagp Releases](https://github.com/hanzec/yagp/releases)
 
-面板和节点需要一起更新到使用 `yagp.v1` 的版本。通过令牌注册过的节点可继续使用原来的节点 ID、凭据和证书。
+面板和节点需要一起更新到支持 `yagp.v1/Connect` 的版本。通过令牌注册过的节点可继续使用原来的节点 ID 和凭据。
 
 ### 自动版本号
 

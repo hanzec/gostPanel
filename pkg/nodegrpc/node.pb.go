@@ -799,13 +799,12 @@ func (x *ReportRequest) GetObservation() *proto.ObserveRequest {
 }
 
 type RegisterNodeRequest struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	Token              string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
-	NodeCertificatePem string                 `protobuf:"bytes,2,opt,name=node_certificate_pem,json=nodeCertificatePem,proto3" json:"node_certificate_pem,omitempty"`
-	Ipv4               string                 `protobuf:"bytes,3,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
-	Ipv6               string                 `protobuf:"bytes,4,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	Ipv4          string                 `protobuf:"bytes,3,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	Ipv6          string                 `protobuf:"bytes,4,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterNodeRequest) Reset() {
@@ -845,13 +844,6 @@ func (x *RegisterNodeRequest) GetToken() string {
 	return ""
 }
 
-func (x *RegisterNodeRequest) GetNodeCertificatePem() string {
-	if x != nil {
-		return x.NodeCertificatePem
-	}
-	return ""
-}
-
 func (x *RegisterNodeRequest) GetIpv4() string {
 	if x != nil {
 		return x.Ipv4
@@ -871,7 +863,6 @@ type RegisterNodeReply struct {
 	NodeId        uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
 	Password      string                 `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
-	ControlPort   uint32                 `protobuf:"varint,4,opt,name=control_port,json=controlPort,proto3" json:"control_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -925,13 +916,6 @@ func (x *RegisterNodeReply) GetPassword() string {
 		return x.Password
 	}
 	return ""
-}
-
-func (x *RegisterNodeReply) GetControlPort() uint32 {
-	if x != nil {
-		return x.ControlPort
-	}
-	return 0
 }
 
 type NodeIPsRequest struct {
@@ -994,6 +978,92 @@ func (x *NodeIPsRequest) GetIpv6() string {
 	return ""
 }
 
+type StreamFrame struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The sender allocates an ID for each call. Its reply repeats that ID.
+	Id uint64 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	// The full gRPC method name is present only on a call.
+	Method        string `protobuf:"bytes,2,opt,name=method,proto3" json:"method,omitempty"`
+	Payload       []byte `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`
+	Code          int32  `protobuf:"varint,4,opt,name=code,proto3" json:"code,omitempty"`
+	Error         string `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	TimeoutMillis int64  `protobuf:"varint,6,opt,name=timeout_millis,json=timeoutMillis,proto3" json:"timeout_millis,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StreamFrame) Reset() {
+	*x = StreamFrame{}
+	mi := &file_node_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StreamFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StreamFrame) ProtoMessage() {}
+
+func (x *StreamFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StreamFrame.ProtoReflect.Descriptor instead.
+func (*StreamFrame) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *StreamFrame) GetId() uint64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *StreamFrame) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *StreamFrame) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
+func (x *StreamFrame) GetCode() int32 {
+	if x != nil {
+		return x.Code
+	}
+	return 0
+}
+
+func (x *StreamFrame) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *StreamFrame) GetTimeoutMillis() int64 {
+	if x != nil {
+		return x.TimeoutMillis
+	}
+	return 0
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
@@ -1052,21 +1122,26 @@ const file_node_proto_rawDesc = "" +
 	"\x05error\x18\a \x01(\tR\x05error\"a\n" +
 	"\rReportRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x127\n" +
-	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"\x85\x01\n" +
+	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"o\n" +
 	"\x13RegisterNodeRequest\x12\x14\n" +
-	"\x05token\x18\x01 \x01(\tR\x05token\x120\n" +
-	"\x14node_certificate_pem\x18\x02 \x01(\tR\x12nodeCertificatePem\x12\x12\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\x12\x12\n" +
 	"\x04ipv4\x18\x03 \x01(\tR\x04ipv4\x12\x12\n" +
-	"\x04ipv6\x18\x04 \x01(\tR\x04ipv6\"\x87\x01\n" +
+	"\x04ipv6\x18\x04 \x01(\tR\x04ipv6J\x04\b\x02\x10\x03R\x14node_certificate_pem\"x\n" +
 	"\x11RegisterNodeReply\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x03 \x01(\tR\bpassword\x12!\n" +
-	"\fcontrol_port\x18\x04 \x01(\rR\vcontrolPort\"Q\n" +
+	"\bpassword\x18\x03 \x01(\tR\bpasswordJ\x04\b\x04\x10\x05R\fcontrol_port\"Q\n" +
 	"\x0eNodeIPsRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x12\n" +
 	"\x04ipv4\x18\x02 \x01(\tR\x04ipv4\x12\x12\n" +
-	"\x04ipv6\x18\x03 \x01(\tR\x04ipv6B\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
+	"\x04ipv6\x18\x03 \x01(\tR\x04ipv6\"\xa0\x01\n" +
+	"\vStreamFrame\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x16\n" +
+	"\x06method\x18\x02 \x01(\tR\x06method\x12\x18\n" +
+	"\apayload\x18\x03 \x01(\fR\apayload\x12\x12\n" +
+	"\x04code\x18\x04 \x01(\x05R\x04code\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12%\n" +
+	"\x0etimeout_millis\x18\x06 \x01(\x03R\rtimeoutMillisB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var (
 	file_node_proto_rawDescOnce sync.Once
@@ -1080,7 +1155,7 @@ func file_node_proto_rawDescGZIP() []byte {
 	return file_node_proto_rawDescData
 }
 
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_node_proto_goTypes = []any{
 	(*CommandRequest)(nil),       // 0: yagp.node.v1.CommandRequest
 	(*CommandReply)(nil),         // 1: yagp.node.v1.CommandReply
@@ -1099,11 +1174,12 @@ var file_node_proto_goTypes = []any{
 	(*RegisterNodeRequest)(nil),  // 14: yagp.node.v1.RegisterNodeRequest
 	(*RegisterNodeReply)(nil),    // 15: yagp.node.v1.RegisterNodeReply
 	(*NodeIPsRequest)(nil),       // 16: yagp.node.v1.NodeIPsRequest
-	(*proto.ObserveRequest)(nil), // 17: proto.ObserveRequest
+	(*StreamFrame)(nil),          // 17: yagp.node.v1.StreamFrame
+	(*proto.ObserveRequest)(nil), // 18: proto.ObserveRequest
 }
 var file_node_proto_depIdxs = []int32{
 	5,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
-	17, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	18, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	2,  // [2:2] is the sub-list for method output_type
 	2,  // [2:2] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
@@ -1122,7 +1198,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -47,7 +47,7 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	}
 	mustPersist(t, nodes.SetRegistrationToken(ctx, stale.ID, "expired", time.Now().UTC().Add(-time.Hour)))
 	enrolled := model.GostNode{
-		ID: stale.ID, Username: "edge", Password: "first password", TLSCertificatePEM: "certificate",
+		ID: stale.ID, Username: "edge", Password: "first password",
 		Address: "198.51.100.1", IPv4: "198.51.100.1",
 	}
 	if err := nodes.ConsumeRegistrationToken(ctx, &enrolled, "expired"); !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -61,20 +61,18 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	}
 	mustPersist(t, db.Exec("DROP TRIGGER fail_enrollment").Error)
 	mustPersist(t, nodes.ConsumeRegistrationToken(ctx, &enrolled, "first"))
-	if enrolled.Port != stale.Port {
-		t.Fatalf("enrollment returned port %d, want %d", enrolled.Port, stale.Port)
-	}
 	if err := nodes.ConsumeRegistrationToken(ctx, &enrolled, "first"); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("replaying consumed token: %v", err)
 	}
 	mustPersist(t, nodes.UpdateStatus(stale.ID, model.NodeStatusOnline))
 	mustPersist(t, nodes.UpdateLastCheck(stale.ID))
+	legacyPort := stale.Port
 	stale.Name, stale.Remark, stale.Port = "renamed", "saved after enrollment", 39111
 	mustPersist(t, nodes.Update(&stale, nil, nil))
 	current, err := nodes.FindByName("renamed")
 	mustPersist(t, err)
 	if current.Password != enrolled.Password || current.Status != model.NodeStatusOnline || current.LastCheckAt == nil ||
-		current.RegistrationTokenHash != "" || current.RegistrationExpiresAt != nil || current.Port != stale.Port || current.Remark != stale.Remark {
+		current.RegistrationTokenHash != "" || current.RegistrationExpiresAt != nil || current.Port != legacyPort || current.Remark != stale.Remark {
 		t.Fatalf("metadata update overwrote enrollment or health state: %+v", current)
 	}
 

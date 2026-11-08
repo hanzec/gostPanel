@@ -11,14 +11,17 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"yagp/internal/buildinfo"
 	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -29,13 +32,10 @@ type Config struct {
 	NodeID         uint64 `yaml:"node_id"`
 	Username       string `yaml:"username"`
 	Password       string `yaml:"password"`
-	ControlListen  string `yaml:"control_listen"`
 	AdminAddress   string `yaml:"admin_address"`
 	ObserverListen string `yaml:"observer_listen"`
 	ReportAddress  string `yaml:"report_address"`
 	ReportCAFile   string `yaml:"report_ca_file"`
-	TLSCertFile    string `yaml:"tls_cert_file"`
-	TLSKeyFile     string `yaml:"tls_key_file"`
 	NftConfigFile  string `yaml:"-"`
 	ConfigFile     string `yaml:"-"`
 }
@@ -47,21 +47,12 @@ func Run(ctx context.Context, cfg Config) error {
 	if !IsLoopbackAddress(cfg.AdminAddress) || !IsLoopbackAddress(cfg.ObserverListen) {
 		return errors.New("Gost admin and observer addresses must be loopback IP addresses with ports")
 	}
-	controlTLS, err := credentials.NewServerTLSFromFile(cfg.TLSCertFile, cfg.TLSKeyFile)
-	if err != nil {
-		return fmt.Errorf("load node TLS certificate: %w", err)
-	}
-	reportConn, err := connectPanel(cfg)
+	panelConn, err := connectPanel(cfg)
 	if err != nil {
 		return fmt.Errorf("create panel report client: %w", err)
 	}
-	defer reportConn.Close()
+	defer panelConn.Close()
 
-	controlListener, err := net.Listen("tcp", cfg.ControlListen)
-	if err != nil {
-		return fmt.Errorf("listen for node control: %w", err)
-	}
-	defer controlListener.Close()
 	observerListener, err := net.Listen("tcp", cfg.ObserverListen)
 	if err != nil {
 		return fmt.Errorf("listen for local Gost observer: %w", err)
@@ -84,9 +75,7 @@ func Run(ctx context.Context, cfg Config) error {
 		}
 	}
 
-	control := grpc.NewServer(grpc.Creds(controlTLS))
-	defer control.Stop()
-	nodegrpc.RegisterV1Server(control, &controlServer{
+	control := &controlServer{
 		config: cfg,
 		client: &http.Client{
 			Transport: &http.Transport{},
@@ -95,24 +84,25 @@ func Run(ctx context.Context, cfg Config) error {
 				return http.ErrUseLastResponse
 			},
 		},
-	})
+	}
+	defer control.client.CloseIdleConnections()
+	var current atomic.Pointer[nodegrpc.Session]
 	observation := grpc.NewServer()
 	defer observation.Stop()
-	panel := nodegrpc.NewV1Client(reportConn)
 	observer.RegisterObserverServer(observation, &observerServer{
-		nodeID: cfg.NodeID,
-		token:  nodegrpc.ObserverToken(cfg.Username, cfg.Password),
-		panel:  panel,
+		nodeID:  cfg.NodeID,
+		token:   nodegrpc.ObserverToken(cfg.Username, cfg.Password),
+		current: &current,
 	})
+	ready := health.NewServer()
+	ready.SetServingStatus(daemonHealthService+buildinfo.Version, healthpb.HealthCheckResponse_SERVING)
+	healthpb.RegisterHealthServer(observation, ready)
 
-	ipTicks := time.NewTicker(5 * time.Minute)
-	defer ipTicks.Stop()
-	reportCtx, cancelReports := context.WithCancel(ctx)
-	defer cancelReports()
-	go reportPublicIPChanges(reportCtx, cfg.NodeID, panel, DetectPublicIPs, ipTicks.C)
+	channelCtx, cancelChannel := context.WithCancel(ctx)
+	defer cancelChannel()
+	go maintainPanelChannel(channelCtx, cfg.NodeID, nodegrpc.NewV1Client(panelConn), &current, controlDispatcher(control))
 
-	serveErrors := make(chan error, 2)
-	go func() { serveErrors <- control.Serve(controlListener) }()
+	serveErrors := make(chan error, 1)
 	go func() { serveErrors <- observation.Serve(observerListener) }()
 	select {
 	case <-ctx.Done():
@@ -132,7 +122,8 @@ func connectPanel(cfg Config) (*grpc.ClientConn, error) {
 		return nil, fmt.Errorf("load panel report CA: %w", err)
 	}
 	return address.NewClientConn(grpc.WithTransportCredentials(transport),
-		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)))
+		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(5<<20)))
 }
 
 func IsLoopbackAddress(address string) bool {
@@ -146,17 +137,7 @@ type controlServer struct {
 	client *http.Client
 }
 
-func (s *controlServer) authenticate(ctx context.Context) error {
-	if !nodegrpc.MatchCredentials(ctx, s.config.Username, s.config.Password) {
-		return status.Error(codes.Unauthenticated, "invalid node credentials")
-	}
-	return nil
-}
-
 func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
-	if err := s.authenticate(ctx); err != nil {
-		return nil, err
-	}
 	method, path := command.GetMethod(), command.GetPath()
 	if !allowedCommand(method, path) {
 		return nil, status.Error(codes.InvalidArgument, "unsupported Gost command")
@@ -183,10 +164,7 @@ func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRe
 	return &nodegrpc.CommandReply{StatusCode: int32(res.StatusCode), Body: body}, nil
 }
 
-func (s *controlServer) GetObserverEndpoint(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.ObserverEndpoint, error) {
-	if err := s.authenticate(ctx); err != nil {
-		return nil, err
-	}
+func (s *controlServer) GetObserverEndpoint(context.Context, *emptypb.Empty) (*nodegrpc.ObserverEndpoint, error) {
 	return &nodegrpc.ObserverEndpoint{Address: s.config.ObserverListen}, nil
 }
 
@@ -235,16 +213,20 @@ func allowedCommand(method, path string) bool {
 
 type observerServer struct {
 	observer.UnimplementedObserverServer
-	nodeID uint64
-	token  string
-	panel  nodegrpc.V1Client
+	nodeID  uint64
+	token   string
+	current *atomic.Pointer[nodegrpc.Session]
 }
 
 func (s *observerServer) Observe(ctx context.Context, req *observer.ObserveRequest) (*observer.ObserveReply, error) {
 	if !nodegrpc.MatchObserverToken(ctx, s.token) {
 		return nil, status.Error(codes.Unauthenticated, "invalid local observer token")
 	}
+	session := s.current.Load()
+	if session == nil {
+		return nil, status.Error(codes.Unavailable, "panel stream is disconnected")
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return s.panel.Report(ctx, &nodegrpc.ReportRequest{NodeId: s.nodeID, Observation: req})
+	return nodegrpc.NewV1Client(session).Report(ctx, &nodegrpc.ReportRequest{NodeId: s.nodeID, Observation: req})
 }

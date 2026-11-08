@@ -235,10 +235,7 @@ type trafficQuotaTestNode struct {
 	calls    int
 }
 
-func (s *trafficQuotaTestNode) SyncTrafficQuota(ctx context.Context, req *nodegrpc.TrafficQuotaRequest) (*nodegrpc.TrafficQuotaReply, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (s *trafficQuotaTestNode) SyncTrafficQuota(_ context.Context, req *nodegrpc.TrafficQuotaRequest) (*nodegrpc.TrafficQuotaReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls++
@@ -261,10 +258,7 @@ type trafficQuotaAdminTestNode struct {
 	commands []trafficQuotaAdminCommand
 }
 
-func (s *trafficQuotaAdminTestNode) Execute(ctx context.Context, req *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
-	if !nodegrpc.MatchCredentials(ctx, "entry", "fixture-password") {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
-	}
+func (s *trafficQuotaAdminTestNode) Execute(_ context.Context, req *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	command := req.GetMethod() + " " + req.GetPath()

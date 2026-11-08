@@ -87,7 +87,7 @@ func (s *NodeHealthService) checkNodes() {
 			// 状态变更处理
 			if status != n.Status {
 				logger.Infof("节点 %s 状态变更: %s -> %s", n.Name, n.Status, status)
-				if err = s.nodeRepo.UpdateStatus(n.ID, status); err != nil {
+				if err := s.nodeRepo.UpdateStatus(n.ID, status); err != nil {
 					logger.Errorf("更新节点 %s 状态失败: %v", n.Name, err)
 				}
 			}
@@ -119,12 +119,7 @@ func (s *NodeHealthService) checkNodes() {
 // checkNodeHealth 检查单个节点的健康状态
 // 通过调用 Gost API 的 /config 接口来判断节点是否可用
 func (s *NodeHealthService) checkNodeHealth(node model.GostNode) model.NodeStatus {
-	// 检查地址是否有效
-	if node.Address == "" || node.Port == 0 {
-		return model.NodeStatusOffline
-	}
-
-	// 验证 Gost API 是否可用
+	// 检查节点会话上的 Gost API 是否可用。
 	client := utils.GetGostClient(&node)
 
 	if err := client.HealthCheck(); err != nil {

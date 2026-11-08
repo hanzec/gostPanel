@@ -2,10 +2,8 @@ package nodebridge
 
 import (
 	"context"
-	"crypto/x509"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +17,8 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -28,10 +27,7 @@ func TestUpgradeStatusRPCReadsPersistedOperation(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{NodeID: 42, Username: controlTestUser, Password: controlTestPassword, ConfigFile: filepath.Join(dir, "node.yaml")}
 	control := controlServer{config: cfg}
-	ctx := controlTestContext()
-	if _, err := control.GetUpgradeStatus(context.Background(), &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated upgrade status returned %v", err)
-	}
+	ctx := t.Context()
 	state, err := control.GetUpgradeStatus(ctx, &emptypb.Empty{})
 	if err != nil || state.GetState() != "idle" || state.GetDaemonVersion() != buildinfo.Version {
 		t.Fatalf("initial status = %v, %v", state, err)
@@ -72,7 +68,7 @@ func TestUpgradeStatusRPCReadsPersistedOperation(t *testing.T) {
 }
 
 func TestUpgradeRejectsInvalidAndUnsupportedRequests(t *testing.T) {
-	ctx := controlTestContext()
+	ctx := t.Context()
 	cfg := Config{NodeID: 42, Username: controlTestUser, Password: controlTestPassword}
 	control := controlServer{config: cfg}
 	if _, err := control.StartUpgrade(ctx, &nodegrpc.NodeUpgradeRequest{Component: "gost", Version: "latest"}); status.Code(err) != codes.InvalidArgument {
@@ -180,60 +176,30 @@ func TestWaitForReadyRetries(t *testing.T) {
 
 const expectedDaemonUpgradeVersion = "0.1.99-abc1234"
 
-type readyUpgradeDaemon struct {
-	nodegrpc.UnimplementedV1Server
-}
-
-func (readyUpgradeDaemon) GetUpgradeStatus(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
-	if !nodegrpc.MatchCredentials(ctx, controlTestUser, controlTestPassword) {
-		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
-	}
-	return &nodegrpc.NodeUpgradeStatus{Supported: true, DaemonVersion: expectedDaemonUpgradeVersion}, nil
-}
-
-func (readyUpgradeDaemon) GetObserverEndpoint(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.ObserverEndpoint, error) {
-	if !nodegrpc.MatchCredentials(ctx, controlTestUser, controlTestPassword) {
-		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
-	}
-	return &nodegrpc.ObserverEndpoint{Address: "127.0.0.1:10900"}, nil
-}
-
 func TestWaitForDaemonUsesUpgradeAndRollbackProbes(t *testing.T) {
-	cert, key, _ := testTLSFiles(t, x509.Certificate{DNSNames: []string{nodegrpc.NodeCertificateName}})
-	tls, err := credentials.NewServerTLSFromFile(cert, key)
-	if err != nil {
-		t.Fatal(err)
-	}
 	listener := listenLocal(t)
-	server := grpc.NewServer(grpc.Creds(tls))
+	server := grpc.NewServer()
 	t.Cleanup(server.Stop)
-	nodegrpc.RegisterV1Server(server, readyUpgradeDaemon{})
+	ready := health.NewServer()
+	ready.SetServingStatus(daemonHealthService+expectedDaemonUpgradeVersion, healthpb.HealthCheckResponse_SERVING)
+	healthpb.RegisterHealthServer(server, ready)
 	go func() { _ = server.Serve(listener) }()
-	_, port, err := net.SplitHostPort(listener.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := Config{ControlListen: "0.0.0.0:" + port, TLSCertFile: cert, Username: controlTestUser, Password: controlTestPassword}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	cfg := Config{ObserverListen: listener.Addr().String()}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	if err := waitForDaemon(ctx, cfg, expectedDaemonUpgradeVersion); err != nil {
 		t.Fatalf("upgrade probe: %v", err)
 	}
-	cfg.ControlListen = ":" + port
 	if err := waitForDaemon(ctx, cfg, ""); err != nil {
 		t.Fatalf("rollback probe: %v", err)
 	}
-	cfg.ControlListen = "no-port"
-	if err := waitForDaemon(ctx, cfg, expectedDaemonUpgradeVersion); err == nil {
-		t.Fatal("readiness accepted an invalid control address")
+	wrongVersion, stop := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer stop()
+	if err := waitForDaemon(wrongVersion, cfg, "0.1.98-abc1234"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("readiness accepted a different version: %v", err)
 	}
-	cfg.ControlListen = listener.Addr().String()
-	cfg.TLSCertFile = filepath.Join(t.TempDir(), "missing")
-	if err := waitForDaemon(ctx, cfg, expectedDaemonUpgradeVersion); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing node certificate returned %v", err)
-	}
-	cfg.TLSCertFile = key
+	cfg.ObserverListen = "192.0.2.1:1234"
 	if err := waitForDaemon(ctx, cfg, expectedDaemonUpgradeVersion); err == nil {
-		t.Fatal("readiness accepted a private key as the node certificate")
+		t.Fatal("readiness accepted a nonlocal observer address")
 	}
 }

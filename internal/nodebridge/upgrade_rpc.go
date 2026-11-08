@@ -12,9 +12,6 @@ import (
 )
 
 func (s *controlServer) GetUpgradeStatus(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
-	if err := s.authenticate(ctx); err != nil {
-		return nil, err
-	}
 	current, err := ReadUpgradeStatus(ctx, s.config, s.config.ConfigFile)
 	if err != nil {
 		return nil, status.Error(codes.Internal, "无法读取节点升级状态")
@@ -29,9 +26,6 @@ func (s *controlServer) GetUpgradeStatus(ctx context.Context, _ *emptypb.Empty) 
 }
 
 func (s *controlServer) StartUpgrade(ctx context.Context, request *nodegrpc.NodeUpgradeRequest) (*nodegrpc.NodeUpgradeStatus, error) {
-	if err := s.authenticate(ctx); err != nil {
-		return nil, err
-	}
 	component, tag := request.GetComponent(), request.GetVersion()
 	if !upgrade.ValidateTag(component, tag) {
 		return nil, status.Error(codes.InvalidArgument, "无效的升级组件或版本")

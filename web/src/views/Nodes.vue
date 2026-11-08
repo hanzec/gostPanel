@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page">
-    <PageHeader eyebrow="NODE INVENTORY" title="节点管理" description="登记 Gost 实例，检查 gRPC 连通性，并管理节点桥接服务。">
+    <PageHeader eyebrow="NODE INVENTORY" title="节点管理" description="登记 Gost 实例，查看节点连接状态和流量，并管理节点服务。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
@@ -55,7 +55,7 @@
           <thead role="rowgroup">
             <tr role="row">
               <th scope="col" role="columnheader">实例</th>
-              <th scope="col" role="columnheader">连接地址</th>
+              <th scope="col" role="columnheader">节点 IP</th>
               <th scope="col" role="columnheader">状态</th>
               <th scope="col" role="columnheader">累计流量</th>
               <th scope="col" role="columnheader">操作</th>
@@ -71,8 +71,8 @@
                 <span class="inventory-secondary ops-mono ops-muted">#{{ node.id }}</span>
               </td>
               <td role="cell">
-                <span class="inventory-cell-label" aria-hidden="true">gRPC 地址</span>
-                <strong class="ops-mono">{{ nodeEndpoint(node) }}</strong>
+                <span class="inventory-cell-label" aria-hidden="true">节点 IP</span>
+                <strong class="ops-mono">{{ node.address || '待获取地址' }}</strong>
                 <span v-if="node.ipv4" class="inventory-secondary ops-muted">IPv4 · <span class="ops-mono">{{ node.ipv4 }}</span></span>
                 <span v-if="node.ipv6" class="inventory-secondary ops-muted">IPv6 · <span class="ops-mono">{{ node.ipv6 }}</span></span>
                 <span class="inventory-secondary ops-muted">检查 · {{ node.last_check_at ? formatTime(node.last_check_at) : '待检查' }}</span>
@@ -163,13 +163,10 @@
       @closed="openCreatedNodeInstall"
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="handleSubmit">
-        <p class="node-address-help ops-muted">节点注册时会自动获取连接地址。</p>
+        <p class="node-address-help ops-muted">节点主动连接面板，注册时会自动上报 IP。</p>
         <div class="inventory-form-grid">
           <el-form-item label="节点名称" prop="name" class="inventory-form-wide">
             <el-input v-model="form.name" placeholder="例如 华东入口" />
-          </el-form-item>
-          <el-form-item label="gRPC 端口" prop="port">
-            <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
           </el-form-item>
           <el-form-item label="流量上限（GiB，可选）" prop="trafficLimitGiB" class="inventory-form-wide">
             <el-input v-model.trim="form.trafficLimitGiB" inputmode="decimal" placeholder="例如 100.5" aria-describedby="node-traffic-limit-help" clearable />
@@ -234,7 +231,6 @@
       <p class="install-intro ops-muted">在目标服务器上以 root 身份执行安装命令。节点首次通过 TLS 注册时会自动获取节点 ID 和凭据，并探测 IP。</p>
       <dl v-if="installNode" class="install-meta">
         <div><dt>节点 ID</dt><dd class="ops-mono">#{{ installNode.id }}</dd></div>
-        <div><dt>gRPC 地址</dt><dd class="ops-mono">{{ nodeEndpoint(installNode) }}</dd></div>
       </dl>
       <el-form label-position="top" @submit.prevent>
         <el-form-item
@@ -342,7 +338,7 @@ const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
 const submitLoading = ref(false)
 const formRef = ref(null)
-const form = reactive({ name: '', port: 39000, remark: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const form = reactive({ name: '', remark: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
 const originalTrafficLimitGiB = computed(() => {
@@ -360,7 +356,6 @@ const trafficLimitBytes = computed(() => {
 })
 const rules = {
   name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
-  port: [{ required: true, message: '请输入端口', trigger: 'blur' }],
   trafficLimitGiB: [{
     validator: () => trafficLimitBytes.value !== null && (isEdit.value || Number.isSafeInteger(trafficLimitBytes.value)),
     message: '请输入 0 或至少 1 字节且小于 8 PiB 的 GiB 数值。',
@@ -403,13 +398,6 @@ const formatBytes = (bytes) => {
 }
 
 const formatTime = (value) => dateFormatter.format(new Date(value))
-
-const nodeEndpoint = (node) => {
-  const address = node.address
-  if (!address) return '待获取地址'
-  const host = address.includes(':') && !address.startsWith('[') ? `[${address}]` : address
-  return `${host}:${node.port}`
-}
 
 const configSummary = (tab, entry) => {
   if (tab === 'chains') return (entry.hops?.length || 0) + ' 跳'
@@ -535,7 +523,6 @@ const openDialog = (row = null) => {
   originalTrafficResetPeriod = row?.traffic_reset_period || 'none'
   Object.assign(form, {
     name: row?.name ?? '',
-    port: row?.port ?? 39000,
     remark: row?.remark || '',
     trafficLimitGiB: originalTrafficLimitGiB.value,
     trafficResetPeriod: originalTrafficResetPeriod
@@ -551,7 +538,7 @@ const handleSubmit = async () => {
     const valid = await formRef.value.validate().catch(() => false)
     if (!valid) return
 
-    const node = { name: form.name, port: form.port, remark: form.remark }
+    const node = { name: form.name, remark: form.remark }
     if (!isEdit.value || trafficLimitBytes.value !== originalTrafficLimitBytes.value) {
       node.traffic_limit_bytes = trafficLimitBytes.value
     }

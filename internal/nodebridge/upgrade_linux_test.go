@@ -140,7 +140,7 @@ esac
 	defer admin.Close()
 	cfg := Config{NodeID: 42, ConfigFile: path, AdminAddress: strings.TrimPrefix(admin.URL, "http://"), Username: controlTestUser, Password: controlTestPassword}
 	control := controlServer{config: cfg}
-	ctx := controlTestContext()
+	ctx := t.Context()
 	request := &nodegrpc.NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"}
 	state, err := control.StartUpgrade(ctx, request)
 	if err != nil || !state.GetSupported() || state.GetState() != "queued" || state.GetTargetVersion() != "v3.3.3" {

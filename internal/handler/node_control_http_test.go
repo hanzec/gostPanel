@@ -3,31 +3,21 @@ package handler
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"yagp/internal/model"
 	"yagp/internal/service"
 	"yagp/pkg/gost"
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -36,53 +26,23 @@ const handlerNodePassword = "node-test-password"
 
 func (f *handlerHTTPFixture) enrollFixtureNode(t *testing.T, name string, nodeControl *handlerNodeControl) model.GostNode {
 	t.Helper()
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
-	pub, key, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		DNSNames:              []string{nodegrpc.NodeCertificateName},
-		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(time.Hour),
-		BasicConstraintsValid: true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, pub, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(&tls.Config{
-			Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
-		})),
-		grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, call grpc.UnaryHandler) (any, error) {
-			if !nodegrpc.MatchCredentials(ctx, name, handlerNodePassword) {
-				return nil, status.Error(codes.Unauthenticated, "wrong node credentials")
-			}
-			if err := nodeControl.before(info.FullMethod); err != nil {
-				return nil, err
-			}
-			return call(ctx, req)
-		}),
-	)
-	nodegrpc.RegisterV1Server(server, nodeControl)
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
 	node := model.GostNode{
-		Name: name, Address: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port,
+		Name: name, Address: "127.0.0.1",
 		Status: model.NodeStatusOnline, Username: name, Password: handlerNodePassword,
-		TLSCertificatePEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
 	}
 	if err := f.db.Create(&node).Error; err != nil {
 		t.Fatal(err)
 	}
+	dispatch := nodegrpc.NewDispatcher(nodeControl,
+		nodegrpc.V1_Execute_FullMethodName, nodegrpc.V1_GetGostServiceStatus_FullMethodName, nodegrpc.V1_RestartGostService_FullMethodName,
+		nodegrpc.V1_GetGostLogs_FullMethodName, nodegrpc.V1_GetNftConfig_FullMethodName, nodegrpc.V1_ApplyNftConfig_FullMethodName,
+		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName)
+	startTestReportStream(t, t.Context(), startTestReportServer(t, f.db), node, func(ctx context.Context, method string, body []byte) ([]byte, error) {
+		if err := nodeControl.before(method); err != nil {
+			return nil, err
+		}
+		return dispatch(ctx, method, body)
+	})
 	return node
 }
 

@@ -12,7 +12,6 @@ import (
 	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
@@ -30,7 +29,7 @@ func TestNodeRegistrationRequiresAnAddressAndPersistsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewReportHandler(f.db, false)
-	req := &nodegrpc.RegisterNodeRequest{Token: "invalid", NodeCertificatePem: testNodeCertificate(t)}
+	req := &nodegrpc.RegisterNodeRequest{Token: "invalid"}
 	if _, err := handler.RegisterNode(t.Context(), req); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("register with invalid token: %v", err)
 	}
@@ -92,7 +91,7 @@ func TestRegistrationIPFallbackThroughTrustedProxy(t *testing.T) {
 
 func TestNodeReportRejectsMalformedTrafficAndStorageErrors(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
-	node := model.GostNode{Name: "reporter", Port: 39110, Username: "reporter", Password: "password", TLSCertificatePEM: testNodeCertificate(t)}
+	node := model.GostNode{Name: "reporter", Username: "reporter", Password: "password"}
 	if err := f.db.Create(&node).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -103,9 +102,9 @@ func TestNodeReportRejectsMalformedTrafficAndStorageErrors(t *testing.T) {
 	client := startTestReportServer(t, f.db)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
+	reports := startTestReportStream(t, ctx, client, node, nil)
 	report := &nodegrpc.ReportRequest{NodeId: uint64(node.ID)}
-	if _, err := client.Report(ctx, report, auth); status.Code(err) != codes.InvalidArgument {
+	if _, err := reports.Report(ctx, report); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("report without observation: %v", err)
 	}
 	for _, event := range []*observer.Event{
@@ -115,7 +114,7 @@ func TestNodeReportRejectsMalformedTrafficAndStorageErrors(t *testing.T) {
 		trafficEvent(rule.ID, 0, 0, math.MaxInt64+1),
 	} {
 		report.Observation = &observer.ObserveRequest{Events: []*observer.Event{event}}
-		if _, err := client.Report(ctx, report, auth); status.Code(err) != codes.InvalidArgument {
+		if _, err := reports.Report(ctx, report); status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("report with invalid counters %v: %v", event, err)
 		}
 	}
@@ -128,7 +127,7 @@ func TestNodeReportRejectsMalformedTrafficAndStorageErrors(t *testing.T) {
 		{Kind: "service", Service: "rule-1", Type: "status", Status: &observer.ServiceStatus{State: "stopped"}},
 		trafficEvent(rule.ID, 3, 4, 1),
 	}}
-	if reply, err := client.Report(ctx, report, auth); err != nil || !reply.GetOk() {
+	if reply, err := reports.Report(ctx, report); err != nil || !reply.GetOk() {
 		t.Fatalf("report with ignored events: %v, %v", reply, err)
 	}
 	if err := f.db.Exec(`CREATE TRIGGER fail_traffic BEFORE UPDATE OF total_bytes ON rules
@@ -136,7 +135,7 @@ func TestNodeReportRejectsMalformedTrafficAndStorageErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	report.Observation.Events = []*observer.Event{trafficEvent(rule.ID, 7, 4, 2)}
-	if _, err := client.Report(ctx, report, auth); status.Code(err) != codes.Internal {
+	if _, err := reports.Report(ctx, report); status.Code(err) != codes.Internal {
 		t.Fatalf("report with a storage failure: %v", err)
 	}
 	if err := f.db.First(&node, node.ID).Error; err != nil || node.TotalBytes != 7 {
@@ -146,20 +145,20 @@ func TestNodeReportRejectsMalformedTrafficAndStorageErrors(t *testing.T) {
 
 func TestNodeIPReportHandlesLostUpdatesAndUnavailability(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
-	node := model.GostNode{Name: "reporter", Port: 39110, Username: "reporter", Password: "password", TLSCertificatePEM: testNodeCertificate(t)}
+	node := model.GostNode{Name: "reporter", Username: "reporter", Password: "password"}
 	if err := f.db.Create(&node).Error; err != nil {
 		t.Fatal(err)
 	}
 	client := startTestReportServer(t, f.db)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
+	reports := startTestReportStream(t, ctx, client, node, nil)
 	req := &nodegrpc.NodeIPsRequest{NodeId: uint64(node.ID)}
-	if _, err := client.UpdateNodeIPs(ctx, req, auth); status.Code(err) != codes.InvalidArgument {
+	if _, err := reports.UpdateNodeIPs(ctx, req); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("IP report without addresses: %v", err)
 	}
 	req.Ipv6 = "fe80::1%eth0"
-	if _, err := client.UpdateNodeIPs(ctx, req, auth); status.Code(err) != codes.InvalidArgument {
+	if _, err := reports.UpdateNodeIPs(ctx, req); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("IP report with scoped address: %v", err)
 	}
 	req.Ipv6 = "2001:db8::4"
@@ -167,7 +166,7 @@ func TestNodeIPReportHandlesLostUpdatesAndUnavailability(t *testing.T) {
 		BEGIN SELECT RAISE(IGNORE); END`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.UpdateNodeIPs(ctx, req, auth); status.Code(err) != codes.Unauthenticated {
+	if _, err := reports.UpdateNodeIPs(ctx, req); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("IP report that did not update a row: %v", err)
 	}
 	if err := f.db.Exec("DROP TRIGGER ignore_ip_update").Error; err != nil {
@@ -177,7 +176,7 @@ func TestNodeIPReportHandlesLostUpdatesAndUnavailability(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'IP storage failure'); END`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.UpdateNodeIPs(ctx, req, auth); status.Code(err) != codes.Internal {
+	if _, err := reports.UpdateNodeIPs(ctx, req); status.Code(err) != codes.Internal {
 		t.Fatalf("IP report with a storage failure: %v", err)
 	}
 	sqlDB, err := f.db.DB()
@@ -187,7 +186,7 @@ func TestNodeIPReportHandlesLostUpdatesAndUnavailability(t *testing.T) {
 	if err := sqlDB.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.UpdateNodeIPs(ctx, req, auth); status.Code(err) != codes.Internal {
+	if _, err := reports.UpdateNodeIPs(ctx, req); status.Code(err) != codes.Internal {
 		t.Fatalf("IP report while node storage is unavailable: %v", err)
 	}
 }

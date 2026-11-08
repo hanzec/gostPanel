@@ -33,10 +33,7 @@ func TestSystemdManagementRequiresSupportedBuild(t *testing.T) {
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := test.call(context.Background()); status.Code(err) != codes.Unauthenticated {
-				t.Fatalf("unauthenticated RPC returned %v", err)
-			}
-			if err := test.call(controlTestContext()); status.Code(err) != codes.Unimplemented {
+			if err := test.call(t.Context()); status.Code(err) != codes.Unimplemented {
 				t.Fatalf("unsupported build returned %v", err)
 			}
 		})

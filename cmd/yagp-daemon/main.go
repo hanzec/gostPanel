@@ -75,14 +75,20 @@ func parseConfigFlag(name string, args []string) string {
 }
 
 func readConfig(configFile string) (nodebridge.Config, error) {
-	var config nodebridge.Config
+	var stored struct {
+		nodebridge.Config `yaml:",inline"`
+		// Older installations still have these keys. Keep their files usable while discarding the listener settings.
+		ControlListen string `yaml:"control_listen"`
+		TLSCertFile   string `yaml:"tls_cert_file"`
+		TLSKeyFile    string `yaml:"tls_key_file"`
+	}
 	file, err := os.Open(configFile)
 	if err != nil {
-		return config, err
+		return stored.Config, err
 	}
 	defer file.Close()
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
-	err = decoder.Decode(&config)
-	return config, err
+	err = decoder.Decode(&stored)
+	return stored.Config, err
 }

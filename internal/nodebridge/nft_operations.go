@@ -11,10 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func (s *controlServer) GetNftConfig(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.NftConfig, error) {
-	if err := s.authenticate(ctx); err != nil {
-		return nil, err
-	}
+func (s *controlServer) GetNftConfig(context.Context, *emptypb.Empty) (*nodegrpc.NftConfig, error) {
 	config, err := readNftConfig(s.config.NftConfigFile)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read nftables config: %v", err)
@@ -23,9 +20,6 @@ func (s *controlServer) GetNftConfig(ctx context.Context, _ *emptypb.Empty) (*no
 }
 
 func (s *controlServer) ApplyNftConfig(ctx context.Context, req *nodegrpc.NftConfig) (*nodegrpc.NftConfig, error) {
-	if err := s.authenticate(ctx); err != nil {
-		return nil, err
-	}
 	if err := applyNftConfig(ctx, s.config.NodeID, s.config.NftConfigFile, req.GetConfig()); err != nil {
 		return nil, err
 	}

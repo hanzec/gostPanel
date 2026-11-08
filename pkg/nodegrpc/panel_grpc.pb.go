@@ -21,6 +21,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	V1_Connect_FullMethodName              = "/yagp.v1/Connect"
 	V1_Report_FullMethodName               = "/yagp.v1/Report"
 	V1_RegisterNode_FullMethodName         = "/yagp.v1/RegisterNode"
 	V1_GetNftTemplate_FullMethodName       = "/yagp.v1/GetNftTemplate"
@@ -41,12 +42,14 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type V1Client interface {
-	// Implemented by the panel listener.
+	// All normal reporting and reverse management share this outbound node stream.
+	Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamFrame, StreamFrame], error)
+	// These method definitions also describe the typed operations carried by Connect.
 	Report(ctx context.Context, in *ReportRequest, opts ...grpc.CallOption) (*proto.ObserveReply, error)
 	RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeReply, error)
 	GetNftTemplate(ctx context.Context, in *NftTemplateRequest, opts ...grpc.CallOption) (*NftConfig, error)
 	UpdateNodeIPs(ctx context.Context, in *NodeIPsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	// Implemented by the node control listener.
+	// Commands carried by Connect from the panel to the node.
 	Execute(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandReply, error)
 	GetObserverEndpoint(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ObserverEndpoint, error)
 	GetGostServiceStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
@@ -66,6 +69,19 @@ type v1Client struct {
 func NewV1Client(cc grpc.ClientConnInterface) V1Client {
 	return &v1Client{cc}
 }
+
+func (c *v1Client) Connect(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[StreamFrame, StreamFrame], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &V1_ServiceDesc.Streams[0], V1_Connect_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[StreamFrame, StreamFrame]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type V1_ConnectClient = grpc.BidiStreamingClient[StreamFrame, StreamFrame]
 
 func (c *v1Client) Report(ctx context.Context, in *ReportRequest, opts ...grpc.CallOption) (*proto.ObserveReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -211,12 +227,14 @@ func (c *v1Client) StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opt
 // All implementations must embed UnimplementedV1Server
 // for forward compatibility.
 type V1Server interface {
-	// Implemented by the panel listener.
+	// All normal reporting and reverse management share this outbound node stream.
+	Connect(grpc.BidiStreamingServer[StreamFrame, StreamFrame]) error
+	// These method definitions also describe the typed operations carried by Connect.
 	Report(context.Context, *ReportRequest) (*proto.ObserveReply, error)
 	RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeReply, error)
 	GetNftTemplate(context.Context, *NftTemplateRequest) (*NftConfig, error)
 	UpdateNodeIPs(context.Context, *NodeIPsRequest) (*emptypb.Empty, error)
-	// Implemented by the node control listener.
+	// Commands carried by Connect from the panel to the node.
 	Execute(context.Context, *CommandRequest) (*CommandReply, error)
 	GetObserverEndpoint(context.Context, *emptypb.Empty) (*ObserverEndpoint, error)
 	GetGostServiceStatus(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
@@ -237,6 +255,9 @@ type V1Server interface {
 // pointer dereference when methods are called.
 type UnimplementedV1Server struct{}
 
+func (UnimplementedV1Server) Connect(grpc.BidiStreamingServer[StreamFrame, StreamFrame]) error {
+	return status.Errorf(codes.Unimplemented, "method Connect not implemented")
+}
 func (UnimplementedV1Server) Report(context.Context, *ReportRequest) (*proto.ObserveReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Report not implemented")
 }
@@ -299,6 +320,13 @@ func RegisterV1Server(s grpc.ServiceRegistrar, srv V1Server) {
 	}
 	s.RegisterService(&V1_ServiceDesc, srv)
 }
+
+func _V1_Connect_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(V1Server).Connect(&grpc.GenericServerStream[StreamFrame, StreamFrame]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type V1_ConnectServer = grpc.BidiStreamingServer[StreamFrame, StreamFrame]
 
 func _V1_Report_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReportRequest)
@@ -616,6 +644,13 @@ var V1_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _V1_StartUpgrade_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Connect",
+			Handler:       _V1_Connect_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "panel.proto",
 }
