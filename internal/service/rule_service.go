@@ -4,6 +4,10 @@ package service
 import (
 	stderrors "errors"
 	"fmt"
+	"net"
+	"net/netip"
+	"strconv"
+	"strings"
 
 	"yagp/internal/config"
 	"yagp/internal/dto"
@@ -79,8 +83,11 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 		return nil, errors.ErrRuleTypeInvalid
 	}
 
-	// 检查端口是否已被使用
-	exists, err := s.ruleRepo.ExistsByPort(entryNodeID, req.ListenPort)
+	listenIP, err := normalizeRuleListenIP(req.ListenIP)
+	if err != nil {
+		return nil, err
+	}
+	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort)
 	if err != nil {
 		return nil, err
 	}
@@ -95,6 +102,7 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 		Name:       req.Name,
 		Type:       model.RuleType(req.Type),
 		Protocol:   model.RuleProtocol(req.Protocol),
+		ListenIP:   listenIP,
 		ListenPort: req.ListenPort,
 		Targets:    req.Targets,
 		Strategy:   req.Strategy,
@@ -117,7 +125,7 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 		ip,
 		userAgent)
 
-	logger.Infof("创建规则成功: %s (:%d)", rule.Name, rule.ListenPort)
+	logger.Infof("创建规则成功: %s (%s)", rule.Name, net.JoinHostPort(rule.ListenIP, strconv.Itoa(rule.ListenPort)))
 	return rule, nil
 }
 
@@ -139,8 +147,14 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	// 获取入口节点 ID（用于端口冲突检查）
 	entryNodeID := s.getEntryNodeID(rule)
 
-	// 检查端口是否已被使用（排除自身）
-	exists, err := s.ruleRepo.ExistsByPort(entryNodeID, req.ListenPort, id)
+	listenIP := rule.ListenIP
+	if req.ListenIP != nil {
+		listenIP, err = normalizeRuleListenIP(*req.ListenIP)
+		if err != nil {
+			return nil, err
+		}
+	}
+	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort, id)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +165,7 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	// 更新规则（不修改类型和入口）
 	rule.Name = req.Name
 	rule.Protocol = model.RuleProtocol(req.Protocol)
+	rule.ListenIP = listenIP
 	rule.ListenPort = req.ListenPort
 	rule.Targets = req.Targets
 	rule.Strategy = req.Strategy
@@ -171,6 +186,22 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 		userAgent)
 
 	return rule, nil
+}
+
+func normalizeRuleListenIP(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	addr, err := netip.ParseAddr(value)
+	if err != nil || addr.Zone() != "" {
+		return "", errors.ErrRuleListenIPInvalid
+	}
+	addr = addr.Unmap()
+	if addr.IsUnspecified() {
+		return "", nil
+	}
+	return addr.String(), nil
 }
 
 // Delete 删除规则
@@ -444,6 +475,7 @@ func (s *RuleService) buildAndStartService(client *gost.Client, node *model.Gost
 	} else {
 		svc = gost.BuildUDPForwardService(serviceName, rule.ListenPort, targets, strategy)
 	}
+	svc.Addr = net.JoinHostPort(rule.ListenIP, strconv.Itoa(rule.ListenPort))
 
 	// 如果有 Chain ID，则关联（用于隧道转发）
 	if chainID != "" {

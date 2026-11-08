@@ -49,6 +49,7 @@ type GostRule struct {
 	Type       RuleType     `gorm:"size:20;not null;default:forward" json:"type"` // 规则类型
 	TunnelID   *uint        `gorm:"index" json:"tunnel_id"`                       // 隧道 ID（隧道转发时使用）
 	Protocol   RuleProtocol `gorm:"size:10;not null;default:tcp" json:"protocol"` // 协议
+	ListenIP   string       `gorm:"size:45;not null;default:''" json:"listen_ip"` // 监听 IP，空字符串表示所有接口
 	ListenPort int          `gorm:"not null" json:"listen_port"`                  // 监听端口
 
 	Targets   []string   `gorm:"type:json;serializer:json" json:"targets"` // 多目标列表 (host:port)
