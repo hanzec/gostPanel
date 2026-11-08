@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -172,6 +174,46 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 			t.Fatal("no report reached the panel")
 		}
 		session.Close()
+	}
+}
+
+func TestNodeBridgeReconnectsWithPinnedPanelCertificate(t *testing.T) {
+	const username, password = "node", "test-password"
+	recorder := &reportRecorder{username: username, password: password, sessions: make(chan *nodegrpc.Session, 2)}
+	panel := grpc.NewServer()
+	nodegrpc.RegisterV1Server(panel, recorder)
+	t.Cleanup(panel.Stop)
+	https := httptest.NewUnstartedServer(panel)
+	https.EnableHTTP2 = true
+	https.StartTLS()
+	t.Cleanup(https.Close)
+	digest := sha256.Sum256(https.Certificate().Raw)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Config{
+			NodeID: 42, Username: username, Password: password,
+			AdminAddress: "127.0.0.1:1", ObserverListen: "127.0.0.1:0",
+			ReportAddress: https.Listener.Addr().String(), ReportCertSHA256: hex.EncodeToString(digest[:]),
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+
+	timeout, stop := context.WithTimeout(t.Context(), 12*time.Second)
+	defer stop()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-recorder.sessions:
+		case <-timeout.Done():
+			t.Fatalf("pinned connection %d did not reach panel: %v", i+1, timeout.Err())
+		}
+		// Drop the TLS connection itself, so the next stream has to verify the certificate again.
+		https.CloseClientConnections()
 	}
 }
 

@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"strings"
 
 	"google.golang.org/grpc/credentials"
@@ -58,4 +60,42 @@ func ClientTLS(caFile string) (credentials.TransportCredentials, error) {
 		return credentials.NewClientTLSFromFile(caFile, "")
 	}
 	return credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12}), nil
+}
+
+// ClientTLS uses the pinned panel certificate when the panel generated its own TLS identity.
+func (a PanelAddress) ClientTLS(caFile, fingerprint string) (credentials.TransportCredentials, error) {
+	if fingerprint == "" {
+		return ClientTLS(caFile)
+	}
+	pin, err := decodeCertificateFingerprint(fingerprint)
+	if err != nil {
+		return nil, err
+	}
+	return credentials.NewTLS(&tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: a.Host(),
+		// Pin verification uses the matching leaf as the sole trust anchor.
+		InsecureSkipVerify: true,
+		VerifyConnection: func(state tls.ConnectionState) error {
+			if len(state.PeerCertificates) == 0 {
+				return errors.New("panel did not present a TLS certificate")
+			}
+			leaf := state.PeerCertificates[0]
+			digest := sha256.Sum256(leaf.Raw)
+			if subtle.ConstantTimeCompare(pin, digest[:]) != 1 {
+				return errors.New("panel TLS certificate fingerprint mismatch")
+			}
+			roots := x509.NewCertPool()
+			roots.AddCert(leaf)
+			_, err := leaf.Verify(x509.VerifyOptions{DNSName: a.Host(), Roots: roots})
+			return err
+		},
+	}), nil
+}
+
+func decodeCertificateFingerprint(fingerprint string) ([]byte, error) {
+	if len(fingerprint) != hex.EncodedLen(sha256.Size) || fingerprint != strings.ToLower(fingerprint) {
+		return nil, errors.New("panel TLS certificate fingerprint must be a lowercase SHA-256 hex digest")
+	}
+	return hex.DecodeString(fingerprint)
 }
