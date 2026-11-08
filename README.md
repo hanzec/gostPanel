@@ -130,7 +130,9 @@ database:
 
 **Docker Compose：** Traefik 在 `443` 终止 TLS，并把 `/api/v1/grpc/Connect` 改写为 `/yagp.v1/Connect`，通过 HTTP/2（h2c）转发到 Docker 网络内的 `39101`。节点主动建立一条双向流，流量和 IP 上报、管理命令和执行结果都走这条流。把 `proxy_ip` 设为 Traefik 在共享网络上的固定 IP，面板只接受该 IP 发来的 gRPC 回源请求。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
 
-Compose 仅对 `/api/v1/grpc/RegisterNode` 限速，每个客户端 IP 平均每分钟 6 个请求，允许 5 个突发请求。Traefik 为直连客户端生成 `X-Real-IP`。如果前面还有反向代理，须让前置代理用实际客户端 IP 覆盖 `X-Real-IP`，并仅将该代理加入 Traefik 入口的 `forwardedHeaders.trustedIPs`，保持 `forwardedHeaders.insecure` 关闭。二进制直连部署需在自己的入口配置注册限速。[Traefik 限速配置](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
+Compose 按真实客户端 IP 分别限制注册和建连请求。`RegisterNode` 平均每分钟 6 次、突发 5 次。`Connect` 默认平均每分钟 60 次、突发 30 次，仅在建立新流时计数。节点断线后会退避重连。多个节点共用出口 IP 时，可在 `.env` 中按需调整 `YAGP_CONNECT_RATE_PER_MINUTE` 和 `YAGP_CONNECT_RATE_BURST`。
+
+Traefik 为直连客户端生成 `X-Real-IP`。如果前面还有反向代理，须让前置代理用实际客户端 IP 覆盖 `X-Real-IP`，并仅将该代理加入 Traefik 入口的 `forwardedHeaders.trustedIPs`，保持 `forwardedHeaders.insecure` 关闭。二进制直连部署需在自己的入口配置注册和建连限速。面板在验证 `Connect` 节点凭据时最多等待 3 秒，认证通过后的双向流不受该超时限制。[Traefik 限速配置](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
 
 在 Traefik 的静态配置中，将 HTTPS 入口的请求读取和响应写入超时设为 `0s`。读取超时默认是 60 秒，双向流的请求体会持续打开。[Traefik 入口超时配置](https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#configuration-options)
 
