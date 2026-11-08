@@ -134,6 +134,118 @@ func (x *CommandReply) GetBody() []byte {
 	return nil
 }
 
+type ListenerCheckRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Protocol      string                 `protobuf:"bytes,1,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	Ip            string                 `protobuf:"bytes,2,opt,name=ip,proto3" json:"ip,omitempty"`
+	Port          uint32                 `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListenerCheckRequest) Reset() {
+	*x = ListenerCheckRequest{}
+	mi := &file_node_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListenerCheckRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListenerCheckRequest) ProtoMessage() {}
+
+func (x *ListenerCheckRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListenerCheckRequest.ProtoReflect.Descriptor instead.
+func (*ListenerCheckRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ListenerCheckRequest) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+func (x *ListenerCheckRequest) GetIp() string {
+	if x != nil {
+		return x.Ip
+	}
+	return ""
+}
+
+func (x *ListenerCheckRequest) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+type ListenerCheckReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Available     bool                   `protobuf:"varint,1,opt,name=available,proto3" json:"available,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListenerCheckReply) Reset() {
+	*x = ListenerCheckReply{}
+	mi := &file_node_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListenerCheckReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListenerCheckReply) ProtoMessage() {}
+
+func (x *ListenerCheckReply) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListenerCheckReply.ProtoReflect.Descriptor instead.
+func (*ListenerCheckReply) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ListenerCheckReply) GetAvailable() bool {
+	if x != nil {
+		return x.Available
+	}
+	return false
+}
+
+func (x *ListenerCheckReply) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type ObserverEndpoint struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
@@ -143,7 +255,7 @@ type ObserverEndpoint struct {
 
 func (x *ObserverEndpoint) Reset() {
 	*x = ObserverEndpoint{}
-	mi := &file_node_proto_msgTypes[2]
+	mi := &file_node_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -155,7 +267,7 @@ func (x *ObserverEndpoint) String() string {
 func (*ObserverEndpoint) ProtoMessage() {}
 
 func (x *ObserverEndpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[2]
+	mi := &file_node_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -168,7 +280,7 @@ func (x *ObserverEndpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObserverEndpoint.ProtoReflect.Descriptor instead.
 func (*ObserverEndpoint) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{2}
+	return file_node_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ObserverEndpoint) GetAddress() string {
@@ -190,7 +302,7 @@ type GostServiceStatus struct {
 
 func (x *GostServiceStatus) Reset() {
 	*x = GostServiceStatus{}
-	mi := &file_node_proto_msgTypes[3]
+	mi := &file_node_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -202,7 +314,7 @@ func (x *GostServiceStatus) String() string {
 func (*GostServiceStatus) ProtoMessage() {}
 
 func (x *GostServiceStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[3]
+	mi := &file_node_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -215,7 +327,7 @@ func (x *GostServiceStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GostServiceStatus.ProtoReflect.Descriptor instead.
 func (*GostServiceStatus) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{3}
+	return file_node_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GostServiceStatus) GetUnit() string {
@@ -255,7 +367,7 @@ type GostLogsRequest struct {
 
 func (x *GostLogsRequest) Reset() {
 	*x = GostLogsRequest{}
-	mi := &file_node_proto_msgTypes[4]
+	mi := &file_node_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -267,7 +379,7 @@ func (x *GostLogsRequest) String() string {
 func (*GostLogsRequest) ProtoMessage() {}
 
 func (x *GostLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[4]
+	mi := &file_node_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -280,7 +392,7 @@ func (x *GostLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GostLogsRequest.ProtoReflect.Descriptor instead.
 func (*GostLogsRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{4}
+	return file_node_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *GostLogsRequest) GetLines() uint32 {
@@ -301,7 +413,7 @@ type GostLogEntry struct {
 
 func (x *GostLogEntry) Reset() {
 	*x = GostLogEntry{}
-	mi := &file_node_proto_msgTypes[5]
+	mi := &file_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -313,7 +425,7 @@ func (x *GostLogEntry) String() string {
 func (*GostLogEntry) ProtoMessage() {}
 
 func (x *GostLogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[5]
+	mi := &file_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -326,7 +438,7 @@ func (x *GostLogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GostLogEntry.ProtoReflect.Descriptor instead.
 func (*GostLogEntry) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{5}
+	return file_node_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *GostLogEntry) GetTimestampUnixMicros() int64 {
@@ -359,7 +471,7 @@ type GostLogsReply struct {
 
 func (x *GostLogsReply) Reset() {
 	*x = GostLogsReply{}
-	mi := &file_node_proto_msgTypes[6]
+	mi := &file_node_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -371,7 +483,7 @@ func (x *GostLogsReply) String() string {
 func (*GostLogsReply) ProtoMessage() {}
 
 func (x *GostLogsReply) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[6]
+	mi := &file_node_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -384,7 +496,7 @@ func (x *GostLogsReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GostLogsReply.ProtoReflect.Descriptor instead.
 func (*GostLogsReply) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{6}
+	return file_node_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GostLogsReply) GetEntries() []*GostLogEntry {
@@ -403,7 +515,7 @@ type NftConfig struct {
 
 func (x *NftConfig) Reset() {
 	*x = NftConfig{}
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -415,7 +527,7 @@ func (x *NftConfig) String() string {
 func (*NftConfig) ProtoMessage() {}
 
 func (x *NftConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -428,7 +540,7 @@ func (x *NftConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NftConfig.ProtoReflect.Descriptor instead.
 func (*NftConfig) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{7}
+	return file_node_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *NftConfig) GetConfig() string {
@@ -447,7 +559,7 @@ type NftTemplateRequest struct {
 
 func (x *NftTemplateRequest) Reset() {
 	*x = NftTemplateRequest{}
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -459,7 +571,7 @@ func (x *NftTemplateRequest) String() string {
 func (*NftTemplateRequest) ProtoMessage() {}
 
 func (x *NftTemplateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -472,7 +584,7 @@ func (x *NftTemplateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NftTemplateRequest.ProtoReflect.Descriptor instead.
 func (*NftTemplateRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{8}
+	return file_node_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *NftTemplateRequest) GetNodeId() uint64 {
@@ -495,7 +607,7 @@ type TrafficQuotaRequest struct {
 
 func (x *TrafficQuotaRequest) Reset() {
 	*x = TrafficQuotaRequest{}
-	mi := &file_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -507,7 +619,7 @@ func (x *TrafficQuotaRequest) String() string {
 func (*TrafficQuotaRequest) ProtoMessage() {}
 
 func (x *TrafficQuotaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[9]
+	mi := &file_node_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -520,7 +632,7 @@ func (x *TrafficQuotaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrafficQuotaRequest.ProtoReflect.Descriptor instead.
 func (*TrafficQuotaRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{9}
+	return file_node_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *TrafficQuotaRequest) GetLimitBytes() uint64 {
@@ -567,7 +679,7 @@ type TrafficQuotaReply struct {
 
 func (x *TrafficQuotaReply) Reset() {
 	*x = TrafficQuotaReply{}
-	mi := &file_node_proto_msgTypes[10]
+	mi := &file_node_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -579,7 +691,7 @@ func (x *TrafficQuotaReply) String() string {
 func (*TrafficQuotaReply) ProtoMessage() {}
 
 func (x *TrafficQuotaReply) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[10]
+	mi := &file_node_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -592,7 +704,7 @@ func (x *TrafficQuotaReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrafficQuotaReply.ProtoReflect.Descriptor instead.
 func (*TrafficQuotaReply) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{10}
+	return file_node_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *TrafficQuotaReply) GetUsedBytes() uint64 {
@@ -612,7 +724,7 @@ type NodeUpgradeRequest struct {
 
 func (x *NodeUpgradeRequest) Reset() {
 	*x = NodeUpgradeRequest{}
-	mi := &file_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -624,7 +736,7 @@ func (x *NodeUpgradeRequest) String() string {
 func (*NodeUpgradeRequest) ProtoMessage() {}
 
 func (x *NodeUpgradeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[11]
+	mi := &file_node_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -637,7 +749,7 @@ func (x *NodeUpgradeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeUpgradeRequest.ProtoReflect.Descriptor instead.
 func (*NodeUpgradeRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{11}
+	return file_node_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NodeUpgradeRequest) GetComponent() string {
@@ -669,7 +781,7 @@ type NodeUpgradeStatus struct {
 
 func (x *NodeUpgradeStatus) Reset() {
 	*x = NodeUpgradeStatus{}
-	mi := &file_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -681,7 +793,7 @@ func (x *NodeUpgradeStatus) String() string {
 func (*NodeUpgradeStatus) ProtoMessage() {}
 
 func (x *NodeUpgradeStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[12]
+	mi := &file_node_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -694,7 +806,7 @@ func (x *NodeUpgradeStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeUpgradeStatus.ProtoReflect.Descriptor instead.
 func (*NodeUpgradeStatus) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{12}
+	return file_node_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *NodeUpgradeStatus) GetSupported() bool {
@@ -756,7 +868,7 @@ type ReportRequest struct {
 
 func (x *ReportRequest) Reset() {
 	*x = ReportRequest{}
-	mi := &file_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -768,7 +880,7 @@ func (x *ReportRequest) String() string {
 func (*ReportRequest) ProtoMessage() {}
 
 func (x *ReportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[13]
+	mi := &file_node_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -781,7 +893,7 @@ func (x *ReportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportRequest.ProtoReflect.Descriptor instead.
 func (*ReportRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{13}
+	return file_node_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ReportRequest) GetNodeId() uint64 {
@@ -809,7 +921,7 @@ type RegisterNodeRequest struct {
 
 func (x *RegisterNodeRequest) Reset() {
 	*x = RegisterNodeRequest{}
-	mi := &file_node_proto_msgTypes[14]
+	mi := &file_node_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -821,7 +933,7 @@ func (x *RegisterNodeRequest) String() string {
 func (*RegisterNodeRequest) ProtoMessage() {}
 
 func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[14]
+	mi := &file_node_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -834,7 +946,7 @@ func (x *RegisterNodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeRequest.ProtoReflect.Descriptor instead.
 func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{14}
+	return file_node_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RegisterNodeRequest) GetToken() string {
@@ -869,7 +981,7 @@ type RegisterNodeReply struct {
 
 func (x *RegisterNodeReply) Reset() {
 	*x = RegisterNodeReply{}
-	mi := &file_node_proto_msgTypes[15]
+	mi := &file_node_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -881,7 +993,7 @@ func (x *RegisterNodeReply) String() string {
 func (*RegisterNodeReply) ProtoMessage() {}
 
 func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[15]
+	mi := &file_node_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -894,7 +1006,7 @@ func (x *RegisterNodeReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterNodeReply.ProtoReflect.Descriptor instead.
 func (*RegisterNodeReply) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{15}
+	return file_node_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RegisterNodeReply) GetNodeId() uint64 {
@@ -929,7 +1041,7 @@ type NodeIPsRequest struct {
 
 func (x *NodeIPsRequest) Reset() {
 	*x = NodeIPsRequest{}
-	mi := &file_node_proto_msgTypes[16]
+	mi := &file_node_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -941,7 +1053,7 @@ func (x *NodeIPsRequest) String() string {
 func (*NodeIPsRequest) ProtoMessage() {}
 
 func (x *NodeIPsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[16]
+	mi := &file_node_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -954,7 +1066,7 @@ func (x *NodeIPsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeIPsRequest.ProtoReflect.Descriptor instead.
 func (*NodeIPsRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{16}
+	return file_node_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *NodeIPsRequest) GetNodeId() uint64 {
@@ -994,7 +1106,7 @@ type StreamFrame struct {
 
 func (x *StreamFrame) Reset() {
 	*x = StreamFrame{}
-	mi := &file_node_proto_msgTypes[17]
+	mi := &file_node_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1006,7 +1118,7 @@ func (x *StreamFrame) String() string {
 func (*StreamFrame) ProtoMessage() {}
 
 func (x *StreamFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[17]
+	mi := &file_node_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1019,7 +1131,7 @@ func (x *StreamFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamFrame.ProtoReflect.Descriptor instead.
 func (*StreamFrame) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{17}
+	return file_node_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *StreamFrame) GetId() uint64 {
@@ -1077,7 +1189,14 @@ const file_node_proto_rawDesc = "" +
 	"\fCommandReply\x12\x1f\n" +
 	"\vstatus_code\x18\x01 \x01(\x05R\n" +
 	"statusCode\x12\x12\n" +
-	"\x04body\x18\x02 \x01(\fR\x04body\",\n" +
+	"\x04body\x18\x02 \x01(\fR\x04body\"V\n" +
+	"\x14ListenerCheckRequest\x12\x1a\n" +
+	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x0e\n" +
+	"\x02ip\x18\x02 \x01(\tR\x02ip\x12\x12\n" +
+	"\x04port\x18\x03 \x01(\rR\x04port\"J\n" +
+	"\x12ListenerCheckReply\x12\x1c\n" +
+	"\tavailable\x18\x01 \x01(\bR\tavailable\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\",\n" +
 	"\x10ObserverEndpoint\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x86\x01\n" +
 	"\x11GostServiceStatus\x12\x12\n" +
@@ -1155,31 +1274,33 @@ func file_node_proto_rawDescGZIP() []byte {
 	return file_node_proto_rawDescData
 }
 
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_node_proto_goTypes = []any{
 	(*CommandRequest)(nil),       // 0: yagp.node.v1.CommandRequest
 	(*CommandReply)(nil),         // 1: yagp.node.v1.CommandReply
-	(*ObserverEndpoint)(nil),     // 2: yagp.node.v1.ObserverEndpoint
-	(*GostServiceStatus)(nil),    // 3: yagp.node.v1.GostServiceStatus
-	(*GostLogsRequest)(nil),      // 4: yagp.node.v1.GostLogsRequest
-	(*GostLogEntry)(nil),         // 5: yagp.node.v1.GostLogEntry
-	(*GostLogsReply)(nil),        // 6: yagp.node.v1.GostLogsReply
-	(*NftConfig)(nil),            // 7: yagp.node.v1.NftConfig
-	(*NftTemplateRequest)(nil),   // 8: yagp.node.v1.NftTemplateRequest
-	(*TrafficQuotaRequest)(nil),  // 9: yagp.node.v1.TrafficQuotaRequest
-	(*TrafficQuotaReply)(nil),    // 10: yagp.node.v1.TrafficQuotaReply
-	(*NodeUpgradeRequest)(nil),   // 11: yagp.node.v1.NodeUpgradeRequest
-	(*NodeUpgradeStatus)(nil),    // 12: yagp.node.v1.NodeUpgradeStatus
-	(*ReportRequest)(nil),        // 13: yagp.node.v1.ReportRequest
-	(*RegisterNodeRequest)(nil),  // 14: yagp.node.v1.RegisterNodeRequest
-	(*RegisterNodeReply)(nil),    // 15: yagp.node.v1.RegisterNodeReply
-	(*NodeIPsRequest)(nil),       // 16: yagp.node.v1.NodeIPsRequest
-	(*StreamFrame)(nil),          // 17: yagp.node.v1.StreamFrame
-	(*proto.ObserveRequest)(nil), // 18: proto.ObserveRequest
+	(*ListenerCheckRequest)(nil), // 2: yagp.node.v1.ListenerCheckRequest
+	(*ListenerCheckReply)(nil),   // 3: yagp.node.v1.ListenerCheckReply
+	(*ObserverEndpoint)(nil),     // 4: yagp.node.v1.ObserverEndpoint
+	(*GostServiceStatus)(nil),    // 5: yagp.node.v1.GostServiceStatus
+	(*GostLogsRequest)(nil),      // 6: yagp.node.v1.GostLogsRequest
+	(*GostLogEntry)(nil),         // 7: yagp.node.v1.GostLogEntry
+	(*GostLogsReply)(nil),        // 8: yagp.node.v1.GostLogsReply
+	(*NftConfig)(nil),            // 9: yagp.node.v1.NftConfig
+	(*NftTemplateRequest)(nil),   // 10: yagp.node.v1.NftTemplateRequest
+	(*TrafficQuotaRequest)(nil),  // 11: yagp.node.v1.TrafficQuotaRequest
+	(*TrafficQuotaReply)(nil),    // 12: yagp.node.v1.TrafficQuotaReply
+	(*NodeUpgradeRequest)(nil),   // 13: yagp.node.v1.NodeUpgradeRequest
+	(*NodeUpgradeStatus)(nil),    // 14: yagp.node.v1.NodeUpgradeStatus
+	(*ReportRequest)(nil),        // 15: yagp.node.v1.ReportRequest
+	(*RegisterNodeRequest)(nil),  // 16: yagp.node.v1.RegisterNodeRequest
+	(*RegisterNodeReply)(nil),    // 17: yagp.node.v1.RegisterNodeReply
+	(*NodeIPsRequest)(nil),       // 18: yagp.node.v1.NodeIPsRequest
+	(*StreamFrame)(nil),          // 19: yagp.node.v1.StreamFrame
+	(*proto.ObserveRequest)(nil), // 20: proto.ObserveRequest
 }
 var file_node_proto_depIdxs = []int32{
-	5,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
-	18, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	7,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
+	20, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	2,  // [2:2] is the sub-list for method output_type
 	2,  // [2:2] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
@@ -1198,7 +1319,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

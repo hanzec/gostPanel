@@ -53,6 +53,7 @@ describe('panel API contracts', () => {
     ['rule list', () => rule.getRuleList(filters), 'get', '/rules', { params: filters }],
     ['rule details', () => rule.getRule(42), 'get', '/rules/42'],
     ['create rule', () => rule.createRule(body), 'post', '/rules', { data: body }],
+    ['check rule listener', () => rule.checkRuleListener(5), 'post', '/rules/5/listener-check', { silentError: true }],
     ['update rule', () => rule.updateRule(42, body), 'put', '/rules/42', { data: body }],
     ['delete rule', () => rule.deleteRule(42), 'delete', '/rules/42'],
     ['start rule', () => rule.startRule(42), 'post', '/rules/42/start'],

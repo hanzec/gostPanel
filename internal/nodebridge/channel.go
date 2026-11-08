@@ -17,6 +17,7 @@ import (
 func controlDispatcher(control *controlServer) nodegrpc.StreamHandler {
 	return nodegrpc.NewDispatcher(control,
 		nodegrpc.V1_Execute_FullMethodName,
+		nodegrpc.V1_CheckListener_FullMethodName,
 		nodegrpc.V1_GetObserverEndpoint_FullMethodName,
 		nodegrpc.V1_GetGostServiceStatus_FullMethodName,
 		nodegrpc.V1_RestartGostService_FullMethodName,
