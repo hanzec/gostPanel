@@ -38,6 +38,8 @@ func run(ctx context.Context, args []string) error {
 			return ensureGost(ctx, parseConfigFlag(args[0], args[1:]))
 		case "nft-template":
 			return printNftTemplate(ctx, parseConfigFlag(args[0], args[1:]))
+		case "upgrade-component":
+			return upgradeComponent(ctx, args[1:])
 		}
 	}
 	configFile := parseConfigFlag("yagp-daemon", args)
@@ -46,6 +48,7 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	config.NftConfigFile = filepath.Join(filepath.Dir(configFile), "nft.json")
+	config.ConfigFile = configFile
 	return nodebridge.Run(ctx, config)
 }
 

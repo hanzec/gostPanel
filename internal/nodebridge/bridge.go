@@ -37,6 +37,7 @@ type Config struct {
 	TLSCertFile    string `yaml:"tls_cert_file"`
 	TLSKeyFile     string `yaml:"tls_key_file"`
 	NftConfigFile  string `yaml:"-"`
+	ConfigFile     string `yaml:"-"`
 }
 
 func Run(ctx context.Context, cfg Config) error {

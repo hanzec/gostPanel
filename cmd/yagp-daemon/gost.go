@@ -74,7 +74,7 @@ func ensureGost(ctx context.Context, configFile string) error {
 			return err
 		}
 	}
-	return waitForGost(ctx, config)
+	return nodebridge.WaitForGost(ctx, config)
 }
 
 func installGostUnit(ctx context.Context, unit, basePath, binary, config string) error {
@@ -104,38 +104,6 @@ func systemctl(ctx context.Context, args ...string) error {
 		return fmt.Errorf("systemctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
 	return nil
-}
-
-func waitForGost(ctx context.Context, config nodebridge.Config) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	transport := &http.Transport{}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{
-		Transport: transport, Timeout: time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+config.AdminAddress+"/api/config", nil)
-	if err != nil {
-		return err
-	}
-	req.SetBasicAuth(config.Username, config.Password)
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		res, err := client.Do(req)
-		if err == nil {
-			res.Body.Close()
-			if res.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("Gost API at %s did not become ready: %w", config.AdminAddress, ctx.Err())
-		case <-ticker.C:
-		}
-	}
 }
 
 func downloadGost(ctx context.Context, path string) error {

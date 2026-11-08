@@ -51,6 +51,21 @@ message NftTemplateRequest {
   uint64 node_id = 1;
 }
 
+message NodeUpgradeRequest {
+  string component = 1;
+  string version = 2;
+}
+
+message NodeUpgradeStatus {
+  bool supported = 1;
+  string gost_version = 2;
+  string daemon_version = 3;
+  string component = 4;
+  string target_version = 5;
+  string state = 6;
+  string error = 7;
+}
+
 service Node {
   rpc Execute(CommandRequest) returns (CommandReply);
   rpc GetObserverEndpoint(google.protobuf.Empty) returns (ObserverEndpoint);
@@ -59,6 +74,8 @@ service Node {
   rpc GetGostLogs(GostLogsRequest) returns (GostLogsReply);
   rpc GetNftConfig(google.protobuf.Empty) returns (NftConfig);
   rpc ApplyNftConfig(NftConfig) returns (NftConfig);
+  rpc GetUpgradeStatus(google.protobuf.Empty) returns (NodeUpgradeStatus);
+  rpc StartUpgrade(NodeUpgradeRequest) returns (NodeUpgradeStatus);
 }
 
 message ReportRequest {

@@ -28,6 +28,8 @@ const (
 	Node_GetGostLogs_FullMethodName          = "/yagp.node.v1.Node/GetGostLogs"
 	Node_GetNftConfig_FullMethodName         = "/yagp.node.v1.Node/GetNftConfig"
 	Node_ApplyNftConfig_FullMethodName       = "/yagp.node.v1.Node/ApplyNftConfig"
+	Node_GetUpgradeStatus_FullMethodName     = "/yagp.node.v1.Node/GetUpgradeStatus"
+	Node_StartUpgrade_FullMethodName         = "/yagp.node.v1.Node/StartUpgrade"
 )
 
 // NodeClient is the client API for Node service.
@@ -41,6 +43,8 @@ type NodeClient interface {
 	GetGostLogs(ctx context.Context, in *GostLogsRequest, opts ...grpc.CallOption) (*GostLogsReply, error)
 	GetNftConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NftConfig, error)
 	ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...grpc.CallOption) (*NftConfig, error)
+	GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
+	StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
 }
 
 type nodeClient struct {
@@ -121,6 +125,26 @@ func (c *nodeClient) ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...
 	return out, nil
 }
 
+func (c *nodeClient) GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NodeUpgradeStatus)
+	err := c.cc.Invoke(ctx, Node_GetUpgradeStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeClient) StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opts ...grpc.CallOption) (*NodeUpgradeStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NodeUpgradeStatus)
+	err := c.cc.Invoke(ctx, Node_StartUpgrade_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServer is the server API for Node service.
 // All implementations must embed UnimplementedNodeServer
 // for forward compatibility.
@@ -132,6 +156,8 @@ type NodeServer interface {
 	GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error)
 	GetNftConfig(context.Context, *emptypb.Empty) (*NftConfig, error)
 	ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error)
+	GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error)
+	StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error)
 	mustEmbedUnimplementedNodeServer()
 }
 
@@ -162,6 +188,12 @@ func (UnimplementedNodeServer) GetNftConfig(context.Context, *emptypb.Empty) (*N
 }
 func (UnimplementedNodeServer) ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ApplyNftConfig not implemented")
+}
+func (UnimplementedNodeServer) GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetUpgradeStatus not implemented")
+}
+func (UnimplementedNodeServer) StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StartUpgrade not implemented")
 }
 func (UnimplementedNodeServer) mustEmbedUnimplementedNodeServer() {}
 func (UnimplementedNodeServer) testEmbeddedByValue()              {}
@@ -310,6 +342,42 @@ func _Node_ApplyNftConfig_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Node_GetUpgradeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).GetUpgradeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_GetUpgradeStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).GetUpgradeStatus(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Node_StartUpgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NodeUpgradeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServer).StartUpgrade(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Node_StartUpgrade_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServer).StartUpgrade(ctx, req.(*NodeUpgradeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Node_ServiceDesc is the grpc.ServiceDesc for Node service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -344,6 +412,14 @@ var Node_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ApplyNftConfig",
 			Handler:    _Node_ApplyNftConfig_Handler,
+		},
+		{
+			MethodName: "GetUpgradeStatus",
+			Handler:    _Node_GetUpgradeStatus_Handler,
+		},
+		{
+			MethodName: "StartUpgrade",
+			Handler:    _Node_StartUpgrade_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
