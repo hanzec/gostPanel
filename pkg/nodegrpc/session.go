@@ -18,6 +18,9 @@ const (
 	NodeIDMetadata = "x-yagp-node-id"
 	ReadyMetadata  = "x-yagp-connected"
 
+	// MaxStreamFrameBytes includes the protobuf envelope around a 4 MiB Gost body.
+	MaxStreamFrameBytes = 5 << 20
+
 	sessionCapacity = 32
 	sessionTimeout  = 30 * time.Second
 )
@@ -86,11 +89,18 @@ func (s *Session) Invoke(ctx context.Context, method string, args, reply any, _ 
 	if err := ctx.Err(); err != nil {
 		return status.FromContextError(err).Err()
 	}
-	payload, err := proto.Marshal(args.(proto.Message))
+	request := args.(proto.Message)
+	if proto.Size(request) > MaxStreamFrameBytes {
+		return status.Error(codes.ResourceExhausted, "RPC request exceeds stream message limit")
+	}
+	payload, err := proto.Marshal(request)
 	if err != nil {
 		return status.Error(codes.Internal, "cannot encode RPC request")
 	}
-	frame := &StreamFrame{Id: s.nextID.Add(1), Method: method, Payload: payload}
+	frame := &StreamFrame{Id: s.nextID.Add(1), Method: method, Payload: payload, TimeoutMillis: sessionTimeout.Milliseconds()}
+	if proto.Size(frame) > MaxStreamFrameBytes {
+		return status.Error(codes.ResourceExhausted, "RPC request exceeds stream message limit")
+	}
 	result := make(chan *StreamFrame, 1)
 	s.mu.Lock()
 	s.pending[frame.Id] = result
@@ -180,6 +190,9 @@ func (s *Session) dispatch(frame *StreamFrame) {
 		}
 		response.Code, response.Error = int32(result.Code()), result.Message()
 	}
+	if proto.Size(response) > MaxStreamFrameBytes {
+		response = &StreamFrame{Id: frame.GetId(), Code: int32(codes.ResourceExhausted), Error: "RPC response exceeds stream message limit"}
+	}
 	select {
 	case s.send <- outboundFrame{frame: response}:
 	case <-s.Done():
@@ -195,7 +208,6 @@ func (s *Session) writeFrames() error {
 				if message.caller.Err() != nil {
 					continue
 				}
-				message.frame.TimeoutMillis = sessionTimeout.Milliseconds()
 				if deadline, ok := message.caller.Deadline(); ok {
 					message.frame.TimeoutMillis = max(1, min(message.frame.TimeoutMillis, time.Until(deadline).Milliseconds()))
 				}
@@ -235,7 +247,11 @@ func NewDispatcher(server V1Server, allowed ...string) StreamHandler {
 		if err != nil {
 			return nil, err
 		}
-		encoded, err := proto.Marshal(reply.(proto.Message))
+		response := reply.(proto.Message)
+		if proto.Size(response) > MaxStreamFrameBytes {
+			return nil, status.Error(codes.ResourceExhausted, "RPC response exceeds stream message limit")
+		}
+		encoded, err := proto.Marshal(response)
 		if err != nil {
 			return nil, status.Error(codes.Internal, "cannot encode RPC response")
 		}

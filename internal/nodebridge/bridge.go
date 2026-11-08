@@ -123,7 +123,10 @@ func connectPanel(cfg Config) (*grpc.ClientConn, error) {
 	}
 	return address.NewClientConn(grpc.WithTransportCredentials(transport),
 		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(5<<20)))
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(nodegrpc.MaxStreamFrameBytes),
+			grpc.MaxCallSendMsgSize(nodegrpc.MaxStreamFrameBytes),
+		))
 }
 
 func IsLoopbackAddress(address string) bool {
