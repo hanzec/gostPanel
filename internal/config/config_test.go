@@ -9,6 +9,7 @@ import (
 )
 
 func TestLoadDefaultsAndDatabaseEnvironment(t *testing.T) {
+	t.Setenv("YAGP_HOST", "")
 	t.Setenv("YAGP_DATABASE_TYPE", "")
 	t.Setenv("YAGP_DATABASE_DSN", "")
 	t.Chdir(t.TempDir())
@@ -26,7 +27,7 @@ func TestLoadDefaultsAndDatabaseEnvironment(t *testing.T) {
 	t.Setenv("YAGP_DATABASE_TYPE", "mysql")
 	t.Setenv("YAGP_DATABASE_DSN", dsn)
 	path := "settings.yaml"
-	data := []byte("server:\n  port: ':5000'\n  mode: release\ndatabase:\n  type: sqlite\n  path: /data/panel.db\nauthentik:\n  trusted_proxies: [10.0.0.0/8]\n  admin_group: Operators\nreport:\n  listen: ':9000'\n  address: 'panel.example.test:9000'\nlog:\n  level: debug\n  format: console\n  output: stdout\n")
+	data := []byte("host: panel.example.test\nserver:\n  port: ':5000'\n  mode: release\ndatabase:\n  type: sqlite\n  path: /data/panel.db\nauthentik:\n  trusted_proxies: [10.0.0.0/8]\n  admin_group: Operators\nreport:\n  listen: ':9000'\n  direct_tls: true\nlog:\n  level: debug\n  format: console\n  output: stdout\n")
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -37,8 +38,24 @@ func TestLoadDefaultsAndDatabaseEnvironment(t *testing.T) {
 	if loaded.Database.Type != "mysql" || loaded.Database.DSN != dsn || loaded.Database.Path != "/data/panel.db" ||
 		loaded.Server.Mode != "release" || loaded.Server.Port != ":5000" ||
 		loaded.Authentik.AdminGroup != "Operators" || !slices.Equal(loaded.Authentik.TrustedProxies, []string{"10.0.0.0/8"}) ||
-		loaded.Report.Address != "panel.example.test:9000" || loaded.Report.Listen != ":9000" || loaded.Log.Output != "stdout" {
+		loaded.Host != "panel.example.test" || loaded.Report.Listen != ":9000" || !loaded.Report.DirectTLS || loaded.Log.Output != "stdout" {
 		t.Fatalf("file values or environment overrides were lost: %+v", loaded)
+	}
+}
+
+func TestLoadHostEnvironmentOverride(t *testing.T) {
+	t.Setenv("YAGP_HOST", "2001:db8::2")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := []byte("host: panel.example.test\nreport:\n  listen: ':39101'\n")
+	if err := os.WriteFile(path, yaml, 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Host != "2001:db8::2" || loaded.Report.Listen != ":39101" || loaded.Report.DirectTLS {
+		t.Fatalf("unexpected report configuration: %+v", loaded)
 	}
 }
 

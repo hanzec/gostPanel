@@ -113,30 +113,43 @@ func TestClientTLSLoadsExplicitRoots(t *testing.T) {
 	}
 }
 
-func TestPinnedTLSStillChecksThePanelHostname(t *testing.T) {
+func TestPinnedTLSRejectsAnUnexpectedPanelIdentity(t *testing.T) {
 	server := httptest.NewUnstartedServer(nil)
 	server.EnableHTTP2 = true
 	server.StartTLS()
 	t.Cleanup(server.Close)
 	digest := sha256.Sum256(server.Certificate().Raw)
-	address, err := ParsePanelAddress("wrong.example:443")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := address.ClientTLS("", "invalid-fingerprint"); err == nil {
-		t.Fatal("malformed fingerprint was accepted")
-	}
-	transport, err := address.ClientTLS("", hex.EncodeToString(digest[:]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := net.Dial("tcp", server.Listener.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer raw.Close()
-	if conn, _, err := transport.ClientHandshake(t.Context(), "wrong.example:443", raw); conn != nil ||
-		!errors.As(err, new(x509.HostnameError)) {
-		t.Fatalf("pinned TLS handshake for a different hostname = %v, %v", conn, err)
+	for _, tt := range []struct {
+		name, host, fingerprint string
+		wantError               func(error) bool
+	}{
+		{"wrong hostname", "wrong.example", hex.EncodeToString(digest[:]), func(err error) bool {
+			return errors.As(err, new(x509.HostnameError))
+		}},
+		{"wrong fingerprint", "127.0.0.1", strings.Repeat("0", 64), func(err error) bool {
+			return err != nil && strings.Contains(err.Error(), "fingerprint mismatch")
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			panel, err := ParsePanelHost(tt.host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := panel.ClientTLS("", "invalid-fingerprint"); err == nil {
+				t.Fatal("malformed fingerprint was accepted")
+			}
+			transport, err := panel.ClientTLS("", tt.fingerprint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := net.Dial("tcp", server.Listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer raw.Close()
+			if conn, _, err := transport.ClientHandshake(t.Context(), net.JoinHostPort(tt.host, PanelPort), raw); conn != nil || !tt.wantError(err) {
+				t.Fatalf("pinned TLS handshake = %v, %v", conn, err)
+			}
+		})
 	}
 }

@@ -22,6 +22,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -108,14 +109,13 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	if err := db.AutoMigrate(&model.GostNode{}); err != nil {
 		t.Fatal(err)
 	}
-	if server, pin, err := startReports(config.ReportConfig{}, db); err != nil || server != nil || pin != "" {
+	if server, pin, err := startReports(config.ReportConfig{}, "", db); err != nil || server != nil || pin != "" {
 		t.Fatalf("disabled reports = %v, %v", server, err)
 	}
-	cfg := config.ReportConfig{Listen: "127.0.0.1:0", Address: ":9000"}
-	if _, _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.address") {
-		t.Fatalf("invalid report address = %v", err)
+	cfg := config.ReportConfig{Listen: "127.0.0.1:0", DirectTLS: true}
+	if _, _, err := startReports(cfg, "127.0.0.1:9000", db); err == nil || !strings.Contains(err.Error(), "host") {
+		t.Fatalf("invalid report host = %v", err)
 	}
-	cfg.Address = "panel.example.test:9000"
 	https := httptest.NewTLSServer(nil)
 	cert := https.TLS.Certificates[0]
 	https.Close()
@@ -140,12 +140,12 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	}
 	cfg.Listen = listener.Addr().String()
 	_ = listener.Close()
-	server, pin, err := startReports(cfg, db)
+	server, pin, err := startReports(cfg, "127.0.0.1", db)
 	if err != nil || pin != "" {
 		t.Fatalf("configured TLS certificate = pin %q, %v", pin, err)
 	}
 	defer server.Stop()
-	info, ok := server.GetServiceInfo()["yagp.v1"]
+	info, ok := server.GetServiceInfo()[strings.TrimPrefix(nodegrpc.PanelRPCPath, "/")]
 	if !ok || len(info.Methods) != 16 {
 		t.Fatalf("registered report API = %+v", info)
 	}
@@ -153,11 +153,7 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn, err := grpc.NewClient(cfg.Listen, grpc.WithTransportCredentials(trust))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
+	conn := testPanelClient(t, "127.0.0.1", cfg.Listen, trust)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	client := nodegrpc.NewV1Client(conn)
@@ -171,9 +167,29 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 		t.Fatalf("listener probe should run only on the node control stream: %v", err)
 	}
 	cfg.Listen = "invalid listen address"
-	if _, _, err := startReports(cfg, db); err == nil {
+	if _, _, err := startReports(cfg, "127.0.0.1", db); err == nil {
 		t.Fatal("invalid bind address accepted")
 	}
+	cfg.KeyFile = ""
+	if _, _, err := startReports(cfg, "127.0.0.1", db); err == nil || !strings.Contains(err.Error(), "report.key_file") {
+		t.Fatalf("incomplete explicit TLS configuration = %v", err)
+	}
+}
+
+func testPanelClient(t *testing.T, host, listen string, transport credentials.TransportCredentials) *grpc.ClientConn {
+	t.Helper()
+	panel, err := nodegrpc.ParsePanelHost(host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := panel.NewClientConn(grpc.WithTransportCredentials(transport), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", listen)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
 }
 
 func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
@@ -196,12 +212,10 @@ func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cfg := config.ReportConfig{Listen: listener.Addr().String(), Address: listener.Addr().String()}
+			cfg := config.ReportConfig{Listen: listener.Addr().String(), DirectTLS: !proxied}
 			_ = listener.Close()
-			if proxied {
-				cfg.Address = "panel.example.test:443" + nodegrpc.PanelProxyPath
-			}
-			server, pin, err := startReports(cfg, db)
+			const host = "127.0.0.1"
+			server, pin, err := startReports(cfg, host, db)
 			if err != nil || (proxied && pin != "") || (!proxied && len(pin) != 64) {
 				t.Fatalf("start reports = pin %q, %v", pin, err)
 			}
@@ -216,23 +230,26 @@ func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
 			}
 			transport := insecure.NewCredentials()
 			if !proxied {
-				address, err := nodegrpc.ParsePanelAddress(cfg.Address)
+				panel, err := nodegrpc.ParsePanelHost(host)
 				if err != nil {
 					t.Fatal(err)
 				}
-				transport, err = address.ClientTLS("", enrollmentPin)
+				transport, err = panel.ClientTLS("", enrollmentPin)
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
-			conn, err := grpc.NewClient(cfg.Listen, grpc.WithTransportCredentials(transport))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer conn.Close()
+			conn := testPanelClient(t, host, cfg.Listen, transport)
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			client := nodegrpc.NewV1Client(conn)
+			stream, err := client.Connect(ctx)
+			if err == nil {
+				_, err = stream.Recv()
+			}
+			if status.Code(err) != codes.Unauthenticated {
+				t.Fatalf("unauthenticated connect = %v", err)
+			}
 			request := &nodegrpc.RegisterNodeRequest{Token: issued.Token}
 			if proxied {
 				ctx = metadata.AppendToOutgoingContext(ctx, "x-real-ip", "192.0.2.20")
@@ -247,63 +264,6 @@ func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
 			}
 			if err := db.First(&node, node.ID).Error; err != nil || node.IPv4 != request.Ipv4 {
 				t.Fatalf("stored enrollment address = %q, %v", node.IPv4, err)
-			}
-		})
-	}
-}
-
-func TestStartReportsAllowsOnlyTheConfiguredProxy(t *testing.T) {
-	db := testSQLite(t)
-	cfg := config.ReportConfig{Listen: "127.0.0.1:0", Address: "panel.example.test:443"}
-	cfg.ProxyIP = "127.0.0.1"
-	if _, _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "/api/v1/grpc") {
-		t.Fatalf("proxied reports without a path = %v", err)
-	}
-	cfg.Address += "/api/v1/grpc"
-	cfg.ProxyIP = "127.0.0.0/8"
-	if _, _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
-		t.Fatalf("proxy IP with a CIDR = %v", err)
-	}
-
-	for _, tt := range []struct {
-		proxyIP string
-		want    codes.Code
-	}{
-		{"127.0.0.1", codes.Unauthenticated},
-		{"127.0.0.2", codes.PermissionDenied},
-	} {
-		t.Run(tt.proxyIP, func(t *testing.T) {
-			listener, err := net.Listen("tcp4", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			cfg.Listen = listener.Addr().String()
-			_ = listener.Close()
-			cfg.ProxyIP = tt.proxyIP
-			server, _, err := startReports(cfg, db)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer server.Stop()
-
-			conn, err := grpc.NewClient(cfg.Listen, grpc.WithTransportCredentials(insecure.NewCredentials()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer conn.Close()
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-			defer cancel()
-			client := nodegrpc.NewV1Client(conn)
-			_, err = client.RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{})
-			if status.Code(err) != tt.want {
-				t.Fatalf("registration from 127.0.0.1 = %v, want %v", err, tt.want)
-			}
-			stream, err := client.Connect(ctx)
-			if err == nil {
-				_, err = stream.Recv()
-			}
-			if status.Code(err) != tt.want {
-				t.Fatalf("stream from 127.0.0.1 = %v, want %v", err, tt.want)
 			}
 		})
 	}

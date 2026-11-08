@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   messages = mockNodeMessages()
   api.getNodeList.mockResolvedValue(list([primary]))
-  getPublicSystemConfig.mockResolvedValue(response({ reportAddress: 'panel.example.com:443/api/v1/grpc' }))
+  getPublicSystemConfig.mockResolvedValue(response({ host: 'panel.example.com' }))
   api.issueNodeRegistrationToken.mockImplementation(async () => token())
 })
 
@@ -188,7 +188,7 @@ describe('node registration and quota settings', () => {
     expect(install.get('code').text()).toBe('secret')
     expect(install.get('textarea').element.value).toBe(
       "curl -fsSL 'https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh' | bash -s -- " +
-      "--panel-address 'panel.example.com:443/api/v1/grpc' --token 'secret'"
+      "--host 'panel.example.com' --token 'secret'"
     )
     expect(messages.success).toHaveBeenCalledWith('节点已添加')
   })
@@ -230,8 +230,8 @@ describe('node registration and quota settings', () => {
     Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
     const execCommand = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false)
     Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
-    getPublicSystemConfig.mockResolvedValueOnce(response({ reportAddress: '' }))
-      .mockResolvedValue(response({ reportAddress: '[2001:db8::1]:39101' }))
+    getPublicSystemConfig.mockResolvedValueOnce(response({ host: '' }))
+      .mockResolvedValue(response({ host: '2001:db8::1' }))
     api.issueNodeRegistrationToken.mockRejectedValueOnce(new Error('retry'))
       .mockImplementationOnce(async () => token('expired', -1000))
       .mockImplementationOnce(async () => token("one'two", 1000))
@@ -240,7 +240,7 @@ describe('node registration and quota settings', () => {
     await click(view, '安装')
     const install = dialog(view, '安装节点 · 边缘节点')
     expect(install.find('input').exists()).toBe(false)
-    expect(install.get('[role="alert"]').text()).toContain('report.address')
+    expect(install.get('[role="alert"]').text()).toContain('host 和 report.listen')
     expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
     await click(install, '重试生成')
     expect(install.get('[role="alert"]').text()).toContain('签发注册令牌失败')
@@ -253,7 +253,7 @@ describe('node registration and quota settings', () => {
     const field = install.get('textarea').element
     const command = field.value
     expect(field.readOnly).toBe(true)
-    expect(command).toContain("--panel-address '[2001:db8::1]:39101'")
+    expect(command).toContain("--host '2001:db8::1'")
     expect(command).toContain("--token 'one'\"'\"'two'")
     await click(install, '复制安装命令')
     expect(writeText).toHaveBeenCalledWith(command)
@@ -285,7 +285,7 @@ describe('node registration and quota settings', () => {
     const title = '安装节点 · 边缘节点'
     expect(dialog(view, title).text()).toContain('正在生成注册令牌')
     await click(dialog(view, title), '关闭')
-    config.resolve(response({ reportAddress: 'stale.example.com:1' }))
+    config.resolve(response({ host: 'stale.example.com' }))
     await flushPromises()
     expect(view.find(`[aria-label="${title}"]`).exists()).toBe(false)
     expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
@@ -297,7 +297,7 @@ describe('node registration and quota settings', () => {
     issue.resolve(token('shared-token'))
     await flushPromises()
     expect(dialog(view, title).get('code').text()).toBe('shared-token')
-    expect(dialog(view, title).get('textarea').element.value).toContain("--panel-address 'panel.example.com:443/api/v1/grpc'")
+    expect(dialog(view, title).get('textarea').element.value).toContain("--host 'panel.example.com'")
   })
 
   it('retains a failed edit, ignores a duplicate submission and lets the user retry', async () => {

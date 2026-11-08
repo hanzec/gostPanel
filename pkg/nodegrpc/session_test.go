@@ -237,24 +237,23 @@ func TestBidirectionalSessionCorrelatesCallsAndReleasesPendingOnDisconnect(t *te
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	panel := &sessionPanelFixture{connected: make(chan *Session, 1)}
-	server := grpc.NewServer(grpc.UnknownServiceHandler(func(_ any, stream grpc.ServerStream) error {
-		method, _ := grpc.MethodFromServerStream(stream)
-		if method != "/api/v1/grpc/Connect" {
-			return status.Errorf(codes.Unimplemented, "unexpected path %s", method)
-		}
-		return panel.Connect(&grpc.GenericServerStream[StreamFrame, StreamFrame]{ServerStream: stream})
-	}))
+	server := grpc.NewServer()
+	RegisterPanelServer(server, panel)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = server.Serve(listener) }()
 	defer server.Stop()
-	address, err := ParsePanelAddress(listener.Addr().String() + PanelProxyPath)
+	host, err := ParsePanelHost("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn, err := address.NewClientConn(grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := host.NewClientConn(grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
+		func(ctx context.Context, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
+		},
+	))
 	if err != nil {
 		t.Fatal(err)
 	}

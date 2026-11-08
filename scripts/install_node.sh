@@ -10,7 +10,7 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 usage() {
     cat <<'EOF'
 用法:
-  install_node.sh --panel-address HOST:PORT[/api/v1/grpc] --token TOKEN
+  install_node.sh --host HOST --token TOKEN
   install_node.sh upgrade --node-id ID
   install_node.sh uninstall --node-id ID
 EOF
@@ -24,13 +24,13 @@ esac
 [[ $EUID -eq 0 ]] || die "请使用 root 用户运行此脚本"
 
 node_id=
-panel_address=
+panel_host=
 token=
 while (($#)); do
     [[ $# -ge 2 ]] || die "缺少参数值: $1"
     case "$action:$1" in
         upgrade:--node-id|uninstall:--node-id) node_id=$2 ;;
-        install:--panel-address) panel_address=$2 ;;
+        install:--host) panel_host=$2 ;;
         install:--token) token=$2 ;;
         *) usage; die "未知参数: $1" ;;
     esac
@@ -84,7 +84,7 @@ if [[ "$action" == upgrade ]]; then
     [[ -f "$base_path/node.yaml" && -x "$base_path/yagp-daemon" ]] || die "未找到已安装的节点 $node_id"
     [[ $(systemctl show --property=LoadState --value "$bridge_unit.service") == loaded ]] || die "未找到服务 $bridge_unit.service"
 else
-    [[ -n "$panel_address" && -n "$token" ]] || { usage; exit 1; }
+    [[ -n "$panel_host" && -n "$token" ]] || { usage; exit 1; }
 fi
 
 case "$(uname -m)" in
@@ -153,7 +153,7 @@ if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
 fi
 "$stage/yagp-daemon" prepare-gost --output "$stage/gost"
 
-if ! node_id=$(printf '%s' "$token" | "$stage/yagp-daemon" enroll --panel-address "$panel_address" --output "$stage"); then
+if ! node_id=$(printf '%s' "$token" | "$stage/yagp-daemon" enroll --host "$panel_host" --output "$stage"); then
     die "节点未安装。若 token 已失效，请在面板生成新的 token 后重试。"
 fi
 unset token

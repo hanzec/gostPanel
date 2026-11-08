@@ -11,6 +11,7 @@ import (
 
 // Config 应用配置结构
 type Config struct {
+	Host      string          `mapstructure:"host"`
 	Server    ServerConfig    `mapstructure:"server"`
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Authentik AuthentikConfig `mapstructure:"authentik"`
@@ -37,11 +38,10 @@ type AuthentikConfig struct {
 }
 
 type ReportConfig struct {
-	Listen   string `mapstructure:"listen"`
-	Address  string `mapstructure:"address"`
-	ProxyIP  string `mapstructure:"proxy_ip"`
-	CertFile string `mapstructure:"cert_file"`
-	KeyFile  string `mapstructure:"key_file"`
+	Listen    string `mapstructure:"listen"`
+	DirectTLS bool   `mapstructure:"direct_tls"`
+	CertFile  string `mapstructure:"cert_file"`
+	KeyFile   string `mapstructure:"key_file"`
 }
 
 // LogConfig 日志配置
@@ -59,6 +59,9 @@ var cfg *Config
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigType("yaml")
+	if err := v.BindEnv("host", "YAGP_HOST"); err != nil {
+		return nil, err
+	}
 	if err := v.BindEnv("database.type", "YAGP_DATABASE_TYPE"); err != nil {
 		return nil, err
 	}
@@ -100,7 +103,6 @@ func Load(configPath string) (*Config, error) {
 
 	// 设置默认值
 	setDefaults(cfg)
-
 	return cfg, nil
 }
 

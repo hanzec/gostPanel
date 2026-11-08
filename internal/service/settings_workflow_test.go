@@ -23,7 +23,7 @@ import (
 
 func TestSystemSettingsRoundTripAndPublicProjection(t *testing.T) {
 	db := newServiceTestDB(t)
-	loadServiceConfig(t, "report:\n  address: https://panel.test\n")
+	loadServiceConfig(t, "host: panel.test\nreport:\n  listen: ':39101'\n")
 	settings := NewSystemConfigService(repository.NewSystemConfigRepository(db))
 	defaults, err := settings.GetConfig()
 	requireServiceError(t, err, nil)
@@ -50,8 +50,14 @@ func TestSystemSettingsRoundTripAndPublicProjection(t *testing.T) {
 	}
 	public, err := settings.GetPublicConfig()
 	requireServiceError(t, err, nil)
-	if *public != (dto.PublicSystemConfigResp{SiteTitle: want.Config.SiteTitle, LogoURL: want.Config.LogoURL, Copyright: want.Config.Copyright, ReportAddress: "https://panel.test"}) {
+	if *public != (dto.PublicSystemConfigResp{SiteTitle: want.Config.SiteTitle, LogoURL: want.Config.LogoURL, Copyright: want.Config.Copyright, Host: "panel.test"}) {
 		t.Fatalf("public settings = %+v", public)
+	}
+	loadServiceConfig(t, "host: panel.test\n")
+	public, err = settings.GetPublicConfig()
+	requireServiceError(t, err, nil)
+	if public.Host != "" {
+		t.Fatal("advertised a registration host with reporting disabled")
 	}
 
 	requireServiceError(t, db.Migrator().DropTable(&model.SystemConfig{}), nil)

@@ -6,6 +6,7 @@ import (
 
 	"yagp/pkg/nodegrpc"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -26,8 +27,8 @@ func (s *controlServer) ApplyNftConfig(ctx context.Context, req *nodegrpc.NftCon
 	return req, nil
 }
 
-func GetNftTemplate(ctx context.Context, cfg Config) (string, error) {
-	conn, err := connectPanel(cfg)
+func GetNftTemplate(ctx context.Context, cfg Config, dialOptions ...grpc.DialOption) (string, error) {
+	conn, err := connectPanel(cfg, dialOptions...)
 	if err != nil {
 		return "", err
 	}

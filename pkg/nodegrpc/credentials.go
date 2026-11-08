@@ -63,7 +63,7 @@ func ClientTLS(caFile string) (credentials.TransportCredentials, error) {
 }
 
 // ClientTLS uses the pinned panel certificate when the panel generated its own TLS identity.
-func (a PanelAddress) ClientTLS(caFile, fingerprint string) (credentials.TransportCredentials, error) {
+func (h PanelHost) ClientTLS(caFile, fingerprint string) (credentials.TransportCredentials, error) {
 	if fingerprint == "" {
 		return ClientTLS(caFile)
 	}
@@ -73,7 +73,7 @@ func (a PanelAddress) ClientTLS(caFile, fingerprint string) (credentials.Transpo
 	}
 	return credentials.NewTLS(&tls.Config{
 		MinVersion: tls.VersionTLS12,
-		ServerName: a.Host(),
+		ServerName: h.Host(),
 		// Pin verification uses the matching leaf as the sole trust anchor.
 		InsecureSkipVerify: true,
 		VerifyConnection: func(state tls.ConnectionState) error {
@@ -87,7 +87,7 @@ func (a PanelAddress) ClientTLS(caFile, fingerprint string) (credentials.Transpo
 			}
 			roots := x509.NewCertPool()
 			roots.AddCert(leaf)
-			_, err := leaf.Verify(x509.VerifyOptions{DNSName: a.Host(), Roots: roots})
+			_, err := leaf.Verify(x509.VerifyOptions{DNSName: h.Host(), Roots: roots})
 			return err
 		},
 	}), nil

@@ -34,12 +34,12 @@ func TestRunRejectsInvalidCLIAndConfiguration(t *testing.T) {
 		{"unknown configuration field", []string{"-c", unknown}, "not_a_node_field"},
 		{"missing configuration file", []string{"-c", missing}, "missing.yaml"},
 		{"invalid bridge config", []string{"-c", configPath}, "node ID and credentials are required"},
-		{"enrollment flags", []string{"enroll"}, "requires --panel-address and --output"},
+		{"enrollment flags", []string{"enroll"}, "requires --host and --output"},
 		{"prepare flags", []string{"prepare-gost"}, "requires --output"},
 		{"ensure config missing", []string{"ensure-gost", "-c", missing}, "missing.yaml"},
 		{"ensure API is loopback", []string{"ensure-gost", "-c", configPath}, "loopback Gost API address"},
 		{"template config missing", []string{"nft-template", "-c", missing}, "missing.yaml"},
-		{"template invalid report address", []string{"nft-template", "-c", configPath}, "panel address must be HOST:PORT"},
+		{"template invalid panel host", []string{"nft-template", "-c", configPath}, "panel host must be a bare DNS name or IP address"},
 		{"upgrade flags", []string{"upgrade-component", "--component", "gost"}, "requires --component and --tag"},
 		{"upgrade config missing", []string{"upgrade-component", "--component", "gost", "--tag", "v3.3.3", "-c", missing}, "missing.yaml"},
 		{"installed ID flag", []string{"--upgrade-installed"}, "requires --node-id"},
@@ -68,7 +68,7 @@ func TestEnrollmentCommandReadsTokenFromStdin(t *testing.T) {
 	os.Stdin = file
 	defer func() { os.Stdin = original }()
 	output := t.TempDir()
-	err = run(context.Background(), []string{"enroll", "--panel-address", "127.0.0.1:42", "--output", output})
+	err = run(context.Background(), []string{"enroll", "--host", "127.0.0.1", "--output", output})
 	if err == nil || !strings.Contains(err.Error(), "invalid registration token") {
 		t.Fatalf("invalid token read from stdin returned %v", err)
 	}
@@ -87,15 +87,21 @@ tls_cert_file: /etc/yagp-daemon/42/node.crt
 tls_key_file: /etc/yagp-daemon/42/node.key
 admin_address: 127.0.0.1:12345
 observer_listen: 127.0.0.1:12346
-report_address: panel.example.com:443/api/v1/grpc
+host: panel.example.com
 `
 	if err := os.WriteFile(path, []byte(stored), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := readConfig(path)
 	if err != nil || cfg.NodeID != 42 || cfg.Username != "node-42" || cfg.Password != "existing-credential" ||
-		cfg.ObserverListen != "127.0.0.1:12346" || cfg.ReportAddress != "panel.example.com:443/api/v1/grpc" {
+		cfg.ObserverListen != "127.0.0.1:12346" || cfg.Host != "panel.example.com" {
 		t.Fatalf("reading existing node configuration failed: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("report_address: panel.example.com:443/api/v1/grpc\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readConfig(path); err == nil || !strings.Contains(err.Error(), "report_address") {
+		t.Fatalf("retired configuration field was accepted: %v", err)
 	}
 }
 

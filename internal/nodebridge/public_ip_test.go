@@ -28,12 +28,12 @@ func TestReportPublicIPChanges(t *testing.T) {
 	listener := listenLocal(t)
 	panel := grpc.NewServer(grpc.Creds(serverTLS))
 	reports := &ipReportRecorder{requests: make(chan *nodegrpc.NodeIPsRequest, 8)}
-	nodegrpc.RegisterV1Server(panel, reports)
+	nodegrpc.RegisterPanelServer(panel, reports)
 	go func() { _ = panel.Serve(listener) }()
 	t.Cleanup(panel.Stop)
 	conn, err := connectPanel(Config{
-		Username: "node", Password: "test-password", ReportAddress: listener.Addr().String(), ReportCAFile: cert,
-	})
+		Username: "node", Password: "test-password", Host: "127.0.0.1", ReportCAFile: cert,
+	}, dialPanelAt(listener))
 	if err != nil {
 		t.Fatal(err)
 	}
