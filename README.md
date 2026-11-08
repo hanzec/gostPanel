@@ -14,6 +14,28 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 改名、管理员认证、数据库和节点通信改造使用了 OpenAI Codex 辅助。[AGENTS.md](./AGENTS.md)
 
+## 节点一键安装与升级
+
+### 安装新节点
+
+先在面板配置 [TLS 注册和上报地址](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写 gRPC 端口。同一台服务器上的多个节点使用不同端口。配置了 `report.address` 后，添加节点会打开安装窗口并生成一次性令牌。点击 **复制命令**，在目标 Linux 主机以 root 身份执行。
+
+也可用下面的模板，把地址和令牌替换为面板提供的值。令牌有效期为 15 分钟，注册成功后立即失效。重新签发会撤销上一枚未使用的令牌。[节点安装脚本](./scripts/install_node.sh)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh \
+  | bash -s -- --panel-address 'panel.example.com:39101' --token 'TOKEN_FROM_PANEL'
+```
+
+### 升级已安装节点
+
+在使用 systemd 且系统 D-Bus 可用的节点上，以 root 身份执行以下命令，将 `42` 换成面板中的节点 ID。升级只替换 `yagp-daemon`，原配置、凭据和证书可继续使用，无需重新注册。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh \
+  | bash -s -- upgrade --node-id 42
+```
+
 ## 🚀 核心特性
 
 - ⚡ **极简管理** - 统一管理多个 Gost 节点及其转发规则。
@@ -132,9 +154,9 @@ report:
 
 ## 📡 添加 Gost 实例
 
-1. 在 **节点管理** 添加实例并填写 gRPC 端口。连接地址由节点自动探测和更新。多个实例部署到同一台服务器时，为每个实例分配独立端口。
-2. 打开该实例的 **安装** 操作，点击 **签发注册令牌**，并在目标 Linux 服务器以 root 执行生成的命令。命令只传 `--panel-address` 和 `--token`。token 有效期为 15 分钟，成功注册后立即失效，重新签发会替换尚未使用的 token。
-3. 节点在线后创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 gRPC `Panel.Report`。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
+按 [一键安装步骤](#安装新节点) 添加实例。需要重新生成命令时，可在该实例的 **安装** 窗口点击 **签发注册令牌**。
+
+节点在线后即可创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 gRPC `Panel.Report`。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
 首次注册时，`yagp-daemon` 验证面板 TLS 证书，生成本机证书和私钥，再通过 `Panel.RegisterNode` 提交 token 和公有证书。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-daemon/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据和证书。
 
@@ -158,14 +180,7 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-daemon` 的 TL
 
 在线升级适用于 systemd 节点。面板和节点需要能通过 HTTPS 访问 GitHub。节点校验发布包的 SHA-256，再替换对应的二进制并重启服务。配置、凭据、证书和节点 ID 都会保留。Gost 重启会中断该实例正在转发的连接，新版服务启动检查失败时会尝试恢复旧版。
 
-如果已安装的 systemd 节点尚不支持在线升级，在节点主机上以 root 执行以下命令，将 `42` 换成面板中的节点 ID。脚本默认使用最新发布包，只替换 `yagp-daemon`，沿用原配置、凭据和证书，无需注册令牌。升级后可从面板管理后续更新。
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/install_node.sh \
-  | bash -s -- upgrade --node-id 42
-```
-
-`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 且系统 D-Bus 可用的 systemd 实例。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 指定版本时，请选择 `0.1.77` 或更新版本。
+如果已安装的节点尚不支持在线升级，请先执行 [一键升级命令](#升级已安装节点)。`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 的 systemd 实例，默认使用最新发布包。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 指定版本时，请选择 `0.1.77` 或更新版本。
 
 如果节点仍使用改名前的 `yagp-node-<ID>` 服务，迁移时先停止该服务和 `yagp-gost-<ID>`，并取消旧守护服务的开机启动。将 `/etc/yagp-node/<ID>` 移到 `/etc/yagp-daemon/<ID>`，放入新版 `yagp-daemon`。systemd 选用包内的 `yagp-daemon-systemd-linux-<架构>`，OpenRC 选用 `yagp-daemon-linux-<架构>`。更新 `node.yaml` 的 `tls_cert_file` 和 `tls_key_file`，如 `report_ca_file` 指向已移动的文件，也一并更新。原 ID、凭据和证书可继续使用。
 
