@@ -51,7 +51,18 @@ curl -fsSL https://raw.githubusercontent.com/hanzec/gostPanel/HEAD/scripts/insta
 
 **方式 A · Docker（推荐）**
 
-在本项目根目录使用 Docker Compose 从源码构建并启动面板。
+此方式接入已有的 Traefik（v3.4 或更高版本，启用 Docker provider）和 Authentik Outpost。将面板域名指向 Traefik，并为其配置 HTTPS 证书。Traefik 和面板加入同一个 Docker 网络，Traefik 还须能访问 Outpost 的内部地址。
+
+在本项目根目录创建 `.env`，将域名、网络名和 Outpost 地址换成实际值。Outpost 地址包含协议和端口，末尾不加 `/`；`websecure` 是 Traefik 的 HTTPS 入口名。
+
+```dotenv
+YAGP_HOST=panel.example.com
+TRAEFIK_NETWORK=traefik
+TRAEFIK_HTTPS_ENTRYPOINT=websecure
+AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
+```
+
+按下文配置 [Authentik 正向认证](#authentik-正向认证) 和面板的可信代理，再从当前目录构建并启动：
 
 ```bash
 docker compose up -d --build
@@ -59,7 +70,9 @@ docker compose up -d --build
 
 构建环境如需使用 Go 模块代理，可通过 `docker compose build --build-arg GOPROXY=<代理地址>` 指定，再执行 `docker compose up -d`。
 
-Compose 将管理端口 `39100` 发布到宿主机的 `127.0.0.1`，将节点流量上报端口 `39101` 发布到宿主机。`config/` 以只读方式挂载到 `/app/config`。部署前配置下面的 Authentik、数据库和节点上报参数。
+Compose 将当前目录的 `config/`、`data/` 和 `logs/` 分别绑定到容器中的 `/app/config`、`/app/data` 和 `/app/logs`。`config/` 只读，数据库和日志可写。从其他目录使用 `-f` 指定 Compose 文件时，确保 `PWD` 环境变量指向所需目录，并在其中准备 `config/config.yaml`（PowerShell 可用 `$env:PWD = (Get-Location).Path`）。如果未设置 `PWD`，则使用 Compose 项目目录。
+
+面板网页和 API 通过 Traefik 的 HTTPS 路由访问。Compose 不发布管理端口 `39100`，仅发布节点注册和上报用的 TLS gRPC 端口 `39101`。
 
 **方式 B · Linux 二进制部署**
 
@@ -85,13 +98,13 @@ bash scripts/install_panel.sh uninstall
 
 ### Authentik 正向认证
 
-1. 在 Authentik 创建 Proxy Provider，模式选 **Forward auth (single application)**，External host 设为面板的 HTTPS 地址。将应用授权给管理员组，例如 `yagp-admins`。
-2. 在反向代理上对管理页面和 `/api/v1` 启用 forward auth。把 `/outpost.goauthentik.io/` 交给 Authentik outpost 处理登录、回调和退出。代理应使用认证子请求返回的 `X-Authentik-Username` 和 `X-Authentik-Groups` 覆盖客户端同名请求头，保留原始 `Host`，并设置外部协议的 `X-Forwarded-Proto`。[Authentik 正向认证配置](https://docs.goauthentik.io/add-secure-apps/providers/proxy/forward_auth)
-3. 在 `config/config.yaml` 中填写面板实际看到的代理对端 IP 或 CIDR，并设定同一个管理员组。宿主机代理访问容器时，使用容器看到的代理源地址。只允许可信代理访问管理端口。
+1. 在 Authentik 创建 Proxy Provider，模式选 **Forward auth (single application)**，External host 设为面板的 HTTPS 地址。将应用授权给管理员组，例如 `yagp-admins`，并将其分配给所用的 Outpost。
+2. Compose 已配置 Traefik 对面板启用 ForwardAuth，并把 `/outpost.goauthentik.io/` 直接交给 Outpost 处理登录、回调和退出。Traefik 应只信任实际在它前面的代理发来的转发头，不要开启入口的 `forwardedHeaders.insecure`。如使用二进制部署，需在自己的反向代理上配置这两条路由，保留原始 `Host` 和外部协议 `X-Forwarded-Proto`，并用认证响应覆盖 `X-Authentik-Username` 和 `X-Authentik-Groups`。[Authentik 的 Traefik 配置](https://docs.goauthentik.io/add-secure-apps/providers/proxy/server_traefik/)
+3. 在 `config/config.yaml` 中填入面板实际看到的代理源 IP，并设定同一个管理员组。使用 Compose 时填写 Traefik 在共享 Docker 网络上的 IP（建议固定该地址），不要将整个共享网络设为可信代理。以下为示例；代理确实在本机访问面板时才填 `127.0.0.1` 或 `::1`。
 
 ```yaml
 authentik:
-  trusted_proxies: ["127.0.0.1", "::1"]
+  trusted_proxies: ["172.30.0.2"]
   admin_group: "yagp-admins"
 ```
 
