@@ -30,7 +30,7 @@ const nodeStateDir = "/etc/yagp-daemon"
 
 func enroll(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("enroll", flag.ExitOnError)
-	address := flags.String("panel-address", "", "panel registration address HOST:PORT")
+	address := flags.String("panel-address", "", "panel registration address HOST:PORT or HOST:PORT"+nodegrpc.PanelProxyPath)
 	output := flags.String("output", "", "staging directory for node files")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "enroll reads the registration token from stdin")
@@ -53,10 +53,9 @@ func enroll(ctx context.Context, args []string) error {
 }
 
 func registerNode(ctx context.Context, address, token, stateDir, output string, detectIPs func(context.Context) (string, string)) (uint64, error) {
-	host, port, err := net.SplitHostPort(address)
-	portNumber, portErr := strconv.ParseUint(port, 10, 16)
-	if err != nil || host == "" || strings.ContainsAny(host, "/ \\?#\t\r\n") || portErr != nil || portNumber == 0 {
-		return 0, errors.New("panel address must be HOST:PORT")
+	panelAddress, err := nodegrpc.ParsePanelAddress(address)
+	if err != nil {
+		return 0, err
 	}
 	// The token ID is a local preflight hint. The panel verifies the full token.
 	expectedID, err := nodegrpc.ParseRegistrationTokenID(token)
@@ -81,7 +80,7 @@ func registerNode(ctx context.Context, address, token, stateDir, output string, 
 	if err != nil {
 		return 0, fmt.Errorf("create node TLS key pair: %w", err)
 	}
-	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(transport))
+	conn, err := panelAddress.NewClientConn(grpc.WithTransportCredentials(transport))
 	if err != nil {
 		return 0, err
 	}

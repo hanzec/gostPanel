@@ -47,9 +47,6 @@ func Run(ctx context.Context, cfg Config) error {
 	if !IsLoopbackAddress(cfg.AdminAddress) || !IsLoopbackAddress(cfg.ObserverListen) {
 		return errors.New("Gost admin and observer addresses must be loopback IP addresses with ports")
 	}
-	if host, _, err := net.SplitHostPort(cfg.ReportAddress); err != nil || host == "" {
-		return errors.New("panel report address must contain a host and port")
-	}
 	controlTLS, err := credentials.NewServerTLSFromFile(cfg.TLSCertFile, cfg.TLSKeyFile)
 	if err != nil {
 		return fmt.Errorf("load node TLS certificate: %w", err)
@@ -126,11 +123,15 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 func connectPanel(cfg Config) (*grpc.ClientConn, error) {
+	address, err := nodegrpc.ParsePanelAddress(cfg.ReportAddress)
+	if err != nil {
+		return nil, err
+	}
 	transport, err := nodegrpc.ClientTLS(cfg.ReportCAFile)
 	if err != nil {
 		return nil, fmt.Errorf("load panel report CA: %w", err)
 	}
-	return grpc.NewClient(cfg.ReportAddress, grpc.WithTransportCredentials(transport),
+	return address.NewClientConn(grpc.WithTransportCredentials(transport),
 		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)))
 }
 

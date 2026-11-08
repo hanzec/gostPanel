@@ -15,6 +15,7 @@ import (
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -23,13 +24,16 @@ import (
 
 type ReportHandler struct {
 	nodegrpc.UnimplementedPanelServer
-	db      *gorm.DB
-	traffic *service.ObserverService
-	nodes   *service.NodeService
+	db          *gorm.DB
+	traffic     *service.ObserverService
+	nodes       *service.NodeService
+	behindProxy bool
 }
 
-func NewReportHandler(db *gorm.DB) *ReportHandler {
-	return &ReportHandler{db: db, traffic: service.NewObserverService(db), nodes: service.NewNodeService(db)}
+func NewReportHandler(db *gorm.DB, behindProxy bool) *ReportHandler {
+	return &ReportHandler{
+		db: db, traffic: service.NewObserverService(db), nodes: service.NewNodeService(db), behindProxy: behindProxy,
+	}
 }
 
 func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
@@ -40,7 +44,7 @@ func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.Regi
 	if err := nodegrpc.ValidateNodeCertificate(request.GetNodeCertificatePem()); err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid node certificate")
 	}
-	ipv4, ipv6, err := registrationIPs(ctx, request)
+	ipv4, ipv6, err := h.registrationIPs(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -85,23 +89,29 @@ func (h *ReportHandler) UpdateNodeIPs(ctx context.Context, request *nodegrpc.Nod
 	return &emptypb.Empty{}, nil
 }
 
-func registrationIPs(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (string, string, error) {
+func (h *ReportHandler) registrationIPs(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (string, string, error) {
 	ipv4, ipv6, err := reportedIPs(request.GetIpv4(), request.GetIpv6())
 	if err != nil || ipv4 != "" || ipv6 != "" {
 		return ipv4, ipv6, err
 	}
-	// A registration proxy can have a different address from the node itself.
-	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
-		endpoint, err := netip.ParseAddrPort(p.Addr.String())
-		ip := endpoint.Addr().Unmap()
-		if err == nil && isNodeIP(ip) {
-			if ip.Is4() {
-				return ip.String(), "", nil
-			}
-			return "", ip.String(), nil
+	var ip netip.Addr
+	if h.behindProxy {
+		// The report server has already verified the proxy's connection address.
+		if values := metadata.ValueFromIncomingContext(ctx, "x-real-ip"); len(values) == 1 {
+			ip, _ = netip.ParseAddr(values[0])
 		}
+	} else if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
+		endpoint, _ := netip.ParseAddrPort(p.Addr.String())
+		ip = endpoint.Addr()
 	}
-	return "", "", nil
+	ip = ip.Unmap()
+	if !isNodeIP(ip) {
+		return "", "", nil
+	}
+	if ip.Is4() {
+		return ip.String(), "", nil
+	}
+	return "", ip.String(), nil
 }
 
 func reportedIPs(v4, v6 string) (string, string, error) {

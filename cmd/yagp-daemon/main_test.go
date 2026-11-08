@@ -39,7 +39,7 @@ func TestRunRejectsInvalidCLIAndConfiguration(t *testing.T) {
 		{"ensure config missing", []string{"ensure-gost", "-c", missing}, "missing.yaml"},
 		{"ensure API is loopback", []string{"ensure-gost", "-c", configPath}, "loopback Gost API address"},
 		{"template config missing", []string{"nft-template", "-c", missing}, "missing.yaml"},
-		{"template invalid report address", []string{"nft-template", "-c", configPath}, "missing address"},
+		{"template invalid report address", []string{"nft-template", "-c", configPath}, "panel address must be HOST:PORT"},
 		{"upgrade flags", []string{"upgrade-component", "--component", "gost"}, "requires --component and --tag"},
 		{"upgrade config missing", []string{"upgrade-component", "--component", "gost", "--tag", "v3.3.3", "-c", missing}, "missing.yaml"},
 		{"installed ID flag", []string{"--upgrade-installed"}, "requires --node-id"},

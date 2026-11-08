@@ -240,12 +240,12 @@
         <el-form-item
           label="面板注册地址"
           for="node-panel-address"
-          :error="panelAddress && !panelAddressValid ? '请输入有效的主机和端口。' : ''"
+          :error="panelAddress && !panelAddressValid ? '请输入主机:端口，通过 Traefik 时加上 /api/v1/grpc。' : ''"
         >
           <el-input
             id="node-panel-address"
             v-model.trim="panelAddress"
-            placeholder="panel.example.com:39101"
+            placeholder="panel.example.com:443/api/v1/grpc"
             :disabled="loadingPanelAddress"
             spellcheck="false"
           />
@@ -421,7 +421,7 @@ const configSummary = (tab, entry) => {
 const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "'"
 
 const panelAddressValid = computed(() => {
-  const address = panelAddress.value
+  const address = panelAddress.value.replace(/\/api\/v1\/grpc$/, '')
   if (!address || /[\s/@?#\\]/.test(address)) return false
   try {
     const { hostname, port } = new URL('tcp://' + address)

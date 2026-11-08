@@ -10,7 +10,7 @@ die() { printf '%s\n' "$*" >&2; exit 1; }
 usage() {
     cat <<'EOF'
 用法:
-  install_node.sh --panel-address HOST:PORT --token TOKEN
+  install_node.sh --panel-address HOST:PORT[/api/v1/grpc] --token TOKEN
   install_node.sh upgrade --node-id ID
   install_node.sh uninstall --node-id ID
 EOF

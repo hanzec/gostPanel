@@ -21,6 +21,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 )
@@ -166,6 +167,59 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	cfg.Listen = "invalid listen address"
 	if _, err := startReports(cfg, db); err == nil {
 		t.Fatal("invalid bind address accepted")
+	}
+}
+
+func TestStartReportsAllowsOnlyTheConfiguredProxy(t *testing.T) {
+	db := testSQLite(t)
+	cfg := config.ReportConfig{Listen: "127.0.0.1:0", Address: "panel.example.test:443"}
+	cfg.ProxyIP = "127.0.0.1"
+	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "/api/v1/grpc") {
+		t.Fatalf("proxied reports without a path = %v", err)
+	}
+	cfg.Address += "/api/v1/grpc"
+	cfg.ProxyIP = ""
+	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
+		t.Fatalf("direct reports with a proxy path = %v", err)
+	}
+	cfg.ProxyIP = "127.0.0.0/8"
+	if _, err := startReports(cfg, db); err == nil || !strings.Contains(err.Error(), "report.proxy_ip") {
+		t.Fatalf("proxy IP with a CIDR = %v", err)
+	}
+
+	for _, tt := range []struct {
+		proxyIP string
+		want    codes.Code
+	}{
+		{"127.0.0.1", codes.Unauthenticated},
+		{"127.0.0.2", codes.PermissionDenied},
+	} {
+		t.Run(tt.proxyIP, func(t *testing.T) {
+			listener, err := net.Listen("tcp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Listen = listener.Addr().String()
+			_ = listener.Close()
+			cfg.ProxyIP = tt.proxyIP
+			server, err := startReports(cfg, db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer server.Stop()
+
+			conn, err := grpc.NewClient(cfg.Listen, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			_, err = nodegrpc.NewPanelClient(conn).RegisterNode(ctx, &nodegrpc.RegisterNodeRequest{})
+			if status.Code(err) != tt.want {
+				t.Fatalf("registration from 127.0.0.1 = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }
 

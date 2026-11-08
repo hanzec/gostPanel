@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,7 +24,10 @@ import (
 	"github.com/glebarez/sqlite"
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -146,10 +150,17 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 	if cfg.Listen == "" {
 		return nil, nil
 	}
-	if host, port, err := net.SplitHostPort(cfg.Address); err != nil || host == "" || port == "" {
-		return nil, fmt.Errorf("report.address 必须是节点可以访问的主机和端口")
+	address, err := nodegrpc.ParsePanelAddress(cfg.Address)
+	if err != nil {
+		return nil, fmt.Errorf("report.address: %w", err)
 	}
-	tlsCredentials, err := credentials.NewServerTLSFromFile(cfg.CertFile, cfg.KeyFile)
+	if cfg.ProxyIP != "" && !address.Proxied() {
+		return nil, fmt.Errorf("配置 report.proxy_ip 后，report.address 必须以 %s 结尾", nodegrpc.PanelProxyPath)
+	}
+	if cfg.ProxyIP == "" && address.Proxied() {
+		return nil, fmt.Errorf("report.address 使用 %s 时必须配置 report.proxy_ip", nodegrpc.PanelProxyPath)
+	}
+	option, err := reportTransport(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -157,8 +168,8 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	server := grpc.NewServer(grpc.Creds(tlsCredentials))
-	nodegrpc.RegisterPanelServer(server, handler.NewReportHandler(db))
+	server := grpc.NewServer(option)
+	nodegrpc.RegisterPanelServer(server, handler.NewReportHandler(db, cfg.ProxyIP != ""))
 	go func() {
 		logger.Infof("gRPC 流量上报服务监听 %s", listener.Addr())
 		if err := server.Serve(listener); err != nil {
@@ -166,6 +177,31 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 		}
 	}()
 	return server, nil
+}
+
+func reportTransport(cfg config.ReportConfig) (grpc.ServerOption, error) {
+	if cfg.ProxyIP == "" {
+		tlsCredentials, err := credentials.NewServerTLSFromFile(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			return nil, err
+		}
+		return grpc.Creds(tlsCredentials), nil
+	}
+
+	proxyIP, err := netip.ParseAddr(cfg.ProxyIP)
+	proxyIP = proxyIP.Unmap()
+	if err != nil || proxyIP.Zone() != "" || !(proxyIP.IsGlobalUnicast() || proxyIP.IsLoopback()) {
+		return nil, fmt.Errorf("report.proxy_ip 必须是代理的固定 IP 地址")
+	}
+	// The proxy terminates TLS and is the only peer allowed on this h2c listener.
+	return grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+		if p, ok := peer.FromContext(ctx); ok {
+			if addr, ok := p.Addr.(*net.TCPAddr); ok && addr.AddrPort().Addr().Unmap() == proxyIP {
+				return next(ctx, req)
+			}
+		}
+		return nil, status.Error(codes.PermissionDenied, "untrusted report proxy")
+	}), nil
 }
 
 // initDatabase 初始化数据库
