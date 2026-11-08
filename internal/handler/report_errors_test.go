@@ -14,6 +14,7 @@ import (
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
@@ -28,7 +29,7 @@ func TestNodeRegistrationRequiresAnAddressAndPersistsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewReportHandler(f.db)
+	handler := NewReportHandler(f.db, false)
 	req := &nodegrpc.RegisterNodeRequest{Token: "invalid", NodeCertificatePem: testNodeCertificate(t)}
 	if _, err := handler.RegisterNode(t.Context(), req); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("register with invalid token: %v", err)
@@ -57,6 +58,35 @@ func TestNodeRegistrationRequiresAnAddressAndPersistsIt(t *testing.T) {
 	}
 	if node.IPv6 != "2001:db8::8" || node.IPv4 != "" || node.Address != node.IPv6 {
 		t.Fatalf("IPv6 peer enrollment: %+v", node)
+	}
+}
+
+func TestRegistrationIPFallbackThroughTrustedProxy(t *testing.T) {
+	ctx := peer.NewContext(t.Context(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP("172.30.0.2"), Port: 39000}})
+	for _, tt := range []struct {
+		name        string
+		behindProxy bool
+		forwarded   []string
+		reported    string
+		want4       string
+		want6       string
+	}{
+		{"direct connection ignores forwarded IP", false, []string{"192.0.2.3"}, "", "172.30.0.2", ""},
+		{"node report takes precedence", true, []string{"192.0.2.3"}, "192.0.2.4", "192.0.2.4", ""},
+		{"proxy IPv4", true, []string{"192.0.2.3"}, "", "192.0.2.3", ""},
+		{"proxy IPv6", true, []string{"2001:db8::8"}, "", "", "2001:db8::8"},
+		{"proxy did not supply an IP", true, nil, "", "", ""},
+		{"proxy supplied an invalid IP", true, []string{"unknown"}, "", "", ""},
+		{"proxy supplied several IPs", true, []string{"192.0.2.3", "192.0.2.4"}, "", "", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := metadata.NewIncomingContext(ctx, metadata.MD{"x-real-ip": tt.forwarded})
+			handler := ReportHandler{behindProxy: tt.behindProxy}
+			ipv4, ipv6, err := handler.registrationIPs(ctx, &nodegrpc.RegisterNodeRequest{Ipv4: tt.reported})
+			if err != nil || ipv4 != tt.want4 || ipv6 != tt.want6 {
+				t.Fatalf("registration IPs = %q, %q, %v, want %q, %q", ipv4, ipv6, err, tt.want4, tt.want6)
+			}
+		})
 	}
 }
 

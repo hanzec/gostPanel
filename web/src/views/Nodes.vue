@@ -245,7 +245,7 @@
           <el-input
             id="node-panel-address"
             v-model.trim="panelAddress"
-            placeholder="panel.example.com:39101"
+            placeholder="panel.example.com:443"
             :disabled="loadingPanelAddress"
             spellcheck="false"
           />

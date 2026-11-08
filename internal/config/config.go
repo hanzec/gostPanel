@@ -39,6 +39,7 @@ type AuthentikConfig struct {
 type ReportConfig struct {
 	Listen   string `mapstructure:"listen"`
 	Address  string `mapstructure:"address"`
+	ProxyIP  string `mapstructure:"proxy_ip"`
 	CertFile string `mapstructure:"cert_file"`
 	KeyFile  string `mapstructure:"key_file"`
 }

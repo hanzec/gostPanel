@@ -14,6 +14,7 @@ authentik:
 report:
   listen: ""
   address: ""
+  proxy_ip: ""  # Traefik 的 Docker 网络 IP；仅在由 Traefik 终止 TLS 时设置
   cert_file: ""
   key_file: ""
 
