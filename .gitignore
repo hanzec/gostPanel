@@ -48,6 +48,7 @@ gost-panel
 web/node_modules/
 web/dist/
 web/.cache/
+web/coverage/
 web/*.log
 
 # Environment
