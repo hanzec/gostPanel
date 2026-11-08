@@ -242,6 +242,8 @@ GitHub Release 正文由 `cmd/release-notes` 生成。程序沿当前分支的�
 
 构建前端后，运行 `go test ./... -cover` 可查看各个 Go 包的语句覆盖率。发布工作流在隔离的 Linux 容器中运行全仓测试，包括需要 nftables 的真实配额测试和使用隔离 systemd 命令的升级测试。运行摘要会显示总覆盖率，超过 90% 才会创建 GitHub Release。Windows 常规测试会跳过 Linux 专用场景。
 
+运行 `npm --prefix web test` 执行 Vue 测试，或运行 `npm --prefix web run test:coverage` 查看前端覆盖率。发布流程在摘要中分别报告前端和 Go 的语句覆盖率。前端语句覆盖率须达到 90% 才能通过发布检查，本地 HTML 报告位于 `web/coverage/index.html`。
+
 ```bash
 # 完整构建，产物为 yagp 和 yagp-daemon
 make build

@@ -60,6 +60,16 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: make release VERSION="$VERSION"
 
+      - name: Run Vue tests and report coverage
+        working-directory: web
+        run: |
+          npm run test:coverage
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync } from "node:fs"
+            const { total } = JSON.parse(readFileSync("coverage/coverage-summary.json", "utf8"))
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, "### Vue test coverage\n\nStatement coverage: **" + total.statements.pct + "%**\n\n")
+          '
+
       - name: Run Go tests and report coverage
         shell: bash
         run: |
