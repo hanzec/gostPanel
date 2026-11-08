@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
@@ -117,6 +118,9 @@ func main() {
 	// 启动规则状态同步服务
 	syncService := service.NewRuleSyncService(db)
 	syncService.Start()
+	rulesetCtx, stopRuleset := context.WithCancel(context.Background())
+	defer stopRuleset()
+	go service.NewGostRulesetService(db).Run(rulesetCtx)
 
 	// 启动自动备份服务
 	backupService := service.NewBackupService(db)
@@ -130,6 +134,7 @@ func main() {
 	logger.Info("yagp 正在关闭...")
 
 	// 停止相关的后台服务
+	stopRuleset()
 	healthService.Stop()
 	syncService.Stop()
 	backupService.Stop()
@@ -204,6 +209,7 @@ func autoMigrate(db *gorm.DB) error {
 		&model.GostRule{},
 		&model.GostTunnel{},
 		&model.GostAllowlist{},
+		&model.GostRuleset{},
 		&model.OperationLog{},
 		&model.SystemConfig{},
 	); err != nil {

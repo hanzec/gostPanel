@@ -55,6 +55,14 @@ export function updateGostAllowlist(nodeIds) {
     return request.put('/system/gost-allowlist', { node_ids: nodeIds })
 }
 
+export function getGostRuleset() {
+    return request.get('/system/gost-ruleset')
+}
+
+export function updateGostRuleset(url, nodeIds) {
+    return request.put('/system/gost-ruleset', { url, node_ids: nodeIds }, { timeout: 25000 })
+}
+
 export async function getRoutingNodes() {
     const nodes = []
     const pageSize = 100

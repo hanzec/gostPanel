@@ -164,6 +164,12 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 在 **系统设置 → Gost IP 白名单** 勾选允许连接的节点。面板从所选节点的登记地址生成 IPv4/IPv6 白名单，并应用到面板管理的隧道出口 Relay。登记地址应填写这些节点连接 Relay 时使用的源 IP。清空选择并保存可解除该白名单限制。首次为已有 Relay 绑定准入配置时会重载该服务，后续修改名单会热更新。
 
+### Clash 规则集订阅
+
+在 **系统设置 → Clash 规则集** 填写 HTTPS 规则集链接并选择要同步的边缘节点。面板保存转换结果，之后每小时刷新，并将 Gost 的 `yagp-transparent-proxy` 白名单同步到所选在线节点。下载或转换失败时保留最近一次成功的规则。取消选择某个节点会停止给该节点自动更新，并保留最近下发的白名单。
+
+支持 `payload:` YAML 和文本规则集，包含域名、域名后缀、可等价转换的关键词、IP 和 CIDR 条目。在既有 Gost 透明代理转发链的第一跳设置 `bypass: yagp-transparent-proxy`，匹配目标走该转发链，其余目标直连。域名匹配依赖现有透明代理从 HTTP Host 或 TLS SNI 识别目标，纯 IP 流量使用 IP/CIDR 条目。[Gost 分流配置](https://v3.gost.run/en/concepts/bypass/) · [Gost 透明代理](https://v3.gost.run/en/tutorials/redirect/)
+
 ---
 
 ## 📦 预编译下载

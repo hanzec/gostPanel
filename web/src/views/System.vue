@@ -2,7 +2,7 @@
   <div class="ops-page settings-page">
     <PageHeader eyebrow="CONFIGURATION" title="系统设置" description="管理面板品牌、SMTP 邮件、数据库备份和 Gost 配置。">
       <template #actions>
-        <el-button v-if="activeTab !== 'gost-allowlist'" type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
+        <el-button v-if="!activeTab.startsWith('gost-')" type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
           保存设置
         </el-button>
       </template>
@@ -111,6 +111,14 @@
               </header>
               <GostAllowlistSettings />
             </el-tab-pane>
+
+            <el-tab-pane name="gost-ruleset" label="Clash 规则集" lazy>
+              <header class="settings-section-heading">
+                <h2>透明代理规则集订阅</h2>
+                <p>面板定期读取 Clash 规则集，转换为 Gost 分流白名单并同步到所选节点。</p>
+              </header>
+              <GostRulesetSettings />
+            </el-tab-pane>
           </el-tabs>
         </section>
 
@@ -152,10 +160,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Coin, InfoFilled, Lock, Message, Monitor } from '@element-plus/icons-vue'
+import { Coin, Connection, InfoFilled, Lock, Message, Monitor } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { backupSystem, getSystemConfig, sendTestEmail, updateSystemConfig } from '@/api/system'
 import GostAllowlistSettings from '@/components/GostAllowlistSettings.vue'
+import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useSystemStore } from '@/store/system'
 
@@ -205,6 +214,13 @@ const context = computed(() => {
       icon: Lock, label: 'ADMISSION', title: '白名单同步',
       description: '面板向在线 Relay 同步已保存的来源 IP。离线节点重新连接后会收到更新。首次启用时，已有 Relay 可能短暂重启。',
       factLabel: '作用范围', factValue: '面板管理的 Gost Relay'
+    }
+  }
+  if (activeTab.value === 'gost-ruleset') {
+    return {
+      icon: Connection, label: 'BYPASS', title: '在 Gost 中使用规则集',
+      description: '在现有透明代理转发链的第一跳添加下方配置。匹配的目标经代理转发，其余目标直连。',
+      factLabel: 'Gost 第一跳配置', factValue: 'bypass: yagp-transparent-proxy'
     }
   }
   return {

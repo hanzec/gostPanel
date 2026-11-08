@@ -187,7 +187,7 @@ func allowedCommand(method, path string) bool {
 		return false
 	}
 	switch parts[2] {
-	case "services", "chains", "observers", "limiters", "climiters", "rlimiters", "admissions":
+	case "services", "chains", "observers", "limiters", "climiters", "rlimiters", "admissions", "bypasses":
 	default:
 		return false
 	}
@@ -197,7 +197,7 @@ func allowedCommand(method, path string) bool {
 	if !resourceName.MatchString(parts[3]) {
 		return false
 	}
-	if parts[2] == "admissions" {
+	if parts[2] == "admissions" || parts[2] == "bypasses" {
 		return method == http.MethodGet || method == http.MethodPut
 	}
 	if method == http.MethodPut {

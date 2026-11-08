@@ -69,6 +69,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 	statsHandler := handler.NewStatsHandler(statsService)
 	logHandler := handler.NewLogHandler(logService)
 	systemConfigHandler := handler.NewSystemConfigHandler(systemConfigService, backupService)
+	gostRulesetHandler := handler.NewGostRulesetHandler(service.NewGostRulesetService(r.db))
 	gostAllowlistHandler := handler.NewGostAllowlistHandler(service.NewGostAllowlistService(r.db))
 
 	// 管理员路由
@@ -121,6 +122,8 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.PUT("/system/config", systemConfigHandler.UpdateConfig)
 		authRoutes.GET("/system/gost-allowlist", gostAllowlistHandler.Get)
 		authRoutes.PUT("/system/gost-allowlist", gostAllowlistHandler.Update)
+		authRoutes.GET("/system/gost-ruleset", gostRulesetHandler.Get)
+		authRoutes.PUT("/system/gost-ruleset", gostRulesetHandler.Update)
 		authRoutes.POST("/system/email/test", systemConfigHandler.TestEmail)
 		authRoutes.POST("/system/backup", systemConfigHandler.Backup)
 	}
