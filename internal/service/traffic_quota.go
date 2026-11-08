@@ -89,7 +89,7 @@ func quotaPorts(services []gost.ServiceConfig) (tcp, udp []uint32) {
 			continue
 		}
 		switch svc.Listener.Type {
-		case "tcp", "tls", "mtls", "ws", "mws":
+		case "tcp", "tls", "mtls", "ws", "mws", "red":
 			tcp = append(tcp, uint32(value))
 		case "udp", "quic":
 			udp = append(udp, uint32(value))
@@ -106,7 +106,7 @@ func isQuotaService(svc gost.ServiceConfig) bool {
 	}
 	var prefix string
 	switch svc.Handler.Type {
-	case "forward":
+	case "forward", "red":
 		prefix = "rule-"
 	case "relay":
 		prefix = "relay-tunnel-"

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -205,6 +206,18 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 	if updated != read || read.Config != nftJSON || read.Table != nodegrpc.NftTableName(uint64(node.ID)) ||
 		!json.Valid([]byte(read.Template)) || !strings.Contains(read.Template, read.Table) {
 		t.Fatalf("bridge returned an unexpected nftables config: %+v", read)
+	}
+	for _, port := range []string{"0", "65536", "abc"} {
+		f.request(t, "GET", path+"/nft?loopback_port="+port, "", 400)
+	}
+	loopback := handlerData[nodeNftConfig](t, f.request(t, "GET", path+"/nft?loopback_port=443", "", 200))
+	if loopback.Config != read.Config || loopback.Table != read.Table || !json.Valid([]byte(loopback.Template)) {
+		t.Fatalf("unexpected loopback template response: %+v", loopback)
+	}
+	for _, expected := range []string{`"hook":"output"`, `"name":"loopback_443"`, `"redirect":{"port":443}`, strconv.Itoa(gost.ClashRedirectMark)} {
+		if !strings.Contains(loopback.Template, expected) {
+			t.Errorf("loopback template missing %q: %s", expected, loopback.Template)
+		}
 	}
 	control.reject(nodegrpc.V1_GetNftConfig_FullMethodName, codes.Unimplemented)
 	f.request(t, "GET", path+"/nft", "", 501)
