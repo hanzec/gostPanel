@@ -48,13 +48,23 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 	}
 	ruleset.Matchers = []string{".new.test"}
 	requireServiceError(t, db.Save(&ruleset).Error, nil)
-	entryRemote.mu.Lock()
-	entryRemote.reject["POST /config?format=yaml"] = http.StatusBadGateway
-	entryRemote.mu.Unlock()
 	subscriptions := NewGostRulesetService(db)
 	unsaved := make(map[uint]bool)
+	bypassPath := "PUT /config/bypasses/" + gost.TransparentBypassName
+	entryRemote.mu.Lock()
+	entryRemote.reject[bypassPath] = http.StatusBadGateway
+	entryRemote.mu.Unlock()
 	subscriptions.sync(t.Context(), unsaved)
 	var matchers gost.AdmissionConfig
+	entryRemote.read("/config/bypasses/"+gost.TransparentBypassName, &matchers)
+	if !reflect.DeepEqual(matchers.Matchers, []string{".old.test"}) || unsaved[entry.ID] {
+		t.Fatalf("failed update changed the active subscription: %+v, %v", matchers, unsaved)
+	}
+	entryRemote.mu.Lock()
+	delete(entryRemote.reject, bypassPath)
+	entryRemote.reject["POST /config?format=yaml"] = http.StatusBadGateway
+	entryRemote.mu.Unlock()
+	subscriptions.sync(t.Context(), unsaved)
 	entryRemote.read("/config/bypasses/"+gost.TransparentBypassName, &matchers)
 	if !reflect.DeepEqual(matchers.Matchers, ruleset.Matchers) || !unsaved[entry.ID] {
 		t.Fatalf("subscription reached the selected entry but must be saved again: %+v, %v", matchers, unsaved)

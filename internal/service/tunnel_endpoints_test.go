@@ -151,6 +151,13 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	}
 	entryRemote.mu.Lock()
 	delete(entryRemote.reject, "DELETE /config/services/"+forward.Name)
+	entryRemote.reject["DELETE /config/chains/"+chain.Name] = http.StatusBadGateway
+	entryRemote.mu.Unlock()
+	if err := tunnels.Stop(tunnel.ID, testAdmin, testIP, testAgent); err == nil || entryRemote.service(forward.Name).Name != "" {
+		t.Fatal("failed chain cleanup must report failure and leave the source stopped")
+	}
+	entryRemote.mu.Lock()
+	delete(entryRemote.reject, "DELETE /config/chains/"+chain.Name)
 	entryRemote.mu.Unlock()
 	requireServiceError(t, tunnels.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
 	if entryRemote.service(forward.Name).Name != "" || entryRemote.chain(chain.Name).Name != "" || exitRemote.service(relay.Name).Name != "" {
