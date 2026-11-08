@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{or .Title .Message}} · YAGP</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #0b1019;
+      --grid: #141c29;
+      --panel: #121b29;
+      --inset: #0f1723;
+      --border: #29374a;
+      --text: #edf4fa;
+      --muted: #aebdd0;
+      --accent: #58e6ae;
+      --on-accent: #091e16;
+      --warning: #f3cb79;
+      --warning-bg: #33291c;
+      --warning-border: #725c33;
+      --mono: 'Cascadia Code', Consolas, monospace;
+      font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Noto Sans CJK SC', system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 24px 16px;
+      color: var(--text);
+      background-color: var(--background);
+      background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 32px 32px;
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+
+    main { width: min(100%, 640px); min-width: 0; }
+    h1, h2, p, dl, dd { margin: 0; }
+    .brand, .status, .category {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand { margin-bottom: 20px; font-weight: 700; letter-spacing: .08em; }
+    .brand svg { color: var(--accent); }
+    .brand-caption, .status-code {
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--inset);
+      color: var(--muted);
+      font: .8125rem/1.6 var(--mono);
+      letter-spacing: 0;
+    }
+    .card {
+      padding: clamp(20px, 6vw, 40px);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 16px 40px #05080e73;
+      overflow-wrap: anywhere;
+    }
+    .status { justify-content: space-between; margin-bottom: 20px; }
+    .category { color: var(--muted); font-weight: 600; }
+    .category svg { color: var(--warning); }
+    .status-code { border-color: var(--warning-border); background: var(--warning-bg); color: var(--warning); }
+    h1 { margin-bottom: 8px; font-size: clamp(1.375rem, 4.5vw, 1.75rem); line-height: 1.35; }
+    h2 { margin-bottom: 8px; color: var(--muted); font-size: 1rem; }
+    .description { color: var(--muted); }
+    .next { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+    .diagnostic {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 4px 16px;
+      margin-top: 16px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--inset);
+      color: var(--muted);
+      font-size: .875rem;
+    }
+    code { color: var(--warning); font-family: var(--mono); }
+    .action {
+      display: grid;
+      place-items: center;
+      min-height: 48px;
+      margin-top: 24px;
+      padding: 8px 16px;
+      border-radius: 4px;
+      background: var(--accent);
+      color: var(--on-accent);
+      font-weight: 700;
+      text-align: center;
+      text-decoration: none;
+    }
+    .action:hover { background: #83edc3; }
+    .action:active { background: #45c995; }
+    .action:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 15h5l3-6h8M6 9h3m6 6h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="4" cy="15" r="1.6" fill="currentColor"/>
+        <circle cx="20" cy="9" r="1.6" fill="currentColor"/>
+        <circle cx="20" cy="15" r="1.6" fill="currentColor"/>
+      </svg>
+      <span>YAGP</span>
+      <span class="brand-caption">GOST CONTROL</span>
+    </header>
+    <section class="card" aria-labelledby="auth-title">
+      <div class="status">
+        <div class="category">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10ZM12 8v4m0 4h.01"/>
+          </svg>
+          <span>访问检查</span>
+        </div>
+        <span class="status-code">HTTP {{.Status}}</span>
+      </div>
+      <h1 id="auth-title">{{or .Title .Message}}</h1>
+      {{if .Detail}}<p class="description">{{.Detail}}</p>{{end}}
+      {{if .NextStep}}
+      <div class="next">
+        <h2>下一步</h2>
+        <p>{{.NextStep}}</p>
+      </div>
+      {{end}}
+      <dl class="diagnostic">
+        <dt>诊断代码</dt>
+        <dd><code>{{.Reason}}</code></dd>
+      </dl>
+      <a class="action" href="/">重新打开面板</a>
+    </section>
+  </main>
+</body>
+</html>
