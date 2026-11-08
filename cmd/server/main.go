@@ -289,7 +289,6 @@ func initSystemConfig(db *gorm.DB) error {
 
 	sysConfig := &model.SystemConfig{
 		SiteTitle:            "yagp",
-		LogoURL:              "https://gost.run/images/gost.png",
 		Copyright:            upstreamURL,
 		LogRetentionDays:     7,
 		LogLevel:             "info",

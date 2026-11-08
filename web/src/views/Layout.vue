@@ -43,7 +43,7 @@
       <main id="console-main" ref="mainContent" class="console-main" tabindex="-1">
         <RouterView v-if="identity === 'ready'" />
         <section v-else-if="identity === 'error'" class="ops-panel console-gate" role="alert">
-          <el-icon aria-hidden="true"><Lock /></el-icon>
+          <img :src="defaultLogoUrl" alt="" width="32" height="32" />
           <h1>无法确认管理员身份</h1>
           <p>请通过启用了 Authentik 的面板地址访问。</p>
           <el-button type="primary" @click="loadIdentity">重试身份验证</el-button>
@@ -70,10 +70,10 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { Loading, Lock, Menu, SwitchButton, User } from '@element-plus/icons-vue'
+import { Loading, Menu, SwitchButton, User } from '@element-plus/icons-vue'
 import { getUserInfo } from '@/api/auth'
 import ConsoleNav from '@/components/ConsoleNav.vue'
-import { useSystemStore } from '@/store/system'
+import { defaultLogoUrl, useSystemStore } from '@/store/system'
 
 const route = useRoute()
 const system = useSystemStore()

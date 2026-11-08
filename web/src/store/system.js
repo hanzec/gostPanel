@@ -2,10 +2,17 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getPublicSystemConfig } from '@/api/system'
 
+export const defaultLogoUrl = '/favicon.svg'
+const previousDefaultLogoUrl = 'https://gost.run/images/gost.png'
+
+function logoOverride(url) {
+    return url === previousDefaultLogoUrl ? '' : (url || '')
+}
+
 export const useSystemStore = defineStore('system', () => {
     // State
     const siteTitle = ref(localStorage.getItem('siteTitle') || 'yagp')
-    const logoUrl = ref(localStorage.getItem('logoUrl') || 'https://gost.run/images/gost.png')
+    const logoUrl = ref(logoOverride(localStorage.getItem('logoUrl')))
     const copyright = ref(localStorage.getItem('copyright') || '')
 
     // Actions
@@ -22,11 +29,10 @@ export const useSystemStore = defineStore('system', () => {
                     localStorage.setItem('siteTitle', config.siteTitle)
                 }
 
-                if (config.logoUrl) {
-                    logoUrl.value = config.logoUrl
-                    localStorage.setItem('logoUrl', config.logoUrl)
+                logoUrl.value = logoOverride(config.logoUrl)
+                if (logoUrl.value) {
+                    localStorage.setItem('logoUrl', logoUrl.value)
                 } else {
-                    logoUrl.value = ''
                     localStorage.removeItem('logoUrl')
                 }
 
