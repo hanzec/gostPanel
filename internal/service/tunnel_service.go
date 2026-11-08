@@ -250,8 +250,9 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	relayName := relayServiceName(tunnel.ID)
 
 	relaySvc := &gost.ServiceConfig{
-		Name: relayName,
-		Addr: fmt.Sprintf(":%d", tunnel.RelayPort),
+		Name:     relayName,
+		Addr:     fmt.Sprintf(":%d", tunnel.RelayPort),
+		Metadata: map[string]any{"enableStats": true},
 		Handler: &gost.HandlerConfig{
 			Type: "relay", // relay 协议支持接收客户端传来的目标地址
 		},

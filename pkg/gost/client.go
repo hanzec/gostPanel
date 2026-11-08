@@ -57,7 +57,14 @@ type ServiceConfig struct {
 
 // ServiceStatus 服务运行时状态信息
 type ServiceStatus struct {
-	State string `json:"state"` // 状态: ready, running, failed, closed.
+	State      string               `json:"state"` // 状态: ready, running, failed, closed.
+	CreateTime int64                `json:"createTime,omitempty"`
+	Stats      *ServiceTrafficStats `json:"stats,omitempty"`
+}
+
+type ServiceTrafficStats struct {
+	InputBytes  uint64 `json:"inputBytes"`
+	OutputBytes uint64 `json:"outputBytes"`
 }
 
 // GostResponse 通用 API 响应包裹

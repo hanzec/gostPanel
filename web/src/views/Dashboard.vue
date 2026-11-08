@@ -4,10 +4,9 @@
       class="ops-panel overview-banner"
       eyebrow="OVERVIEW / CONTROL PLANE"
       title="运行总览"
-      description="查看 Gost 节点、转发规则和隧道状态，追踪管理操作。"
+      description="实时查看隧道出口流量、节点和转发状态。"
     >
       <template #actions>
-        <el-button :icon="Refresh" :loading="statsLoading || logsLoading" @click="refreshOverview">刷新</el-button>
         <RouterLink class="overview-primary" to="/nodes">
           查看节点
           <el-icon aria-hidden="true"><ArrowRight /></el-icon>
@@ -17,10 +16,69 @@
 
     <div v-if="statsError" class="ops-panel overview-feedback" role="alert">
       <span>{{ stats ? '状态更新失败，当前显示上次获取的数据。' : '暂时无法获取运行状态。' }}</span>
-      <el-button :loading="statsLoading" @click="loadStats">重试</el-button>
     </div>
 
-    <section v-if="stats || statsLoading" class="overview-kpis" aria-label="资源概况" :aria-busy="statsLoading">
+    <section v-if="traffic" class="ops-panel overview-panel" aria-labelledby="overview-traffic-title">
+      <header class="overview-panel-header">
+        <div>
+          <p class="overview-overline">LIVE TRAFFIC</p>
+          <h2 id="overview-traffic-title">实时流量</h2>
+        </div>
+        <span class="ops-status" :class="statsError ? 'is-warning' : 'is-success'">
+          {{ statsError ? '更新暂缓' : '每 5 秒更新' }}
+        </span>
+      </header>
+      <dl class="traffic-totals">
+        <div class="traffic-metric">
+          <dt>累计总流量</dt>
+          <dd class="ops-mono">{{ totalTrafficLabel(traffic.input_bytes + traffic.output_bytes) }}</dd>
+          <dd class="traffic-note">{{ hasPendingExits ? '有运行中的隧道等待采集' : '各隧道出口累计流量之和' }}</dd>
+        </div>
+        <div v-for="direction in trafficDirections" :key="direction.key" class="traffic-metric">
+          <dt>{{ direction.label }}速率</dt>
+          <dd class="ops-mono">{{ formatRate(totalTrafficRate(direction.key)) }}</dd>
+          <dd class="traffic-note">累计 {{ totalTrafficLabel(traffic[direction.key]) }}</dd>
+        </div>
+      </dl>
+      <div class="traffic-exits">
+        <h3 id="tunnel-traffic-title">隧道出口流量</h3>
+        <p class="traffic-note">每条隧道由其 Gost Relay 独立采集。</p>
+        <p v-if="!traffic.tunnels.length" class="traffic-note">暂无隧道。</p>
+        <div v-else class="ops-table-scroll overview-table traffic-table" tabindex="0" role="region" aria-labelledby="tunnel-traffic-title">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">隧道</th>
+                <th scope="col">出口节点</th>
+                <th v-for="direction in trafficDirections" :key="direction.key" scope="col">{{ direction.label }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="tunnel in traffic.tunnels" :key="tunnel.id">
+                <td>
+                  <strong>{{ tunnel.name }}</strong>
+                  <p v-if="!tunnel.measured" class="traffic-note">
+                    {{ tunnel.status === 'running' ? '等待采集。旧隧道在下次启动后开始统计。' : '隧道启动后开始统计。' }}
+                  </p>
+                </td>
+                <td>
+                  <span>{{ tunnel.exit_node_name }}</span>
+                  <span class="ops-status" :class="tunnel.exit_node_status === 'online' ? 'is-success' : 'is-muted'">
+                    {{ tunnel.exit_node_status === 'online' ? '在线' : '离线' }}
+                  </span>
+                </td>
+                <td v-for="direction in trafficDirections" :key="direction.key">
+                  <span class="ops-mono">{{ formatRate(tunnelRate(tunnel, direction.key)) }}</span>
+                  <p class="traffic-note">累计 {{ tunnel.measured ? formatTraffic(tunnel[direction.key]) : '—' }}</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="stats || statsLoading" class="overview-kpis" aria-label="资源概况" :aria-busy="!stats && statsLoading">
       <p v-if="!stats" class="overview-sr-only" role="status">正在加载资源统计</p>
       <article v-for="item in groups" :key="item.name" class="ops-panel kpi-card">
         <header class="kpi-header">
@@ -94,7 +152,7 @@
       </section>
     </div>
 
-    <section class="ops-panel overview-activity" aria-labelledby="overview-activity-title" :aria-busy="logsLoading">
+    <section class="ops-panel overview-activity" aria-labelledby="overview-activity-title" :aria-busy="!recentLogs && logsLoading">
       <header class="overview-panel-header">
         <div>
           <p class="overview-overline">AUDIT LOG</p>
@@ -103,10 +161,9 @@
         <RouterLink class="overview-link" to="/logs">查看全部 <el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink>
       </header>
       <div v-if="logsError" class="overview-feedback" role="alert">
-        <span>{{ recentLogs.length ? '日志更新失败，当前显示上次获取的记录。' : '暂时无法加载最近操作。' }}</span>
-        <el-button :loading="logsLoading" @click="loadRecentLogs">重试</el-button>
+        <span>{{ recentLogs ? '日志更新失败，当前显示上次获取的记录。' : '暂时无法加载最近操作。' }}</span>
       </div>
-      <div v-if="recentLogs.length" class="ops-table-scroll overview-table" tabindex="0" role="region" aria-label="最近操作列表">
+      <div v-if="recentLogs?.length" class="ops-table-scroll overview-table" tabindex="0" role="region" aria-label="最近操作列表">
         <table>
           <thead><tr><th scope="col">时间</th><th scope="col">管理员</th><th scope="col">操作</th><th scope="col">详情</th></tr></thead>
           <tbody>
@@ -119,7 +176,7 @@
           </tbody>
         </table>
       </div>
-      <div v-else-if="logsLoading" class="overview-activity-state" role="status" aria-label="正在加载最近操作">
+      <div v-else-if="!recentLogs && logsLoading" class="overview-activity-state" role="status" aria-label="正在加载最近操作">
         <el-skeleton :rows="2" animated />
       </div>
       <div v-else-if="!logsError" class="overview-activity-state overview-empty">
@@ -132,19 +189,22 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { ArrowRight, Connection, Cpu, DataAnalysis, Document, Monitor, Refresh, Switch } from '@element-plus/icons-vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { ArrowRight, Connection, Cpu, DataAnalysis, Document, Monitor, Switch } from '@element-plus/icons-vue'
 import { getLogList } from '@/api/log'
 import { getDashboardStats } from '@/api/stats'
 import PageHeader from '@/components/PageHeader.vue'
 
 const stats = ref(null)
 const updatedAt = ref(null)
-const statsLoading = ref(true)
+const statsLoading = ref(false)
 const statsError = ref(false)
-const recentLogs = ref([])
-const logsLoading = ref(true)
+const recentLogs = ref(null)
+const logsLoading = ref(false)
 const logsError = ref(false)
+const previousTraffic = ref(null)
+const sampleSeconds = ref(0)
+let pollTimer
 
 const actionLabels = {
   create: ['创建', 'is-success'],
@@ -157,6 +217,39 @@ const countFormat = new Intl.NumberFormat('zh-CN')
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false })
 const formatCount = (value) => value == null ? '—' : countFormat.format(value)
 const formatTime = (value) => value ? timeFormat.format(new Date(value)) : '—'
+const trafficDirections = [{ key: 'input_bytes', label: '入站' }, { key: 'output_bytes', label: '出站' }]
+const trafficUnits = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB']
+const trafficFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 })
+
+function formatTraffic(bytes) {
+  const index = Math.min(Math.floor(Math.log2(Math.max(1, bytes)) / 10), trafficUnits.length - 1)
+  return `${trafficFormat.format(bytes / 1024 ** index)} ${trafficUnits[index]}`
+}
+
+const formatRate = (bytes) => bytes == null ? '—' : `${formatTraffic(bytes)}/s`
+const traffic = computed(() => stats.value?.traffic)
+const previousTunnels = computed(() => new Map(previousTraffic.value?.tunnels.map((tunnel) => [tunnel.id, tunnel])))
+const hasPendingExits = computed(() => traffic.value?.tunnels.some((tunnel) => tunnel.status === 'running' && !tunnel.measured))
+const hasMeasuredExits = computed(() => traffic.value?.tunnels.some((tunnel) => tunnel.measured))
+const totalTrafficLabel = (bytes) => traffic.value.tunnels.length && !hasMeasuredExits.value ? '—' : formatTraffic(bytes)
+
+function trafficRate(current, previous) {
+  return previous == null || current < previous || sampleSeconds.value <= 0 || statsError.value
+    ? null
+    : (current - previous) / sampleSeconds.value
+}
+
+function tunnelRate(tunnel, key) {
+  const previous = previousTunnels.value.get(tunnel.id)
+  if (!tunnel.measured || !previous?.measured || tunnel.exit_node_id !== previous.exit_node_id ||
+      tunnel.status !== 'running' || tunnel.exit_node_status !== 'online' || previous.exit_node_status !== 'online') return null
+  return trafficRate(tunnel[key], previous[key])
+}
+
+function totalTrafficRate(key) {
+  const rates = traffic.value.tunnels.map((tunnel) => tunnelRate(tunnel, key)).filter((rate) => rate != null)
+  return rates.length ? rates.reduce((total, rate) => total + rate, 0) : null
+}
 
 const groups = computed(() => [
   {
@@ -179,12 +272,16 @@ const databaseLabel = computed(() => ({ mysql: 'MySQL', sqlite: 'SQLite' })[stat
 const activeShare = (item) => item.total ? Math.min(100, item.active / item.total * 100) : 0
 
 async function loadStats() {
+  if (statsLoading.value) return
   statsLoading.value = true
-  statsError.value = false
   try {
     const { data } = await getDashboardStats()
+    const now = new Date()
+    previousTraffic.value = traffic.value
+    sampleSeconds.value = updatedAt.value ? (now - updatedAt.value) / 1000 : 0
     stats.value = data
-    updatedAt.value = new Date()
+    updatedAt.value = now
+    statsError.value = false
   } catch {
     statsError.value = true
   } finally {
@@ -193,11 +290,12 @@ async function loadStats() {
 }
 
 async function loadRecentLogs() {
+  if (logsLoading.value) return
   logsLoading.value = true
-  logsError.value = false
   try {
-    const { data } = await getLogList({ page: 1, pageSize: 5 })
+    const { data } = await getLogList({ page: 1, pageSize: 5 }, { silentError: true })
     recentLogs.value = data.list || []
+    logsError.value = false
   } catch {
     logsError.value = true
   } finally {
@@ -210,7 +308,11 @@ function refreshOverview() {
   loadRecentLogs()
 }
 
-onMounted(refreshOverview)
+onMounted(() => {
+  refreshOverview()
+  pollTimer = window.setInterval(refreshOverview, 5000)
+})
+onBeforeUnmount(() => window.clearInterval(pollTimer))
 </script>
 
 <style scoped>
@@ -315,6 +417,46 @@ onMounted(refreshOverview)
 }
 
 .overview-panel-header h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.traffic-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+  margin: 16px 0 0;
+}
+
+.traffic-metric {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  background: var(--ops-inset);
+}
+
+.traffic-metric dt, .traffic-note {
+  color: var(--ops-muted);
+  font-size: 13px;
+}
+
+.traffic-metric .traffic-note { margin: 0; }
+
+.traffic-metric dd:not(.traffic-note) {
+  margin: 6px 0;
+  color: var(--ops-text);
+  font-size: clamp(1.25rem, 3vw, 1.75rem);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.traffic-exits { margin-top: 20px; }
+.traffic-exits h3 { margin: 0; font-size: 15px; }
+.traffic-exits p { margin: 6px 0 0; }
+.traffic-table {
+  margin: 12px 0 0;
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+}
+
+.traffic-table .ops-status { margin-inline-start: 8px; }
 .distribution-list, .runtime-list { margin: 16px 0 0; }
 
 .distribution-row {
@@ -392,6 +534,8 @@ onMounted(refreshOverview)
 .overview-table th { color: var(--ops-muted); font-size: 13px; font-weight: 600; background: var(--ops-inset); }
 .overview-table th:first-child, .overview-table td:first-child { padding-inline-start: 20px; white-space: nowrap; }
 .overview-table td:nth-child(3) { white-space: nowrap; }
+.traffic-table th { border-top: 0; }
+.traffic-table td:first-child { white-space: normal; }
 .overview-log-detail { overflow-wrap: anywhere; }
 
 .overview-feedback {

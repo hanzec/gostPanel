@@ -142,6 +142,7 @@ func (s *RuleSyncService) syncNodeRules(node model.GostNode, allowlist model.Gos
 		logger.Errorf("[Sync] 获取节点 %d 隧道规则失败: %v", node.ID, err)
 		return
 	}
+	s.recordRelayTraffic(node.ID, tunnels, gostCfg.Services)
 	if allowlist.ID != 0 {
 		if err = syncGostAllowlist(client, gostCfg, node.ID, tunnels, allowlist); err != nil {
 			logger.Errorf("[Sync] 下发 Gost 白名单到节点 %d 失败: %v", node.ID, err)

@@ -23,9 +23,9 @@ func (r *TunnelRepository) Create(tunnel *model.GostTunnel) error {
 	return r.DB.Create(tunnel).Error
 }
 
-// Update 更新隧道
+// Update 只更新隧道可编辑的配置。
 func (r *TunnelRepository) Update(tunnel *model.GostTunnel) error {
-	return r.DB.Save(tunnel).Error
+	return r.DB.Model(tunnel).Select("name", "protocol", "relay_port", "remark", "updated_at").Updates(tunnel).Error
 }
 
 // Delete 删除隧道
