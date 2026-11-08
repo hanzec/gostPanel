@@ -26,9 +26,9 @@ type rawSessionFixture struct {
 
 func (f rawSessionFixture) Connect(stream V1_ConnectServer) error { return f.serve(stream) }
 
-func openRawSession(t *testing.T, ctx context.Context, serve func(V1_ConnectServer) error) V1_ConnectClient {
+func openRawSession(t *testing.T, ctx context.Context, serve func(V1_ConnectServer) error, opts ...grpc.ServerOption) V1_ConnectClient {
 	t.Helper()
-	server := grpc.NewServer()
+	server := grpc.NewServer(opts...)
 	RegisterV1Server(server, rawSessionFixture{serve: serve})
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

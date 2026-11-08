@@ -168,7 +168,10 @@ func startReports(cfg config.ReportConfig, db *gorm.DB) (*grpc.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	server := grpc.NewServer(append(options, grpc.MaxRecvMsgSize(5<<20))...)
+	server := grpc.NewServer(append(options,
+		grpc.MaxRecvMsgSize(nodegrpc.MaxStreamFrameBytes),
+		grpc.MaxSendMsgSize(nodegrpc.MaxStreamFrameBytes),
+	)...)
 	nodegrpc.RegisterV1Server(server, handler.NewReportHandler(db, cfg.ProxyIP != ""))
 	go func() {
 		logger.Infof("gRPC 流量上报服务监听 %s", listener.Addr())
