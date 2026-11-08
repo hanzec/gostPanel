@@ -3,12 +3,7 @@
     <RouterLink class="console-brand" to="/dashboard" @click="$emit('navigate')">
       <span class="console-brand__mark" aria-hidden="true">
         <img v-if="logoUrl" :key="logoUrl" :src="logoUrl" :class="{ 'is-loaded': loadedLogo === logoUrl }" alt="" width="24" height="24" @load="loadedLogo = logoUrl" />
-        <svg v-if="!logoUrl || loadedLogo !== logoUrl" viewBox="0 0 24 24" fill="none" width="23" height="23">
-          <path d="M4 15h5l3-6h8M6 9h3m6 6h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-          <circle cx="4" cy="15" r="1.6" fill="currentColor" />
-          <circle cx="20" cy="9" r="1.6" fill="currentColor" />
-          <circle cx="20" cy="15" r="1.6" fill="currentColor" />
-        </svg>
+        <img v-if="!logoUrl || loadedLogo !== logoUrl" class="is-loaded" :src="defaultLogoUrl" alt="" width="24" height="24" />
       </span>
       <span class="console-brand__type">
         <strong>{{ siteTitle }}</strong>
@@ -42,6 +37,7 @@
 <script setup>
 import { ref } from 'vue'
 import { Connection, Document, Lock, Monitor, Odometer, Setting, Switch } from '@element-plus/icons-vue'
+import { defaultLogoUrl } from '@/store/system'
 
 defineProps({
   siteTitle: { type: String, required: true },

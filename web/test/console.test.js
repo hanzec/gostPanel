@@ -67,10 +67,13 @@ describe('console routing and Authentik gate', () => {
     })
 
     expect(wrapper.get('[role="status"]').text()).toContain('正在确认管理员身份')
+    expect(wrapper.get('.console-brand__mark img').attributes('src')).toBe('/favicon.svg')
     expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/info'])
     answer()
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toContain('无法确认管理员身份')
+    const identityError = wrapper.get('[role="alert"]')
+    expect(identityError.text()).toContain('无法确认管理员身份')
+    expect(identityError.get('img').attributes('src')).toBe('/favicon.svg')
     expect(wrapper.find('.overview-banner').exists()).toBe(false)
 
     await wrapper.get('[role="alert"] button').trigger('click')
@@ -82,11 +85,12 @@ describe('console routing and Authentik gate', () => {
     expect(document.title).toBe(branding.siteTitle)
 
     const logo = wrapper.get('.console-brand__mark')
-    expect(logo.get('img').attributes('src')).toBe(branding.logoUrl)
-    expect(logo.find('svg').exists()).toBe(true)
-    await logo.get('img').trigger('load')
-    expect(logo.get('img').classes()).toContain('is-loaded')
-    expect(logo.find('svg').exists()).toBe(false)
+    const customLogo = logo.get(`img[src="${branding.logoUrl}"]`)
+    expect(logo.find('img[src="/favicon.svg"]').exists()).toBe(true)
+    expect(customLogo.classes()).not.toContain('is-loaded')
+    await customLogo.trigger('load')
+    expect(customLogo.classes()).toContain('is-loaded')
+    expect(logo.find('img[src="/favicon.svg"]').exists()).toBe(false)
     await wrapper.get('a.console-skip').trigger('click')
     expect(document.activeElement.id).toBe('console-main')
 
@@ -132,13 +136,30 @@ describe('branding and summary components', () => {
   it('uses sensible defaults and persists server branding', async () => {
     const store = useSystemStore()
     expect(store.siteTitle).toBe('yagp')
-    expect(store.logoUrl).toBe('https://gost.run/images/gost.png')
+    expect(store.logoUrl).toBe('')
     expect(store.copyright).toBe('')
     await store.fetchSystemConfig()
     expect(localStorage.getItem('siteTitle')).toBe(branding.siteTitle)
     expect(localStorage.getItem('logoUrl')).toBe(branding.logoUrl)
     expect(localStorage.getItem('copyright')).toBe(branding.copyright)
     expect(document.title).toBe(branding.siteTitle)
+  })
+
+  it('uses the bundled logo instead of the historical default from cache or server', async () => {
+    const historicalLogo = 'https://gost.run/images/gost.png'
+    localStorage.setItem('logoUrl', historicalLogo)
+    const store = useSystemStore()
+    expect(store.logoUrl).toBe('')
+
+    await store.fetchSystemConfig()
+    expect(store.logoUrl).toBe(branding.logoUrl)
+
+    adapter.mockImplementationOnce(config => Promise.resolve(reply(config, {
+      ...branding, logoUrl: historicalLogo
+    })))
+    await store.fetchSystemConfig()
+    expect(store.logoUrl).toBe('')
+    expect(localStorage.getItem('logoUrl')).toBeNull()
   })
 
   it('preserves cached branding on errors and removes an omitted logo on refresh', async () => {
