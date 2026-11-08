@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ type RuleSyncService struct {
 	nodeRepo   *repository.NodeRepository
 	ruleRepo   *repository.RuleRepository
 	tunnelRepo *repository.TunnelRepository
+	allowlist  *GostAllowlistService
 	ticker     *time.Ticker
 	stopChan   chan struct{}
 	wg         sync.WaitGroup
@@ -30,6 +32,7 @@ func NewRuleSyncService(db *gorm.DB) *RuleSyncService {
 		nodeRepo:   repository.NewNodeRepository(db),
 		ruleRepo:   repository.NewRuleRepository(db),
 		tunnelRepo: repository.NewTunnelRepository(db),
+		allowlist:  NewGostAllowlistService(db),
 		stopChan:   make(chan struct{}),
 	}
 }
@@ -75,14 +78,18 @@ func (s *RuleSyncService) syncAll() {
 		return
 	}
 
+	allowlist, err := s.allowlist.Get(context.Background())
+	if err != nil {
+		logger.Errorf("[Sync] 读取 Gost 白名单失败: %v", err)
+	}
 	for _, node := range nodes {
 		// 并发同步每个节点
-		go s.syncNodeRules(node)
+		go s.syncNodeRules(node, allowlist)
 	}
 }
 
 // syncNodeRules 同步单个节点的规则
-func (s *RuleSyncService) syncNodeRules(node model.GostNode) {
+func (s *RuleSyncService) syncNodeRules(node model.GostNode, allowlist model.GostAllowlist) {
 	// 如果节点离线，跳过规则同步
 	if node.Status == model.NodeStatusOffline {
 		return
@@ -129,6 +136,11 @@ func (s *RuleSyncService) syncNodeRules(node model.GostNode) {
 	if err != nil {
 		logger.Errorf("[Sync] 获取节点 %d 隧道规则失败: %v", node.ID, err)
 	} else {
+		if allowlist.ID != 0 {
+			if err = syncGostAllowlist(client, gostCfg, node.ID, tunnels, allowlist); err != nil {
+				logger.Errorf("[Sync] 下发 Gost 白名单到节点 %d 失败: %v", node.ID, err)
+			}
+		}
 		for _, t := range tunnels {
 			// 仅对入口节点同步隧道状态
 			if t.EntryNodeID == node.ID {

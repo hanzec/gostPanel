@@ -4,6 +4,9 @@ package service
 import (
 	stderrors "errors"
 	"fmt"
+	"net"
+	"strconv"
+	"strings"
 
 	"yagp/internal/dto"
 	"yagp/internal/errors"
@@ -23,6 +26,7 @@ type TunnelService struct {
 	tunnelRepo *repository.TunnelRepository
 	nodeRepo   *repository.NodeRepository
 	logService *LogService
+	allowlist  *GostAllowlistService
 }
 
 // NewTunnelService 创建隧道服务
@@ -31,6 +35,7 @@ func NewTunnelService(db *gorm.DB) *TunnelService {
 		tunnelRepo: repository.NewTunnelRepository(db),
 		nodeRepo:   repository.NewNodeRepository(db),
 		logService: NewLogService(db),
+		allowlist:  NewGostAllowlistService(db),
 	}
 }
 
@@ -242,10 +247,10 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 
 	// 步骤1：在出口节点创建 Relay 服务
 	exitClient := utils.GetGostClient(exitNode)
-	relayServiceName := fmt.Sprintf("relay-tunnel-%d", tunnel.ID)
+	relayName := relayServiceName(tunnel.ID)
 
 	relaySvc := &gost.ServiceConfig{
-		Name: relayServiceName,
+		Name: relayName,
 		Addr: fmt.Sprintf(":%d", tunnel.RelayPort),
 		Handler: &gost.HandlerConfig{
 			Type: "relay", // relay 协议支持接收客户端传来的目标地址
@@ -255,9 +260,18 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 		},
 	}
 
+	if err = s.allowlist.prepareRelay(exitClient, relaySvc); err != nil {
+		return err
+	}
+
 	if err = exitClient.CreateService(relaySvc); err != nil {
 		_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusError)
 		return errors.ErrTunnelRelayCreateFailed
+	}
+	if relaySvc.Admission != "" {
+		if _, err = exitClient.AttachRelayAllowlist(relaySvc.Name); err != nil {
+			return err
+		}
 	}
 
 	// 保存出口节点配置
@@ -270,14 +284,14 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	exitHost := exitNode.Address
 	if exitHost == "" {
 		// 回滚：删除出口节点的 Relay 服务
-		_ = exitClient.DeleteService(relayServiceName)
+		_ = exitClient.DeleteService(relayName)
 		_ = exitClient.SaveConfig()
 		_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusError)
 		return errors.ErrExtractHostFailed
 	}
 
 	chainName := fmt.Sprintf("tunnel-%d-chain", tunnel.ID)
-	relayAddr := fmt.Sprintf("%s:%d", exitHost, tunnel.RelayPort)
+	relayAddr := net.JoinHostPort(strings.Trim(exitHost, "[]"), strconv.Itoa(tunnel.RelayPort))
 
 	chain := &gost.ChainConfig{
 		Name: chainName,
@@ -302,7 +316,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 
 	if err = entryClient.CreateChain(chain); err != nil {
 		// 回滚：删除出口节点的 Relay 服务
-		_ = exitClient.DeleteService(relayServiceName)
+		_ = exitClient.DeleteService(relayName)
 		_ = exitClient.SaveConfig()
 		_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusError)
 		return errors.ErrTunnelChainCreateFailed
@@ -312,7 +326,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	_ = entryClient.SaveConfig()
 
 	// 更新隧道状态和服务 ID
-	_ = s.tunnelRepo.UpdateServiceInfo(id, relayServiceName, chainName)
+	_ = s.tunnelRepo.UpdateServiceInfo(id, relayName, chainName)
 	_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusRunning)
 
 	s.logService.Record(
@@ -324,7 +338,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 		ip,
 		userAgent)
 
-	logger.Infof("启动隧道成功: %s (Relay: %s -> Chain: %s)", tunnel.Name, relayServiceName, chainName)
+	logger.Infof("启动隧道成功: %s (Relay: %s -> Chain: %s)", tunnel.Name, relayName, chainName)
 	return nil
 }
 

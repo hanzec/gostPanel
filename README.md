@@ -160,6 +160,10 @@ Gost 的管理 Web API 绑定在节点本机，面板通过 `yagp-node` 的 TLS 
 
 配置使用 `{"nftables":[...]}`，只允许为该节点专用的 `inet yagp_node_<ID>` 表添加链、规则、集合等对象。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除该表。卸载时安装脚本会清理该表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
 
+### Gost Relay 来源 IP 白名单
+
+在 **系统设置 → Gost IP 白名单** 勾选允许连接的节点。面板从所选节点的登记地址生成 IPv4/IPv6 白名单，并应用到面板管理的隧道出口 Relay。登记地址应填写这些节点连接 Relay 时使用的源 IP。清空选择并保存可解除该白名单限制。首次为已有 Relay 绑定准入配置时会重载该服务，后续修改名单会热更新。
+
 ---
 
 ## 📦 预编译下载

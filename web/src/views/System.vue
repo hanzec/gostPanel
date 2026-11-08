@@ -1,8 +1,8 @@
 <template>
   <div class="ops-page settings-page">
-    <PageHeader eyebrow="CONFIGURATION" title="系统设置" description="管理面板品牌、SMTP 邮件和数据库备份。">
+    <PageHeader eyebrow="CONFIGURATION" title="系统设置" description="管理面板品牌、SMTP 邮件、数据库备份和 Gost 配置。">
       <template #actions>
-        <el-button type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
+        <el-button v-if="activeTab !== 'gost-allowlist'" type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
           保存设置
         </el-button>
       </template>
@@ -103,6 +103,14 @@
                 </div>
               </template>
             </el-tab-pane>
+
+            <el-tab-pane name="gost-allowlist" label="Gost IP 白名单" lazy>
+              <header class="settings-section-heading">
+                <h2>Gost Relay 来源 IP 白名单</h2>
+                <p>统一设置面板管理的 Gost Relay 允许哪些节点连接。</p>
+              </header>
+              <GostAllowlistSettings />
+            </el-tab-pane>
           </el-tabs>
         </section>
 
@@ -144,9 +152,10 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Coin, InfoFilled, Message, Monitor } from '@element-plus/icons-vue'
+import { Coin, InfoFilled, Lock, Message, Monitor } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { backupSystem, getSystemConfig, sendTestEmail, updateSystemConfig } from '@/api/system'
+import GostAllowlistSettings from '@/components/GostAllowlistSettings.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useSystemStore } from '@/store/system'
 
@@ -189,6 +198,13 @@ const context = computed(() => {
       icon: Coin, label: 'BACKUP', title: '备份方式',
       description: backupSupported.value ? 'SQLite 备份文件存放在面板服务的 backups 目录。' : '请使用数据库服务提供的工具创建和管理备份。',
       factLabel: '管理方式', factValue: backupSupported.value ? '面板内备份' : '数据库服务'
+    }
+  }
+  if (activeTab.value === 'gost-allowlist') {
+    return {
+      icon: Lock, label: 'ADMISSION', title: '白名单同步',
+      description: '面板向在线 Relay 同步已保存的来源 IP。离线节点重新连接后会收到更新。首次启用时，已有 Relay 可能短暂重启。',
+      factLabel: '作用范围', factValue: '面板管理的 Gost Relay'
     }
   }
   return {

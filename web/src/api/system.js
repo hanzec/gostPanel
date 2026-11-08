@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { getNodeList } from '@/api/node'
 
 /**
  * 获取系统配置
@@ -44,4 +45,23 @@ export function backupSystem() {
         url: '/system/backup',
         method: 'post'
     })
+}
+
+export function getGostAllowlist() {
+    return request.get('/system/gost-allowlist')
+}
+
+export function updateGostAllowlist(nodeIds) {
+    return request.put('/system/gost-allowlist', { node_ids: nodeIds })
+}
+
+export async function getRoutingNodes() {
+    const nodes = []
+    const pageSize = 100
+    for (let page = 1; ; page++) {
+        const { data } = await getNodeList({ page, pageSize })
+        const list = data.list || []
+        nodes.push(...list)
+        if (nodes.length >= data.total || list.length < pageSize) return nodes
+    }
 }

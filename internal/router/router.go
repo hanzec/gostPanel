@@ -69,6 +69,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 	statsHandler := handler.NewStatsHandler(statsService)
 	logHandler := handler.NewLogHandler(logService)
 	systemConfigHandler := handler.NewSystemConfigHandler(systemConfigService, backupService)
+	gostAllowlistHandler := handler.NewGostAllowlistHandler(service.NewGostAllowlistService(r.db))
 
 	// 管理员路由
 	authRoutes := apiV1.Group("")
@@ -118,6 +119,8 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.GET("/system/public-config", systemConfigHandler.GetPublicConfig)
 		authRoutes.GET("/system/config", systemConfigHandler.GetConfig)
 		authRoutes.PUT("/system/config", systemConfigHandler.UpdateConfig)
+		authRoutes.GET("/system/gost-allowlist", gostAllowlistHandler.Get)
+		authRoutes.PUT("/system/gost-allowlist", gostAllowlistHandler.Update)
 		authRoutes.POST("/system/email/test", systemConfigHandler.TestEmail)
 		authRoutes.POST("/system/backup", systemConfigHandler.Backup)
 	}

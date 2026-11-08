@@ -44,17 +44,19 @@ func NewClient(cfg *Config) *Client {
 
 // ServiceConfig 服务配置
 type ServiceConfig struct {
-	Name      string           `json:"name"`
-	Addr      string           `json:"addr"`
-	Handler   *HandlerConfig   `json:"handler,omitempty"`
-	Listener  *ListenerConfig  `json:"listener,omitempty"`
-	Forwarder *ForwarderConfig `json:"forwarder,omitempty"`
-	Limiter   string           `json:"limiter,omitempty"`  // 流量速率限制器名称
-	CLimiter  string           `json:"climiter,omitempty"` // 并发连接数限制器名称
-	RLimiter  string           `json:"rlimiter,omitempty"` // 请求速率限制器名称
-	Observer  string           `json:"observer,omitempty"` // 观察器名称
-	Metadata  map[string]any   `json:"metadata,omitempty"` // 元数据配置
-	Status    *ServiceStatus   `json:"status,omitempty"`   // 服务运行状态
+	Name       string           `json:"name"`
+	Addr       string           `json:"addr"`
+	Admission  string           `json:"admission,omitempty"`
+	Admissions []string         `json:"admissions,omitempty"`
+	Handler    *HandlerConfig   `json:"handler,omitempty"`
+	Listener   *ListenerConfig  `json:"listener,omitempty"`
+	Forwarder  *ForwarderConfig `json:"forwarder,omitempty"`
+	Limiter    string           `json:"limiter,omitempty"`  // 流量速率限制器名称
+	CLimiter   string           `json:"climiter,omitempty"` // 并发连接数限制器名称
+	RLimiter   string           `json:"rlimiter,omitempty"` // 请求速率限制器名称
+	Observer   string           `json:"observer,omitempty"` // 观察器名称
+	Metadata   map[string]any   `json:"metadata,omitempty"` // 元数据配置
+	Status     *ServiceStatus   `json:"status,omitempty"`   // 服务运行状态
 }
 
 // ServiceStatus 服务运行时状态信息
@@ -194,12 +196,13 @@ func (c *Client) HealthCheck() error {
 
 // GostConfig Gost 完整配置
 type GostConfig struct {
-	Services  []ServiceConfig  `json:"services"`
-	Chains    []ChainConfig    `json:"chains"`
-	Limiters  []LimiterConfig  `json:"limiters"`
-	CLimiters []CLimiterConfig `json:"climiters"`
-	RLimiters []RLimiterConfig `json:"rlimiters"`
-	Observers []ObserverConfig `json:"observers"`
+	Services   []ServiceConfig   `json:"services"`
+	Admissions []AdmissionConfig `json:"admissions"`
+	Chains     []ChainConfig     `json:"chains"`
+	Limiters   []LimiterConfig   `json:"limiters"`
+	CLimiters  []CLimiterConfig  `json:"climiters"`
+	RLimiters  []RLimiterConfig  `json:"rlimiters"`
+	Observers  []ObserverConfig  `json:"observers"`
 }
 
 // GetConfig 获取节点配置

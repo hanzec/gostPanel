@@ -187,7 +187,7 @@ func allowedCommand(method, path string) bool {
 		return false
 	}
 	switch parts[2] {
-	case "services", "chains", "observers", "limiters", "climiters", "rlimiters":
+	case "services", "chains", "observers", "limiters", "climiters", "rlimiters", "admissions":
 	default:
 		return false
 	}
@@ -197,7 +197,13 @@ func allowedCommand(method, path string) bool {
 	if !resourceName.MatchString(parts[3]) {
 		return false
 	}
-	return method == http.MethodGet || method == http.MethodDelete || (parts[2] == "observers" && method == http.MethodPut)
+	if parts[2] == "admissions" {
+		return method == http.MethodGet || method == http.MethodPut
+	}
+	if method == http.MethodPut {
+		return parts[2] == "observers" || (parts[2] == "services" && strings.HasPrefix(parts[3], "relay-tunnel-"))
+	}
+	return method == http.MethodGet || method == http.MethodDelete
 }
 
 type observerServer struct {

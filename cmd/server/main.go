@@ -203,6 +203,7 @@ func autoMigrate(db *gorm.DB) error {
 		&model.GostNode{},
 		&model.GostRule{},
 		&model.GostTunnel{},
+		&model.GostAllowlist{},
 		&model.OperationLog{},
 		&model.SystemConfig{},
 	); err != nil {
