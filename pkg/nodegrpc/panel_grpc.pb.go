@@ -21,20 +21,42 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	V1_Report_FullMethodName         = "/yagp.v1/Report"
-	V1_RegisterNode_FullMethodName   = "/yagp.v1/RegisterNode"
-	V1_GetNftTemplate_FullMethodName = "/yagp.v1/GetNftTemplate"
-	V1_UpdateNodeIPs_FullMethodName  = "/yagp.v1/UpdateNodeIPs"
+	V1_Report_FullMethodName               = "/yagp.v1/Report"
+	V1_RegisterNode_FullMethodName         = "/yagp.v1/RegisterNode"
+	V1_GetNftTemplate_FullMethodName       = "/yagp.v1/GetNftTemplate"
+	V1_UpdateNodeIPs_FullMethodName        = "/yagp.v1/UpdateNodeIPs"
+	V1_Execute_FullMethodName              = "/yagp.v1/Execute"
+	V1_GetObserverEndpoint_FullMethodName  = "/yagp.v1/GetObserverEndpoint"
+	V1_GetGostServiceStatus_FullMethodName = "/yagp.v1/GetGostServiceStatus"
+	V1_RestartGostService_FullMethodName   = "/yagp.v1/RestartGostService"
+	V1_GetGostLogs_FullMethodName          = "/yagp.v1/GetGostLogs"
+	V1_GetNftConfig_FullMethodName         = "/yagp.v1/GetNftConfig"
+	V1_ApplyNftConfig_FullMethodName       = "/yagp.v1/ApplyNftConfig"
+	V1_SyncTrafficQuota_FullMethodName     = "/yagp.v1/SyncTrafficQuota"
+	V1_GetUpgradeStatus_FullMethodName     = "/yagp.v1/GetUpgradeStatus"
+	V1_StartUpgrade_FullMethodName         = "/yagp.v1/StartUpgrade"
 )
 
 // V1Client is the client API for V1 service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type V1Client interface {
+	// Implemented by the panel listener.
 	Report(ctx context.Context, in *ReportRequest, opts ...grpc.CallOption) (*proto.ObserveReply, error)
 	RegisterNode(ctx context.Context, in *RegisterNodeRequest, opts ...grpc.CallOption) (*RegisterNodeReply, error)
 	GetNftTemplate(ctx context.Context, in *NftTemplateRequest, opts ...grpc.CallOption) (*NftConfig, error)
 	UpdateNodeIPs(ctx context.Context, in *NodeIPsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// Implemented by the node control listener.
+	Execute(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandReply, error)
+	GetObserverEndpoint(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ObserverEndpoint, error)
+	GetGostServiceStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
+	RestartGostService(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error)
+	GetGostLogs(ctx context.Context, in *GostLogsRequest, opts ...grpc.CallOption) (*GostLogsReply, error)
+	GetNftConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NftConfig, error)
+	ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...grpc.CallOption) (*NftConfig, error)
+	SyncTrafficQuota(ctx context.Context, in *TrafficQuotaRequest, opts ...grpc.CallOption) (*TrafficQuotaReply, error)
+	GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
+	StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
 }
 
 type v1Client struct {
@@ -85,14 +107,126 @@ func (c *v1Client) UpdateNodeIPs(ctx context.Context, in *NodeIPsRequest, opts .
 	return out, nil
 }
 
+func (c *v1Client) Execute(ctx context.Context, in *CommandRequest, opts ...grpc.CallOption) (*CommandReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CommandReply)
+	err := c.cc.Invoke(ctx, V1_Execute_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) GetObserverEndpoint(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ObserverEndpoint, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ObserverEndpoint)
+	err := c.cc.Invoke(ctx, V1_GetObserverEndpoint_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) GetGostServiceStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GostServiceStatus)
+	err := c.cc.Invoke(ctx, V1_GetGostServiceStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) RestartGostService(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*GostServiceStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GostServiceStatus)
+	err := c.cc.Invoke(ctx, V1_RestartGostService_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) GetGostLogs(ctx context.Context, in *GostLogsRequest, opts ...grpc.CallOption) (*GostLogsReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GostLogsReply)
+	err := c.cc.Invoke(ctx, V1_GetGostLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) GetNftConfig(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NftConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NftConfig)
+	err := c.cc.Invoke(ctx, V1_GetNftConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) ApplyNftConfig(ctx context.Context, in *NftConfig, opts ...grpc.CallOption) (*NftConfig, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NftConfig)
+	err := c.cc.Invoke(ctx, V1_ApplyNftConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) SyncTrafficQuota(ctx context.Context, in *TrafficQuotaRequest, opts ...grpc.CallOption) (*TrafficQuotaReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrafficQuotaReply)
+	err := c.cc.Invoke(ctx, V1_SyncTrafficQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NodeUpgradeStatus)
+	err := c.cc.Invoke(ctx, V1_GetUpgradeStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opts ...grpc.CallOption) (*NodeUpgradeStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(NodeUpgradeStatus)
+	err := c.cc.Invoke(ctx, V1_StartUpgrade_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // V1Server is the server API for V1 service.
 // All implementations must embed UnimplementedV1Server
 // for forward compatibility.
 type V1Server interface {
+	// Implemented by the panel listener.
 	Report(context.Context, *ReportRequest) (*proto.ObserveReply, error)
 	RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeReply, error)
 	GetNftTemplate(context.Context, *NftTemplateRequest) (*NftConfig, error)
 	UpdateNodeIPs(context.Context, *NodeIPsRequest) (*emptypb.Empty, error)
+	// Implemented by the node control listener.
+	Execute(context.Context, *CommandRequest) (*CommandReply, error)
+	GetObserverEndpoint(context.Context, *emptypb.Empty) (*ObserverEndpoint, error)
+	GetGostServiceStatus(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
+	RestartGostService(context.Context, *emptypb.Empty) (*GostServiceStatus, error)
+	GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error)
+	GetNftConfig(context.Context, *emptypb.Empty) (*NftConfig, error)
+	ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error)
+	SyncTrafficQuota(context.Context, *TrafficQuotaRequest) (*TrafficQuotaReply, error)
+	GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error)
+	StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error)
 	mustEmbedUnimplementedV1Server()
 }
 
@@ -114,6 +248,36 @@ func (UnimplementedV1Server) GetNftTemplate(context.Context, *NftTemplateRequest
 }
 func (UnimplementedV1Server) UpdateNodeIPs(context.Context, *NodeIPsRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateNodeIPs not implemented")
+}
+func (UnimplementedV1Server) Execute(context.Context, *CommandRequest) (*CommandReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Execute not implemented")
+}
+func (UnimplementedV1Server) GetObserverEndpoint(context.Context, *emptypb.Empty) (*ObserverEndpoint, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetObserverEndpoint not implemented")
+}
+func (UnimplementedV1Server) GetGostServiceStatus(context.Context, *emptypb.Empty) (*GostServiceStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGostServiceStatus not implemented")
+}
+func (UnimplementedV1Server) RestartGostService(context.Context, *emptypb.Empty) (*GostServiceStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RestartGostService not implemented")
+}
+func (UnimplementedV1Server) GetGostLogs(context.Context, *GostLogsRequest) (*GostLogsReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGostLogs not implemented")
+}
+func (UnimplementedV1Server) GetNftConfig(context.Context, *emptypb.Empty) (*NftConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetNftConfig not implemented")
+}
+func (UnimplementedV1Server) ApplyNftConfig(context.Context, *NftConfig) (*NftConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplyNftConfig not implemented")
+}
+func (UnimplementedV1Server) SyncTrafficQuota(context.Context, *TrafficQuotaRequest) (*TrafficQuotaReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SyncTrafficQuota not implemented")
+}
+func (UnimplementedV1Server) GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetUpgradeStatus not implemented")
+}
+func (UnimplementedV1Server) StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StartUpgrade not implemented")
 }
 func (UnimplementedV1Server) mustEmbedUnimplementedV1Server() {}
 func (UnimplementedV1Server) testEmbeddedByValue()            {}
@@ -208,6 +372,186 @@ func _V1_UpdateNodeIPs_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _V1_Execute_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).Execute(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_Execute_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).Execute(ctx, req.(*CommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_GetObserverEndpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).GetObserverEndpoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_GetObserverEndpoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).GetObserverEndpoint(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_GetGostServiceStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).GetGostServiceStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_GetGostServiceStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).GetGostServiceStatus(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_RestartGostService_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).RestartGostService(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_RestartGostService_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).RestartGostService(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_GetGostLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GostLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).GetGostLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_GetGostLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).GetGostLogs(ctx, req.(*GostLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_GetNftConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).GetNftConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_GetNftConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).GetNftConfig(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_ApplyNftConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NftConfig)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).ApplyNftConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_ApplyNftConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).ApplyNftConfig(ctx, req.(*NftConfig))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_SyncTrafficQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TrafficQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).SyncTrafficQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_SyncTrafficQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).SyncTrafficQuota(ctx, req.(*TrafficQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_GetUpgradeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).GetUpgradeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_GetUpgradeStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).GetUpgradeStatus(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_StartUpgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(NodeUpgradeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).StartUpgrade(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_StartUpgrade_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).StartUpgrade(ctx, req.(*NodeUpgradeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // V1_ServiceDesc is the grpc.ServiceDesc for V1 service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -230,6 +574,46 @@ var V1_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateNodeIPs",
 			Handler:    _V1_UpdateNodeIPs_Handler,
+		},
+		{
+			MethodName: "Execute",
+			Handler:    _V1_Execute_Handler,
+		},
+		{
+			MethodName: "GetObserverEndpoint",
+			Handler:    _V1_GetObserverEndpoint_Handler,
+		},
+		{
+			MethodName: "GetGostServiceStatus",
+			Handler:    _V1_GetGostServiceStatus_Handler,
+		},
+		{
+			MethodName: "RestartGostService",
+			Handler:    _V1_RestartGostService_Handler,
+		},
+		{
+			MethodName: "GetGostLogs",
+			Handler:    _V1_GetGostLogs_Handler,
+		},
+		{
+			MethodName: "GetNftConfig",
+			Handler:    _V1_GetNftConfig_Handler,
+		},
+		{
+			MethodName: "ApplyNftConfig",
+			Handler:    _V1_ApplyNftConfig_Handler,
+		},
+		{
+			MethodName: "SyncTrafficQuota",
+			Handler:    _V1_SyncTrafficQuota_Handler,
+		},
+		{
+			MethodName: "GetUpgradeStatus",
+			Handler:    _V1_GetUpgradeStatus_Handler,
+		},
+		{
+			MethodName: "StartUpgrade",
+			Handler:    _V1_StartUpgrade_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

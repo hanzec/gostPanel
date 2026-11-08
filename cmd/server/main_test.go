@@ -146,8 +146,8 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer server.Stop()
-	info, ok := server.GetServiceInfo()[nodegrpc.V1_ServiceDesc.ServiceName]
-	if !ok || len(info.Methods) != 4 {
+	info, ok := server.GetServiceInfo()["yagp.v1"]
+	if !ok || len(info.Methods) != 14 {
 		t.Fatalf("registered report API = %+v", info)
 	}
 	trust, err := nodegrpc.ClientTLS(cfg.CertFile)
@@ -161,8 +161,12 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if _, err := nodegrpc.NewV1Client(conn).GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: 1}); status.Code(err) != codes.Unauthenticated {
+	client := nodegrpc.NewV1Client(conn)
+	if _, err := client.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: 1}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated report RPC = %v", err)
+	}
+	if _, err := client.Execute(ctx, &nodegrpc.CommandRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("node control RPC on panel listener = %v", err)
 	}
 	cfg.Listen = "invalid listen address"
 	if _, err := startReports(cfg, db); err == nil {

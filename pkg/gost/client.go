@@ -377,7 +377,7 @@ func (c *Client) ObserverAddress() (string, error) {
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
 	defer cancel()
-	reply, err := nodegrpc.NewNodeClient(conn).GetObserverEndpoint(ctx, &emptypb.Empty{})
+	reply, err := nodegrpc.NewV1Client(conn).GetObserverEndpoint(ctx, &emptypb.Empty{})
 	if err != nil {
 		return "", err
 	}
@@ -419,7 +419,7 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
 	defer cancel()
-	reply, err := nodegrpc.NewNodeClient(conn).Execute(ctx, request)
+	reply, err := nodegrpc.NewV1Client(conn).Execute(ctx, request)
 	if err != nil {
 		return nil, err
 	}

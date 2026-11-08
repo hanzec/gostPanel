@@ -86,7 +86,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	control := grpc.NewServer(grpc.Creds(controlTLS))
 	defer control.Stop()
-	nodegrpc.RegisterNodeServer(control, &controlServer{
+	nodegrpc.RegisterV1Server(control, &controlServer{
 		config: cfg,
 		client: &http.Client{
 			Transport: &http.Transport{},
@@ -141,7 +141,7 @@ func IsLoopbackAddress(address string) bool {
 }
 
 type controlServer struct {
-	nodegrpc.UnimplementedNodeServer
+	nodegrpc.UnimplementedV1Server
 	config Config
 	client *http.Client
 }

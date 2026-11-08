@@ -119,9 +119,12 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	timeout, stop := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stop()
 	command := &nodegrpc.CommandRequest{Method: "GET", Path: "/config"}
-	controlClient := nodegrpc.NewNodeClient(controlConn)
+	controlClient := nodegrpc.NewV1Client(controlConn)
 	if _, err = controlClient.Execute(timeout, command, grpc.WaitForReady(true)); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated control request: %v", err)
+	}
+	if _, err = controlClient.RegisterNode(timeout, &nodegrpc.RegisterNodeRequest{}); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("panel registration RPC on node control listener: %v", err)
 	}
 	if _, err = controlClient.RestartGostService(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated restart request: %v", err)

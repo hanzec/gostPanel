@@ -201,7 +201,7 @@ func waitForDaemon(ctx context.Context, cfg Config, tag string) error {
 		return err
 	}
 	defer conn.Close()
-	client := nodegrpc.NewNodeClient(conn)
+	client := nodegrpc.NewV1Client(conn)
 	return waitForReady(ctx, "yagp-daemon control API", 25*time.Second, func(ctx context.Context) bool {
 		if tag != "" {
 			state, err := client.GetUpgradeStatus(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))

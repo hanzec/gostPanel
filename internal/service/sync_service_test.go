@@ -114,7 +114,7 @@ func TestRuleSyncRetargetsRunningTunnel(t *testing.T) {
 }
 
 type tunnelSyncNode struct {
-	nodegrpc.UnimplementedNodeServer
+	nodegrpc.UnimplementedV1Server
 	t       *testing.T
 	mu      sync.Mutex
 	chain   json.RawMessage
@@ -153,7 +153,7 @@ func (s *tunnelSyncNode) Execute(ctx context.Context, request *nodegrpc.CommandR
 	return response, nil
 }
 
-func startServiceTestNode(t *testing.T, server nodegrpc.NodeServer) model.GostNode {
+func startServiceTestNode(t *testing.T, server nodegrpc.V1Server) model.GostNode {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -175,7 +175,7 @@ func startServiceTestNode(t *testing.T, server nodegrpc.NodeServer) model.GostNo
 	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: private}},
 	})))
-	nodegrpc.RegisterNodeServer(grpcServer, server)
+	nodegrpc.RegisterV1Server(grpcServer, server)
 	go func() { _ = grpcServer.Serve(listener) }()
 	t.Cleanup(grpcServer.Stop)
 	return model.GostNode{

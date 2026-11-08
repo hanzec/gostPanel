@@ -28,20 +28,22 @@ type protocolExchange struct {
 	call     func(context.Context, *grpc.ClientConn, ...grpc.CallOption) (proto.Message, error)
 }
 
-func exchange[Client any, Request, Response proto.Message](
-	newClient func(grpc.ClientConnInterface) Client,
+func exchange[Request, Response proto.Message](
 	method string,
-	call func(Client, context.Context, Request, ...grpc.CallOption) (Response, error),
+	call func(V1Client, context.Context, Request, ...grpc.CallOption) (Response, error),
 	request Request,
 	response Response,
 ) protocolExchange {
 	return protocolExchange{method, request, response, func(ctx context.Context, conn *grpc.ClientConn, opts ...grpc.CallOption) (proto.Message, error) {
-		return call(newClient(conn), ctx, request, opts...)
+		return call(NewV1Client(conn), ctx, request, opts...)
 	}}
 }
 
-func TestNodeAndPanelWireCompatibility(t *testing.T) {
+func TestV1WireRoundTrip(t *testing.T) {
 	const username, password = "node-42", "fixture-password"
+	if V1_Execute_FullMethodName != "/yagp.v1/Execute" {
+		t.Fatalf("node control path = %s", V1_Execute_FullMethodName)
+	}
 	empty := &emptypb.Empty{}
 	gostStatus := &GostServiceStatus{Unit: "yagp-gost-42.service", LoadState: "loaded", ActiveState: "active", SubState: "running"}
 	config := &NftConfig{Config: "{\"nftables\":[]}"}
@@ -54,40 +56,40 @@ func TestNodeAndPanelWireCompatibility(t *testing.T) {
 		}}},
 	}
 	calls := []protocolExchange{
-		exchange(NewNodeClient, Node_Execute_FullMethodName, NodeClient.Execute,
+		exchange(V1_Execute_FullMethodName, V1Client.Execute,
 			&CommandRequest{Method: "POST", Path: "/config/services", Body: []byte("{\"name\":\"test\"}")},
 			&CommandReply{StatusCode: 201, Body: []byte("{\"created\":true}")}),
-		exchange(NewNodeClient, Node_GetObserverEndpoint_FullMethodName, NodeClient.GetObserverEndpoint,
+		exchange(V1_GetObserverEndpoint_FullMethodName, V1Client.GetObserverEndpoint,
 			empty, &ObserverEndpoint{Address: "127.0.0.1:10900"}),
-		exchange(NewNodeClient, Node_GetGostServiceStatus_FullMethodName, NodeClient.GetGostServiceStatus,
+		exchange(V1_GetGostServiceStatus_FullMethodName, V1Client.GetGostServiceStatus,
 			empty, gostStatus),
-		exchange(NewNodeClient, Node_RestartGostService_FullMethodName, NodeClient.RestartGostService,
+		exchange(V1_RestartGostService_FullMethodName, V1Client.RestartGostService,
 			empty, gostStatus),
-		exchange(NewNodeClient, Node_GetGostLogs_FullMethodName, NodeClient.GetGostLogs,
+		exchange(V1_GetGostLogs_FullMethodName, V1Client.GetGostLogs,
 			&GostLogsRequest{Lines: 2}, &GostLogsReply{Entries: []*GostLogEntry{
 				{TimestampUnixMicros: 1730000000000000, Message: "started", Priority: 6},
 				{TimestampUnixMicros: 1730000000000001, Message: "connection refused", Priority: 3},
 			}}),
-		exchange(NewNodeClient, Node_GetNftConfig_FullMethodName, NodeClient.GetNftConfig,
+		exchange(V1_GetNftConfig_FullMethodName, V1Client.GetNftConfig,
 			empty, config),
-		exchange(NewNodeClient, Node_ApplyNftConfig_FullMethodName, NodeClient.ApplyNftConfig,
+		exchange(V1_ApplyNftConfig_FullMethodName, V1Client.ApplyNftConfig,
 			config, config),
-		exchange(NewNodeClient, Node_SyncTrafficQuota_FullMethodName, NodeClient.SyncTrafficQuota,
+		exchange(V1_SyncTrafficQuota_FullMethodName, V1Client.SyncTrafficQuota,
 			&TrafficQuotaRequest{LimitBytes: 1000, UsedBytes: 123, WindowStart: 456, TcpPorts: []uint32{80, 443}, UdpPorts: []uint32{53}},
 			&TrafficQuotaReply{UsedBytes: 200}),
-		exchange(NewNodeClient, Node_GetUpgradeStatus_FullMethodName, NodeClient.GetUpgradeStatus, empty,
+		exchange(V1_GetUpgradeStatus_FullMethodName, V1Client.GetUpgradeStatus, empty,
 			&NodeUpgradeStatus{Supported: true, GostVersion: "v3.3.2", DaemonVersion: "0.1.99-abc1234", Component: "gost",
 				TargetVersion: "v3.3.3", State: "failed", Error: "restart failed"}),
-		exchange(NewNodeClient, Node_StartUpgrade_FullMethodName, NodeClient.StartUpgrade,
+		exchange(V1_StartUpgrade_FullMethodName, V1Client.StartUpgrade,
 			&NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"},
 			&NodeUpgradeStatus{Supported: true, Component: "gost", TargetVersion: "v3.3.3", State: "queued"}),
-		exchange(NewV1Client, V1_Report_FullMethodName, V1Client.Report, forwardedReport, &observer.ObserveReply{Ok: true}),
-		exchange(NewV1Client, V1_RegisterNode_FullMethodName, V1Client.RegisterNode,
+		exchange(V1_Report_FullMethodName, V1Client.Report, forwardedReport, &observer.ObserveReply{Ok: true}),
+		exchange(V1_RegisterNode_FullMethodName, V1Client.RegisterNode,
 			&RegisterNodeRequest{Token: "42.fixture", NodeCertificatePem: "fixture cert", Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"},
 			&RegisterNodeReply{NodeId: 42, Username: username, Password: password, ControlPort: 8443}),
-		exchange(NewV1Client, V1_GetNftTemplate_FullMethodName, V1Client.GetNftTemplate,
+		exchange(V1_GetNftTemplate_FullMethodName, V1Client.GetNftTemplate,
 			&NftTemplateRequest{NodeId: 42}, config),
-		exchange(NewV1Client, V1_UpdateNodeIPs_FullMethodName, V1Client.UpdateNodeIPs,
+		exchange(V1_UpdateNodeIPs_FullMethodName, V1Client.UpdateNodeIPs,
 			&NodeIPsRequest{NodeId: 42, Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"}, empty),
 	}
 	byMethod := make(map[string]protocolExchange, len(calls))
@@ -141,7 +143,7 @@ func TestNodeAndPanelWireCompatibility(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	unauthenticated := protocolConn(t, active, control)
-	if _, err := NewNodeClient(unauthenticated).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unauthenticated {
+	if _, err := NewV1Client(unauthenticated).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("unauthenticated endpoint returned %v", err)
 	}
 	_, foreignPEM := testNodeCertificate(t, nil, false)
@@ -150,7 +152,7 @@ func TestNodeAndPanelWireCompatibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	untrusted := protocolConn(t, active, foreignRoot, auth)
-	if _, err := NewNodeClient(untrusted).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unavailable {
+	if _, err := NewV1Client(untrusted).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unavailable {
 		t.Fatalf("certificate pin mismatch returned %v", err)
 	}
 }
@@ -161,7 +163,6 @@ func protocolListener(t *testing.T, cert tls.Certificate, options ...grpc.Server
 	server := grpc.NewServer(append(options, grpc.Creds(credentials.NewTLS(&tls.Config{
 		Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12,
 	})))...)
-	RegisterNodeServer(server, UnimplementedNodeServer{})
 	RegisterV1Server(server, UnimplementedV1Server{})
 	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(func() {

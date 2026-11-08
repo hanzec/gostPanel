@@ -78,7 +78,7 @@ func controlFixture(t *testing.T) (*Client, chan<- controlCall) {
 			}
 		}),
 	)
-	nodegrpc.RegisterNodeServer(server, nodegrpc.UnimplementedNodeServer{})
+	nodegrpc.RegisterV1Server(server, nodegrpc.UnimplementedV1Server{})
 	go func() { _ = server.Serve(lis) }()
 	t.Cleanup(func() {
 		server.Stop()
@@ -109,7 +109,7 @@ func sameControlRequest(got, want proto.Message) bool {
 
 func gostCommand(method, path, body string, code int, reply string) controlCall {
 	return controlCall{
-		method:   nodegrpc.Node_Execute_FullMethodName,
+		method:   nodegrpc.V1_Execute_FullMethodName,
 		request:  &nodegrpc.CommandRequest{Method: method, Path: path, Body: []byte(body)},
 		response: &nodegrpc.CommandReply{StatusCode: int32(code), Body: []byte(reply)},
 	}
@@ -230,39 +230,39 @@ func TestGostTypedControlCalls(t *testing.T) {
 	ctx := context.Background()
 	client, calls := controlFixture(t)
 	state := &nodegrpc.GostServiceStatus{Unit: "yagp-gost.service", ActiveState: "active"}
-	calls <- controlCall{method: nodegrpc.Node_GetGostServiceStatus_FullMethodName, request: &emptypb.Empty{}, response: state}
+	calls <- controlCall{method: nodegrpc.V1_GetGostServiceStatus_FullMethodName, request: &emptypb.Empty{}, response: state}
 	if got, err := client.GostServiceStatus(ctx); err != nil || !proto.Equal(got, state) {
 		t.Fatalf("service status = %v, %v", got, err)
 	}
-	calls <- controlCall{method: nodegrpc.Node_RestartGostService_FullMethodName, request: &emptypb.Empty{}, response: state}
+	calls <- controlCall{method: nodegrpc.V1_RestartGostService_FullMethodName, request: &emptypb.Empty{}, response: state}
 	if got, err := client.RestartGostService(ctx); err != nil || !proto.Equal(got, state) {
 		t.Fatalf("service restart = %v, %v", got, err)
 	}
 	logs := &nodegrpc.GostLogsReply{Entries: []*nodegrpc.GostLogEntry{{Message: "ready"}}}
-	calls <- controlCall{method: nodegrpc.Node_GetGostLogs_FullMethodName, request: &nodegrpc.GostLogsRequest{Lines: 100}, response: logs}
+	calls <- controlCall{method: nodegrpc.V1_GetGostLogs_FullMethodName, request: &nodegrpc.GostLogsRequest{Lines: 100}, response: logs}
 	if got, err := client.GostLogs(ctx); err != nil || !proto.Equal(got, logs) {
 		t.Fatalf("service logs = %v, %v", got, err)
 	}
 	nft := &nodegrpc.NftConfig{Config: `{"nftables":[]}`}
-	calls <- controlCall{method: nodegrpc.Node_GetNftConfig_FullMethodName, request: &emptypb.Empty{}, response: nft}
+	calls <- controlCall{method: nodegrpc.V1_GetNftConfig_FullMethodName, request: &emptypb.Empty{}, response: nft}
 	if got, err := client.GetNftConfig(ctx); err != nil || !proto.Equal(got, nft) {
 		t.Fatalf("read nft = %v, %v", got, err)
 	}
-	calls <- controlCall{method: nodegrpc.Node_ApplyNftConfig_FullMethodName, request: nft, response: nft}
+	calls <- controlCall{method: nodegrpc.V1_ApplyNftConfig_FullMethodName, request: nft, response: nft}
 	if got, err := client.ApplyNftConfig(ctx, nft.Config); err != nil || !proto.Equal(got, nft) {
 		t.Fatalf("apply nft = %v, %v", got, err)
 	}
 	upgrade := &nodegrpc.NodeUpgradeStatus{Supported: true, GostVersion: "3.2.6"}
-	calls <- controlCall{method: nodegrpc.Node_GetUpgradeStatus_FullMethodName, request: &emptypb.Empty{}, response: upgrade}
+	calls <- controlCall{method: nodegrpc.V1_GetUpgradeStatus_FullMethodName, request: &emptypb.Empty{}, response: upgrade}
 	if got, err := client.GetUpgradeStatus(ctx); err != nil || !proto.Equal(got, upgrade) {
 		t.Fatalf("upgrade status = %v, %v", got, err)
 	}
-	calls <- controlCall{method: nodegrpc.Node_StartUpgrade_FullMethodName, request: &nodegrpc.NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"}, response: upgrade}
+	calls <- controlCall{method: nodegrpc.V1_StartUpgrade_FullMethodName, request: &nodegrpc.NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"}, response: upgrade}
 	if got, err := client.StartUpgrade(ctx, "gost", "v3.3.3"); err != nil || !proto.Equal(got, upgrade) {
 		t.Fatalf("start upgrade = %v, %v", got, err)
 	}
 	quota := &nodegrpc.TrafficQuotaRequest{LimitBytes: 200, UsedBytes: 100, WindowStart: 50, TcpPorts: []uint32{80}, UdpPorts: []uint32{53}}
-	calls <- controlCall{method: nodegrpc.Node_SyncTrafficQuota_FullMethodName, request: quota, response: &nodegrpc.TrafficQuotaReply{UsedBytes: 101}}
+	calls <- controlCall{method: nodegrpc.V1_SyncTrafficQuota_FullMethodName, request: quota, response: &nodegrpc.TrafficQuotaReply{UsedBytes: 101}}
 	if used, err := client.SyncTrafficQuota(ctx, 200, 100, 50, []uint32{80}, []uint32{53}); err != nil || used != 101 {
 		t.Fatalf("sync quota = %v, %v", used, err)
 	}
