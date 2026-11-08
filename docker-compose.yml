@@ -4,17 +4,45 @@ services:
     image: yagp:local
     container_name: yagp
     ports:
-      - "127.0.0.1:39100:39100"
       - "39101:39101"
+    networks:
+      - proxy
     volumes:
-      - ./config:/app/config:ro
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - type: bind
+        source: ${PWD:-.}/config
+        target: /app/config
+        read_only: true
+      - type: bind
+        source: ${PWD:-.}/data
+        target: /app/data
+      - type: bind
+        source: ${PWD:-.}/logs
+        target: /app/logs
     environment:
       - GIN_MODE=release
       - TZ=Asia/Shanghai
       - YAGP_DATABASE_TYPE
       - YAGP_DATABASE_DSN
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
+      traefik.http.routers.yagp.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`)"
+      traefik.http.routers.yagp.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp.tls: "true"
+      traefik.http.routers.yagp.priority: "10"
+      traefik.http.routers.yagp.service: yagp
+      traefik.http.routers.yagp.middlewares: yagp-authentik
+      traefik.http.services.yagp.loadbalancer.server.port: "39100"
+      traefik.http.middlewares.yagp-authentik.forwardauth.address: ${AUTHENTIK_OUTPOST_URL:?Set AUTHENTIK_OUTPOST_URL}/outpost.goauthentik.io/auth/traefik
+      traefik.http.middlewares.yagp-authentik.forwardauth.trustforwardheader: "true"
+      traefik.http.middlewares.yagp-authentik.forwardauth.authresponseheaders: X-Authentik-Username,X-Authentik-Groups
+      # Route login and callback requests directly to the outpost to avoid an auth loop.
+      traefik.http.routers.yagp-outpost.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && PathPrefix(`/outpost.goauthentik.io/`)"
+      traefik.http.routers.yagp-outpost.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-outpost.tls: "true"
+      traefik.http.routers.yagp-outpost.priority: "100"
+      traefik.http.routers.yagp-outpost.service: yagp-outpost
+      traefik.http.services.yagp-outpost.loadbalancer.server.url: ${AUTHENTIK_OUTPOST_URL:?Set AUTHENTIK_OUTPOST_URL}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:39100/api/v1/health"]
@@ -22,6 +50,7 @@ services:
       timeout: 3s
       retries: 3
 
-volumes:
-  data:
-  logs:
+networks:
+  proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK:-traefik}
