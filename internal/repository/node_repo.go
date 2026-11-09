@@ -62,11 +62,16 @@ func (r *NodeRepository) UpdateTrafficQuota(node model.GostNode, window int64, u
 		}).Error
 }
 
+const nodeRegistrationStatusCondition = "COALESCE(status, '') <> ?"
+
 func (r *NodeRepository) SetRegistrationToken(ctx context.Context, id uint, hash string, expiresAt time.Time) error {
-	result := r.DB.WithContext(ctx).Model(&model.GostNode{}).Where("id = ?", id).Updates(map[string]any{
-		"registration_token_hash": hash,
-		"registration_expires_at": expiresAt,
-	})
+	result := r.DB.WithContext(ctx).Model(&model.GostNode{}).
+		Where("id = ?", id).
+		Where(nodeRegistrationStatusCondition, model.NodeStatusOnline).
+		Updates(map[string]any{
+			"registration_token_hash": hash,
+			"registration_expires_at": expiresAt,
+		})
 	if result.Error == nil && result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
 	}
@@ -90,6 +95,7 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 		values["session_generation"] = gorm.Expr("session_generation + 1")
 		result := tx.Model(&model.GostNode{}).
 			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
+			Where(nodeRegistrationStatusCondition, model.NodeStatusOnline).
 			Updates(values)
 		if result.Error != nil {
 			return result.Error

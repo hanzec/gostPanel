@@ -25,6 +25,7 @@ const primary = {
   total_bytes: 1536, input_bytes: 512, output_bytes: 1024,
   traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily', traffic_quota_state: 'blocked', traffic_quota_used_bytes: GIB
 }
+const offlinePrimary = { ...primary, status: 'offline' }
 const newNode = { id: 9, name: '新节点', status: 'offline' }
 const list = (nodes, total = nodes.length) => response({ list: nodes, total })
 const token = (value = 'secret', lifetime = 60_000) => response({ token: value, expires_at: new Date(Date.now() + lifetime).toISOString() })
@@ -215,6 +216,38 @@ describe('node inventory', () => {
 })
 
 describe('node registration and quota settings', () => {
+  it('hides installation in both views and closes an open dialog once the node is online', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.getNodeList.mockResolvedValueOnce(list([offlinePrimary]))
+    const view = open()
+    await flushPromises()
+    await click(view, '安装')
+    const title = '安装节点 · 边缘节点'
+    expect(dialog(view, title).get('code').text()).toBe('secret')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(view.find(`[aria-label="${title}"]`).exists()).toBe(false)
+    expect(view.get('tbody tr .inventory-actions').text()).toBe('配置')
+    expect(messages.warning).toHaveBeenCalledExactlyOnceWith('节点已在线，无法重新安装')
+    await openDetail(view)
+    expect(view.get('.detail-header .detail-buttons').text()).toBe('配置')
+  })
+
+  it('closes installation and refreshes the node status when the token API reports it is online', async () => {
+    api.getNodeList.mockResolvedValueOnce(list([offlinePrimary]))
+    const message = '节点已在线，无法重新安装'
+    api.issueNodeRegistrationToken.mockRejectedValueOnce({ response: { status: 409, data: { code: 10008, message } } })
+    const view = open()
+    await flushPromises()
+    await click(view, '安装')
+
+    expect(api.issueNodeRegistrationToken).toHaveBeenCalledExactlyOnceWith(primary.id)
+    expect(api.getNodeList).toHaveBeenCalledTimes(2)
+    expect(messages.warning).toHaveBeenCalledExactlyOnceWith(message)
+    expect(view.find('[aria-label="安装节点 · 边缘节点"]').exists()).toBe(false)
+    expect(view.get('tbody tr .inventory-actions').text()).toBe('配置')
+  })
+
   it('validates quota precision and opens installation after creating the node', async () => {
     api.createNode.mockResolvedValue(response(newNode))
     const view = open()
@@ -270,6 +303,7 @@ describe('node registration and quota settings', () => {
 
   it('uses the configured address to generate, retry, copy and expire a registration command', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    api.getNodeList.mockResolvedValue(list([offlinePrimary]))
     const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('clipboard denied'))
     Object.defineProperty(window.navigator, 'clipboard', { configurable: true, value: { writeText } })
     const execCommand = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false)
@@ -321,6 +355,7 @@ describe('node registration and quota settings', () => {
   })
 
   it('discards a closed dialog address and shares a pending token on reopen', async () => {
+    api.getNodeList.mockResolvedValue(list([offlinePrimary]))
     const config = deferred()
     const issue = deferred()
     getPublicSystemConfig.mockReturnValueOnce(config.promise)

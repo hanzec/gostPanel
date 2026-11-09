@@ -201,6 +201,12 @@ func TestNodeHTTPInventoryLifecycle(t *testing.T) {
 		logs.List[0].IPAddress != "192.0.2.5" || logs.List[0].UserAgent != "yagp-handler-test" {
 		t.Fatalf("node audit log: %+v", logs)
 	}
+	if err := f.db.Model(&node).Updates(model.GostNode{Status: model.NodeStatusOnline, Username: "node-user"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if reply := f.request(t, "POST", path+"/registration-token", "", http.StatusConflict); string(reply.Data) != "null" {
+		t.Fatalf("issuing a token for an online node returned data: %s", reply.Data)
+	}
 	f.request(t, "DELETE", path, "", 200)
 	f.request(t, "GET", path, "", 404)
 	f.request(t, "DELETE", path, "", 404)

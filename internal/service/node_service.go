@@ -139,10 +139,13 @@ func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, usern
 		issued.Token += "." + s.registrationFingerprint
 	}
 	if err := s.nodeRepo.SetRegistrationToken(ctx, id, registrationTokenHash(issued.Token), issued.ExpiresAt); err != nil {
-		if stderrors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.ErrNodeNotFound
+		if !stderrors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
-		return nil, err
+		if _, err := s.GetByID(id); err != nil {
+			return nil, err
+		}
+		return nil, errors.ErrNodeOnline
 	}
 	s.logService.Record(username, model.ActionUpdate, model.ResourceTypeNode, id, "签发节点注册 token", ip, userAgent)
 	return issued, nil

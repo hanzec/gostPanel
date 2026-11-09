@@ -78,6 +78,7 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	}
 
 	old := *current
+	mustPersist(t, nodes.UpdateStatus(current.ID, model.NodeStatusOffline))
 	mustPersist(t, nodes.SetRegistrationToken(ctx, current.ID, "second", time.Now().UTC().Add(time.Hour)))
 	credentials.AccessTokenHash = "new access"
 	mustPersist(t, nodes.EnrollNode(ctx, current, "second", credentials))
@@ -99,6 +100,7 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	mustPersist(t, nodes.UpdateStats(current.ID, 5, 2))
 	mustPersist(t, nodes.SetStats(ctx, current.ID, 2, 9))
 	mustPersist(t, nodes.UpdateStats(current.ID, 1, 4))
+	mustPersist(t, nodes.UpdateStatus(current.ID, model.NodeStatusOnline))
 	online, err := nodes.GetAllOnline()
 	mustPersist(t, err)
 	if len(online) != 1 || online[0].ID != current.ID || online[0].Address != "198.51.100.2" || online[0].IPv6 != "2001:db8::2" ||

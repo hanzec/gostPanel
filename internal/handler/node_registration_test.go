@@ -194,6 +194,17 @@ func TestNodeRegistration(t *testing.T) {
 	_, err = f.register(ctx, request)
 	requireNodeHTTPStatus(t, err, http.StatusBadRequest)
 	request.Ipv4, request.Ipv6 = "", "2001:0db8:0:0::7"
+	if err := f.db.Model(&node).Update("status", model.NodeStatusOnline).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.register(ctx, request)
+	requireNodeHTTPStatus(t, err, http.StatusUnauthorized)
+	if _, err := firstStream.Report(ctx, report); err != nil {
+		t.Fatalf("rejected re-enrollment interrupted the current session: %v", err)
+	}
+	if err := f.db.Model(&node).Update("status", model.NodeStatusOffline).Error; err != nil {
+		t.Fatal(err)
+	}
 	type result struct {
 		reply *nodegrpc.RegisterNodeReply
 		err   error
