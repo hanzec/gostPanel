@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,12 +25,8 @@ import (
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -104,9 +105,10 @@ func TestServerDatabaseConfigurationErrors(t *testing.T) {
 	}
 }
 
-func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
+func TestStartReportsUsesConfiguredTLS(t *testing.T) {
+	t.Chdir(t.TempDir())
 	db := testSQLite(t)
-	if err := db.AutoMigrate(&model.GostNode{}); err != nil {
+	if err := autoMigrate(db); err != nil {
 		t.Fatal(err)
 	}
 	if server, pin, err := startReports(config.ReportConfig{}, "", db); err != nil || server != nil || pin != "" {
@@ -134,37 +136,23 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Listen = listener.Addr().String()
-	_ = listener.Close()
 	server, pin, err := startReports(cfg, "127.0.0.1", db)
 	if err != nil || pin != "" {
 		t.Fatalf("configured TLS certificate = pin %q, %v", pin, err)
 	}
-	defer server.Stop()
-	info, ok := server.GetServiceInfo()[strings.TrimPrefix(nodegrpc.PanelRPCPath, "/")]
-	if !ok || len(info.Methods) != 16 {
-		t.Fatalf("registered report API = %+v", info)
-	}
-	trust, err := nodegrpc.ClientTLS(cfg.CertFile)
+	t.Cleanup(func() { _ = server.Close() })
+	panel, err := nodegrpc.ParsePanelHost("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn := testPanelClient(t, "127.0.0.1", cfg.Listen, trust)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	client := nodegrpc.NewV1Client(conn)
-	if _, err := client.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: 1}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated report RPC = %v", err)
+	trust, err := panel.TLSConfig(cfg.CertFile, "")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := client.Execute(ctx, &nodegrpc.CommandRequest{}); status.Code(err) != codes.Unimplemented {
-		t.Fatalf("node control RPC on panel listener = %v", err)
-	}
-	if _, err := client.CheckListener(ctx, &nodegrpc.ListenerCheckRequest{Protocol: "tcp", Port: 9718}); status.Code(err) != codes.Unimplemented {
-		t.Fatalf("listener probe should run only on the node control stream: %v", err)
+	client := testPanelHTTPClient(t, server.Addr().String(), trust)
+	for _, path := range []string{"/api/grpc/GetNftTemplate", "/api/node/v2/nft-template"} {
+		err := nodegrpc.PostProtobuf(t.Context(), client, panel.HTTPURL(path), &emptypb.Empty{}, &emptypb.Empty{})
+		assertReportHTTPStatus(t, err, http.StatusNotFound)
 	}
 	cfg.Listen = "invalid listen address"
 	if _, _, err := startReports(cfg, "127.0.0.1", db); err == nil {
@@ -176,23 +164,27 @@ func TestStartReportsRequiresTLSAndRegistersPanelAPI(t *testing.T) {
 	}
 }
 
-func testPanelClient(t *testing.T, host, listen string, transport credentials.TransportCredentials) *grpc.ClientConn {
+func testPanelHTTPClient(t *testing.T, listen string, config *tls.Config) *http.Client {
 	t.Helper()
-	panel, err := nodegrpc.ParsePanelHost(host)
-	if err != nil {
-		t.Fatal(err)
+	transport := &http.Transport{
+		TLSClientConfig: config,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", listen)
+		},
 	}
-	conn, err := panel.NewClientConn(grpc.WithTransportCredentials(transport), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "tcp", listen)
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn
+	t.Cleanup(transport.CloseIdleConnections)
+	return &http.Client{Transport: transport, Timeout: 3 * time.Second}
 }
 
-func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
+func assertReportHTTPStatus(t *testing.T, err error, want int) {
+	t.Helper()
+	var status *nodegrpc.HTTPStatusError
+	if !errors.As(err, &status) || status.StatusCode != want {
+		t.Fatalf("report error = %v, want HTTP %d", err, want)
+	}
+}
+
+func TestNodeSessionWithGeneratedTLSOrInternalProxy(t *testing.T) {
 	for _, proxied := range []bool{false, true} {
 		name := "generated TLS"
 		if proxied {
@@ -201,26 +193,22 @@ func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Chdir(t.TempDir())
 			db := testSQLite(t)
-			if err := db.AutoMigrate(&model.GostNode{}, &model.OperationLog{}); err != nil {
+			if err := autoMigrate(db); err != nil {
 				t.Fatal(err)
 			}
 			node := model.GostNode{Name: "enrollment"}
 			if err := db.Create(&node).Error; err != nil {
 				t.Fatal(err)
 			}
-			listener, err := net.Listen("tcp4", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			cfg := config.ReportConfig{Listen: listener.Addr().String(), DirectTLS: !proxied}
-			_ = listener.Close()
+			cfg := config.ReportConfig{Listen: "127.0.0.1:0", DirectTLS: !proxied}
 			const host = "127.0.0.1"
 			server, pin, err := startReports(cfg, host, db)
 			if err != nil || (proxied && pin != "") || (!proxied && len(pin) != 64) {
 				t.Fatalf("start reports = pin %q, %v", pin, err)
 			}
-			defer server.Stop()
-			issued, err := service.NewNodeService(db, pin).IssueRegistrationToken(t.Context(), node.ID, "admin", "127.0.0.1", "test")
+			t.Cleanup(func() { _ = server.Close() })
+			nodes := service.NewNodeService(db, pin)
+			issued, err := nodes.IssueRegistrationToken(t.Context(), node.ID, "admin", "127.0.0.1", "test")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -228,43 +216,109 @@ func TestRegistrationWithGeneratedTLSOrInternalProxy(t *testing.T) {
 			if err != nil || enrollmentPin != pin {
 				t.Fatalf("enrollment certificate pin = %q, %v", enrollmentPin, err)
 			}
-			transport := insecure.NewCredentials()
-			if !proxied {
-				panel, err := nodegrpc.ParsePanelHost(host)
-				if err != nil {
-					t.Fatal(err)
-				}
-				transport, err = panel.ClientTLS("", enrollmentPin)
-				if err != nil {
-					t.Fatal(err)
-				}
+			panel, err := nodegrpc.ParsePanelHost(host)
+			if err != nil {
+				t.Fatal(err)
 			}
-			conn := testPanelClient(t, host, cfg.Listen, transport)
-			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-			defer cancel()
-			client := nodegrpc.NewV1Client(conn)
-			stream, err := client.Connect(ctx)
-			if err == nil {
-				_, err = stream.Recv()
-			}
-			if status.Code(err) != codes.Unauthenticated {
-				t.Fatalf("unauthenticated connect = %v", err)
-			}
-			request := &nodegrpc.RegisterNodeRequest{Token: issued.Token}
+			address := server.Addr().String()
+			var trust *tls.Config
 			if proxied {
-				ctx = metadata.AppendToOutgoingContext(ctx, "x-real-ip", "192.0.2.20")
-				if _, err := client.RegisterNode(ctx, request); status.Code(err) != codes.FailedPrecondition {
-					t.Fatalf("unauthorized forwarded IP accepted = %v", err)
+				forward := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: address})
+				proxy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					r.Header.Set("X-Real-IP", "192.0.2.20")
+					forward.ServeHTTP(w, r)
+				}))
+				t.Cleanup(proxy.Close)
+				address = proxy.Listener.Addr().String()
+				trust = proxy.Client().Transport.(*http.Transport).TLSClientConfig
+			} else {
+				trust, err = panel.TLSConfig("", enrollmentPin)
+				if err != nil {
+					t.Fatal(err)
 				}
+				wrongTrust, err := panel.TLSConfig("", strings.Repeat("0", 64))
+				if err != nil {
+					t.Fatal(err)
+				}
+				wrongClient := testPanelHTTPClient(t, address, wrongTrust)
+				err = nodegrpc.PostProtobuf(t.Context(), wrongClient, panel.HTTPURL(nodegrpc.RegisterPath), &nodegrpc.RegisterNodeRequest{}, &nodegrpc.RegisterNodeReply{})
+				if err == nil || !strings.Contains(err.Error(), "fingerprint mismatch") {
+					t.Fatalf("mismatched TLS pin = %v", err)
+				}
+			}
+			client := testPanelHTTPClient(t, address, trust)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			_, err = panel.DialSession(ctx, client, uint64(node.ID), "invalid")
+			assertReportHTTPStatus(t, err, http.StatusUnauthorized)
+			request := &nodegrpc.RegisterNodeRequest{Token: issued.Token}
+			registered := &nodegrpc.RegisterNodeReply{}
+			registerURL := panel.HTTPURL(nodegrpc.RegisterPath)
+			if proxied {
+				err := nodegrpc.PostProtobuf(ctx, client, registerURL, request, registered)
+				assertReportHTTPStatus(t, err, http.StatusBadRequest)
 			}
 			request.Ipv4 = "192.0.2.21"
-			registered, err := client.RegisterNode(ctx, request)
-			if err != nil || registered.GetNodeId() != uint64(node.ID) {
-				t.Fatalf("register node = %v", err)
+			if err := nodegrpc.PostProtobuf(ctx, client, registerURL, request, registered); err != nil {
+				t.Fatal(err)
+			}
+			access := registered.GetCredentials().GetAccessToken()
+			if registered.GetNodeId() != uint64(node.ID) || access == "" || registered.GetCredentials().GetRefreshToken() == "" {
+				t.Fatal("registration did not return the node identity and credentials")
 			}
 			if err := db.First(&node, node.ID).Error; err != nil || node.IPv4 != request.Ipv4 {
 				t.Fatalf("stored enrollment address = %q, %v", node.IPv4, err)
 			}
+			stream, err := panel.DialSession(ctx, client, uint64(node.ID), access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			session := nodegrpc.NewSession(stream, nil)
+			go func() { _ = session.Run() }()
+			nodeClient := nodegrpc.NewV1Client(session)
+			configuration, err := nodeClient.GetNodeConfig(ctx, &emptypb.Empty{})
+			if err != nil || !strings.Contains(configuration.GetNftTemplate(), nodegrpc.NftTableName(uint64(node.ID))) {
+				t.Fatalf("node configuration over WebSocket = %v, %v", configuration, err)
+			}
+			var settings struct {
+				NodeID uint `yaml:"node_id"`
+			}
+			if err := yaml.Unmarshal(configuration.GetConfigYaml(), &settings); err != nil || settings.NodeID != node.ID {
+				t.Fatalf("node ID in configuration = %d, %v", settings.NodeID, err)
+			}
+			refreshed := &nodegrpc.NodeCredentials{}
+			refresh := &nodegrpc.RefreshNodeRequest{
+				NodeId: uint64(node.ID), RefreshToken: registered.GetCredentials().GetRefreshToken(), RequestId: "refresh-test",
+			}
+			if err := nodegrpc.PostProtobuf(ctx, client, panel.HTTPURL(nodegrpc.RefreshPath), refresh, refreshed); err != nil {
+				t.Fatal(err)
+			}
+			if refreshed.GetAccessToken() == "" || refreshed.GetAccessToken() == access || refreshed.GetRefreshToken() == refresh.GetRefreshToken() {
+				t.Fatal("refresh did not rotate the node credentials")
+			}
+			if _, err := nodeClient.GetNodeConfig(ctx, &emptypb.Empty{}); err != nil {
+				t.Fatalf("refresh disconnected the node: %v", err)
+			}
+			issued, err = nodes.IssueRegistrationToken(ctx, node.ID, "admin", "127.0.0.1", "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Token = issued.Token
+			replacement := &nodegrpc.RegisterNodeReply{}
+			if err := nodegrpc.PostProtobuf(ctx, client, registerURL, request, replacement); err != nil {
+				t.Fatal(err)
+			}
+			if replacement.GetUsername() != registered.GetUsername() || replacement.GetPassword() != registered.GetPassword() {
+				t.Fatal("re-enrollment replaced the local Gost credentials")
+			}
+			select {
+			case <-session.Done():
+			case <-ctx.Done():
+				t.Fatal("re-enrollment left the previous session connected")
+			}
+			_, err = panel.DialSession(ctx, client, uint64(node.ID), refreshed.GetAccessToken())
+			assertReportHTTPStatus(t, err, http.StatusUnauthorized)
 		})
 	}
 }

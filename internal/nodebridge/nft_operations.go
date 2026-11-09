@@ -2,13 +2,16 @@ package nodebridge
 
 import (
 	"context"
-	"time"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -27,17 +30,28 @@ func (s *controlServer) ApplyNftConfig(ctx context.Context, req *nodegrpc.NftCon
 	return req, nil
 }
 
-func GetNftTemplate(ctx context.Context, cfg Config, dialOptions ...grpc.DialOption) (string, error) {
-	conn, err := connectPanel(cfg, dialOptions...)
+const panelConfigCache = "panel-config.pb"
+
+func storePanelConfig(configPath string, config *nodegrpc.NodeConfig) error {
+	data, err := proto.Marshal(config)
 	if err != nil {
-		return "", err
+		return err
 	}
-	defer conn.Close()
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	template, err := nodegrpc.NewV1Client(conn).GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: cfg.NodeID})
+	return WriteNodeFile(filepath.Join(filepath.Dir(configPath), panelConfigCache), data)
+}
+
+// ReadNftTemplate uses the snapshot fetched by the daemon's established session.
+func ReadNftTemplate(configPath string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(configPath), panelConfigCache))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read node configuration cached by the daemon: %w", err)
 	}
-	return template.GetConfig(), nil
+	config := new(nodegrpc.NodeConfig)
+	if err = proto.Unmarshal(data, config); err != nil {
+		return "", fmt.Errorf("decode cached node configuration: %w", err)
+	}
+	if config.GetNftTemplate() == "" {
+		return "", errors.New("cached node configuration has no nftables template")
+	}
+	return config.GetNftTemplate(), nil
 }

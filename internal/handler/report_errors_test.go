@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"yagp/internal/model"
-	"yagp/internal/service"
 	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
@@ -17,48 +16,6 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
-
-func TestNodeRegistrationRequiresAnAddressAndPersistsIt(t *testing.T) {
-	f := newHandlerHTTPFixture(t)
-	node := model.GostNode{Name: "test", Port: 39110}
-	if err := f.db.Create(&node).Error; err != nil {
-		t.Fatal(err)
-	}
-	issued, err := service.NewNodeService(f.db, "").IssueRegistrationToken(t.Context(), node.ID, "admin", "127.0.0.1", "test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	handler := NewReportHandler(f.db, false)
-	req := &nodegrpc.RegisterNodeRequest{Token: "invalid"}
-	if _, err := handler.RegisterNode(t.Context(), req); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("register with invalid token: %v", err)
-	}
-	req.Token = issued.Token
-	if _, err := handler.RegisterNode(t.Context(), req); status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("register without an address or peer: %v", err)
-	}
-	ctx := peer.NewContext(t.Context(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP("2001:db8::8"), Port: 39110}})
-	if err := f.db.Exec(`CREATE TRIGGER fail_enrollment BEFORE UPDATE OF username ON nodes
-		BEGIN SELECT RAISE(ABORT, 'enrollment storage failure'); END`).Error; err != nil {
-		t.Fatal(err)
-	}
-	if _, err := handler.RegisterNode(ctx, req); status.Code(err) != codes.Internal {
-		t.Fatalf("register with a storage failure: %v", err)
-	}
-	if err := f.db.Exec("DROP TRIGGER fail_enrollment").Error; err != nil {
-		t.Fatal(err)
-	}
-	reply, err := handler.RegisterNode(ctx, req)
-	if err != nil || reply.GetNodeId() != uint64(node.ID) {
-		t.Fatalf("retry register with IPv6 peer: %v, %v", reply, err)
-	}
-	if err := f.db.First(&node, node.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	if node.IPv6 != "2001:db8::8" || node.IPv4 != "" || node.Address != node.IPv6 {
-		t.Fatalf("IPv6 peer enrollment: %+v", node)
-	}
-}
 
 func TestRegistrationIPSourceWithAndWithoutTLSProxy(t *testing.T) {
 	ctx := peer.NewContext(t.Context(), &peer.Peer{Addr: &net.TCPAddr{IP: net.ParseIP("172.30.0.2"), Port: 39000}})

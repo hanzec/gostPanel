@@ -131,12 +131,8 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 }
 
 func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, username, ip, userAgent string) (*dto.NodeRegistrationToken, error) {
-	secret, err := newNodeSecret()
-	if err != nil {
-		return nil, err
-	}
 	issued := &dto.NodeRegistrationToken{
-		Token:     fmt.Sprintf("%d.%s", id, secret),
+		Token:     fmt.Sprintf("%d.%s", id, newNodeSecret()),
 		ExpiresAt: time.Now().UTC().Add(registrationTokenLifetime),
 	}
 	if s.registrationFingerprint != "" {
@@ -152,35 +148,10 @@ func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, usern
 	return issued, nil
 }
 
-func (s *NodeService) Register(ctx context.Context, id uint, token, ipv4, ipv6 string) (*model.GostNode, error) {
-	password, err := newNodeSecret()
-	if err != nil {
-		return nil, err
-	}
-	address := ipv4
-	if address == "" {
-		address = ipv6
-	}
-	node := &model.GostNode{
-		ID:       id,
-		Address:  address,
-		Username: fmt.Sprintf("node-%d", id),
-		Password: password,
-		IPv4:     ipv4,
-		IPv6:     ipv6,
-	}
-	if err := s.nodeRepo.ConsumeRegistrationToken(ctx, node, registrationTokenHash(token)); err != nil {
-		return nil, err
-	}
-	return node, nil
-}
-
-func newNodeSecret() (string, error) {
+func newNodeSecret() string {
 	var secret [32]byte
-	if _, err := rand.Read(secret[:]); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(secret[:]), nil
+	rand.Read(secret[:])
+	return base64.RawURLEncoding.EncodeToString(secret[:])
 }
 
 func registrationTokenHash(token string) string {
@@ -190,6 +161,17 @@ func registrationTokenHash(token string) string {
 
 func (s *NodeService) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string) error {
 	return s.nodeRepo.UpdateIPs(ctx, node, ipv4, ipv6)
+}
+
+func (s *NodeService) RevokeCredentials(ctx context.Context, id uint) error {
+	if err := s.nodeRepo.RevokeNodeCredentials(ctx, id); err != nil {
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.ErrNodeNotFound
+		}
+		return err
+	}
+	gost.DisconnectNode(id)
+	return nil
 }
 
 // Delete 删除节点

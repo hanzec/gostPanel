@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,7 +17,6 @@ import (
 	"yagp/internal/nodebridge"
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,19 +26,20 @@ func enroll(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("enroll", flag.ExitOnError)
 	host := flags.String("host", "", "panel DNS name or IP address")
 	output := flags.String("output", "", "staging directory for node files")
+	existing := flags.String("existing", "", "configuration file of a node to re-enroll")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "enroll reads the registration token from stdin")
 		flags.PrintDefaults()
 	}
 	_ = flags.Parse(args)
-	if *host == "" || *output == "" || flags.NArg() != 0 {
-		return errors.New("enroll requires --host and --output")
+	if *host == "" || (*output == "") == (*existing == "") || flags.NArg() != 0 {
+		return errors.New("enroll requires --host and exactly one of --output or --existing")
 	}
 	token, err := io.ReadAll(io.LimitReader(os.Stdin, 128))
 	if err != nil {
 		return fmt.Errorf("read registration token: %w", err)
 	}
-	nodeID, err := registerNode(ctx, *host, strings.TrimSpace(string(token)), nodeStateDir, *output, nodebridge.DetectPublicIPs)
+	nodeID, err := registerNode(ctx, *host, strings.TrimSpace(string(token)), nodeStateDir, *output, *existing, nodebridge.DetectPublicIPs)
 	if err != nil {
 		return err
 	}
@@ -46,7 +47,7 @@ func enroll(ctx context.Context, args []string) error {
 	return err
 }
 
-func registerNode(ctx context.Context, host, token, stateDir, output string, detectIPs func(context.Context) (string, string), dialOptions ...grpc.DialOption) (uint64, error) {
+func registerNode(ctx context.Context, host, token, stateDir, output, existing string, detectIPs func(context.Context) (string, string), dialOptions ...func(context.Context, string, string) (net.Conn, error)) (uint64, error) {
 	panelHost, err := nodegrpc.ParsePanelHost(host)
 	if err != nil {
 		return 0, err
@@ -56,10 +57,8 @@ func registerNode(ctx context.Context, host, token, stateDir, output string, det
 	if err != nil {
 		return 0, err
 	}
-	basePath := filepath.Join(stateDir, strconv.FormatUint(expectedID, 10))
-	if _, err = os.Lstat(basePath); err == nil {
-		return 0, fmt.Errorf("existing node directory %s, move it before registering a replacement", basePath)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	config, err := enrollmentConfig(stateDir, existing, expectedID)
+	if err != nil {
 		return 0, err
 	}
 	var caFile string
@@ -68,38 +67,83 @@ func registerNode(ctx context.Context, host, token, stateDir, output string, det
 		if err != nil {
 			return 0, err
 		}
+		if caFile == "" && config.Host == panelHost.Host() {
+			caFile = config.ReportCAFile
+		}
 	}
-	transport, err := panelHost.ClientTLS(caFile, fingerprint)
+	client, err := nodebridge.NewPanelClient(panelHost, caFile, fingerprint)
 	if err != nil {
 		return 0, fmt.Errorf("load panel CA: %w", err)
 	}
-	conn, err := panelHost.NewClientConn(append(dialOptions, grpc.WithTransportCredentials(transport))...)
-	if err != nil {
-		return 0, err
+	if len(dialOptions) > 0 {
+		client.Transport.(*http.Transport).DialContext = dialOptions[0]
 	}
-	defer conn.Close()
+	defer client.CloseIdleConnections()
 	ipv4, ipv6 := detectIPs(ctx)
 	rpcCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	reply, err := nodegrpc.NewV1Client(conn).RegisterNode(rpcCtx, &nodegrpc.RegisterNodeRequest{
+	reply := new(nodegrpc.RegisterNodeReply)
+	request := &nodegrpc.RegisterNodeRequest{
 		Token: token,
 		Ipv4:  ipv4, Ipv6: ipv6,
-	})
-	if err != nil {
+	}
+	if err = nodegrpc.PostProtobuf(rpcCtx, client, panelHost.HTTPURL(nodegrpc.RegisterPath), request, reply); err != nil {
 		return 0, fmt.Errorf("register with panel: %w", err)
 	}
 	if reply.GetNodeId() != expectedID || reply.GetUsername() == "" || strings.Contains(reply.GetUsername(), ":") ||
 		reply.GetPassword() == "" {
 		return 0, errors.New("panel returned invalid node enrollment data")
 	}
-	config := nodebridge.Config{
-		NodeID: reply.GetNodeId(), Username: reply.GetUsername(), Password: reply.GetPassword(),
-		Host: panelHost.Host(), ReportCAFile: caFile, ReportCertSHA256: fingerprint,
+	if existing != "" && (config.Username != reply.GetUsername() || config.Password != reply.GetPassword()) {
+		return 0, errors.New("panel local Gost credentials do not match the existing node")
 	}
-	if err = writeEnrollment(output, config); err != nil {
+	config.Username, config.Password = reply.GetUsername(), reply.GetPassword()
+	config.Host, config.ReportCAFile, config.ReportCertSHA256 = panelHost.Host(), caFile, fingerprint
+	if err = saveEnrollment(output, existing, config, reply.GetCredentials()); err != nil {
 		return 0, fmt.Errorf("registration succeeded, but local configuration failed: %w", err)
 	}
 	return config.NodeID, nil
+}
+
+func enrollmentConfig(stateDir, existing string, id uint64) (nodebridge.Config, error) {
+	if existing != "" {
+		cfg, err := readConfig(existing)
+		if err != nil {
+			return nodebridge.Config{}, err
+		}
+		if cfg.NodeID != id {
+			return nodebridge.Config{}, errors.New("registration token is for a different node")
+		}
+		return cfg, nil
+	}
+	basePath := filepath.Join(stateDir, strconv.FormatUint(id, 10))
+	if _, err := os.Lstat(basePath); err == nil {
+		return nodebridge.Config{}, fmt.Errorf("existing node directory %s; use --existing to re-enroll", basePath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nodebridge.Config{}, err
+	}
+	return nodebridge.Config{NodeID: id}, nil
+}
+
+func saveEnrollment(output, existing string, config nodebridge.Config, credentials *nodegrpc.NodeCredentials) error {
+	encoded, err := nodebridge.EncodePanelCredentials(credentials)
+	if err != nil {
+		return err
+	}
+	if existing == "" {
+		if err := writeEnrollment(output, config); err != nil {
+			return err
+		}
+		return writeNewFile(filepath.Join(output, nodebridge.PanelCredentialsFile), encoded, 0600)
+	}
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return err
+	}
+	if err = nodebridge.WriteNodeFile(existing, data); err != nil {
+		return err
+	}
+	return nodebridge.WriteNodeFile(filepath.Join(filepath.Dir(existing), nodebridge.PanelCredentialsFile), encoded)
 }
 
 func panelCAFile(stateDir string) (string, error) {

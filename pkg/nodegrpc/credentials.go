@@ -9,28 +9,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"os"
 	"strings"
 
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 )
-
-type passwordCredentials struct{ authorization string }
-
-func PasswordCredentials(username, password string) credentials.PerRPCCredentials {
-	return passwordCredentials{authorization: authorization(username, password)}
-}
-
-func (c passwordCredentials) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
-	return map[string]string{"authorization": c.authorization}, nil
-}
-
-func (passwordCredentials) RequireTransportSecurity() bool { return true }
-
-func MatchCredentials(ctx context.Context, username, password string) bool {
-	return username != "" && password != "" && !strings.Contains(username, ":") &&
-		matchMetadata(ctx, "authorization", authorization(username, password))
-}
 
 func ObserverToken(username, password string) string {
 	digest := sha256.Sum256([]byte("yagp-gost-observer:" + authorization(username, password)))
@@ -55,23 +38,27 @@ func authorization(username, password string) string {
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
 }
 
-func ClientTLS(caFile string) (credentials.TransportCredentials, error) {
-	if caFile != "" {
-		return credentials.NewClientTLSFromFile(caFile, "")
-	}
-	return credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12}), nil
-}
-
-// ClientTLS uses the pinned panel certificate when the panel generated its own TLS identity.
-func (h PanelHost) ClientTLS(caFile, fingerprint string) (credentials.TransportCredentials, error) {
+// TLSConfig authenticates the panel for HTTPS and WebSocket requests.
+func (h PanelHost) TLSConfig(caFile, fingerprint string) (*tls.Config, error) {
 	if fingerprint == "" {
-		return ClientTLS(caFile)
+		config := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: h.Host()}
+		if caFile != "" {
+			pem, err := os.ReadFile(caFile)
+			if err != nil {
+				return nil, err
+			}
+			config.RootCAs = x509.NewCertPool()
+			if !config.RootCAs.AppendCertsFromPEM(pem) {
+				return nil, errors.New("invalid panel CA certificate")
+			}
+		}
+		return config, nil
 	}
 	pin, err := decodeCertificateFingerprint(fingerprint)
 	if err != nil {
 		return nil, err
 	}
-	return credentials.NewTLS(&tls.Config{
+	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		ServerName: h.Host(),
 		// Pin verification uses the matching leaf as the sole trust anchor.
@@ -90,7 +77,7 @@ func (h PanelHost) ClientTLS(caFile, fingerprint string) (credentials.TransportC
 			_, err := leaf.Verify(x509.VerifyOptions{DNSName: h.Host(), Roots: roots})
 			return err
 		},
-	}), nil
+	}, nil
 }
 
 func decodeCertificateFingerprint(fingerprint string) ([]byte, error) {

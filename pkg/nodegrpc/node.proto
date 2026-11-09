@@ -57,8 +57,9 @@ message NftConfig {
   string config = 1;
 }
 
-message NftTemplateRequest {
-  uint64 node_id = 1;
+message NodeConfig {
+  bytes config_yaml = 1;
+  string nft_template = 2;
 }
 
 message TrafficQuotaRequest {
@@ -109,6 +110,20 @@ message RegisterNodeReply {
   uint64 node_id = 1;
   string username = 2;
   string password = 3;
+  NodeCredentials credentials = 5;
+}
+
+message NodeCredentials {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 access_expires_at = 3;
+  int64 refresh_expires_at = 4;
+}
+
+message RefreshNodeRequest {
+  uint64 node_id = 1;
+  string refresh_token = 2;
+  string request_id = 3;
 }
 
 message NodeIPsRequest {
@@ -120,7 +135,7 @@ message NodeIPsRequest {
 message StreamFrame {
   // The sender allocates an ID for each call. Its reply repeats that ID.
   uint64 id = 1;
-  // The full gRPC method name is present only on a call.
+  // The operation name is present only on a call.
   string method = 2;
   bytes payload = 3;
   int32 code = 4;

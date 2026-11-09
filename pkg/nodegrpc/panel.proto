@@ -9,16 +9,12 @@ import "node.proto";
 import "observer.proto";
 
 service v1 {
-  // All normal reporting and reverse management share this outbound node stream.
-  rpc Connect(stream .yagp.node.v1.StreamFrame) returns (stream .yagp.node.v1.StreamFrame);
-
-  // These method definitions also describe the typed operations carried by Connect.
+  // Typed operations exchanged over the node WebSocket session.
   rpc Report(.yagp.node.v1.ReportRequest) returns (.proto.ObserveReply);
-  rpc RegisterNode(.yagp.node.v1.RegisterNodeRequest) returns (.yagp.node.v1.RegisterNodeReply);
-  rpc GetNftTemplate(.yagp.node.v1.NftTemplateRequest) returns (.yagp.node.v1.NftConfig);
+  rpc GetNodeConfig(.google.protobuf.Empty) returns (.yagp.node.v1.NodeConfig);
   rpc UpdateNodeIPs(.yagp.node.v1.NodeIPsRequest) returns (.google.protobuf.Empty);
 
-  // Commands carried by Connect from the panel to the node.
+  // Commands sent from the panel to the node.
   rpc Execute(.yagp.node.v1.CommandRequest) returns (.yagp.node.v1.CommandReply);
   rpc CheckListener(.yagp.node.v1.ListenerCheckRequest) returns (.yagp.node.v1.ListenerCheckReply);
   rpc GetObserverEndpoint(.google.protobuf.Empty) returns (.yagp.node.v1.ObserverEndpoint);

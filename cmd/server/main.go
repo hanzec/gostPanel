@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,18 +11,14 @@ import (
 
 	"yagp/internal/buildinfo"
 	"yagp/internal/config"
-	"yagp/internal/handler"
 	"yagp/internal/model"
 	"yagp/internal/router"
 	"yagp/internal/service"
 	"yagp/pkg/logger"
-	"yagp/pkg/nodegrpc"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	mysqldriver "github.com/go-sql-driver/mysql"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -90,7 +84,7 @@ func main() {
 		logger.Fatalf("启动流量上报服务失败: %v", err)
 	}
 	if reportServer != nil {
-		defer reportServer.Stop()
+		defer reportServer.Close()
 	}
 
 	engine := gin.New()
@@ -141,52 +135,6 @@ func main() {
 	healthService.Stop()
 	syncService.Stop()
 	backupService.Stop()
-}
-
-func startReports(cfg config.ReportConfig, host string, db *gorm.DB) (*grpc.Server, string, error) {
-	if cfg.Listen == "" {
-		return nil, "", nil
-	}
-	panel, err := nodegrpc.ParsePanelHost(host)
-	if err != nil {
-		return nil, "", fmt.Errorf("host: %w", err)
-	}
-	options, fingerprint, err := reportTransport(cfg, panel)
-	if err != nil {
-		return nil, "", err
-	}
-	listener, err := net.Listen("tcp", cfg.Listen)
-	if err != nil {
-		return nil, "", err
-	}
-	server := grpc.NewServer(append(options,
-		grpc.MaxRecvMsgSize(nodegrpc.MaxStreamFrameBytes),
-		grpc.MaxSendMsgSize(nodegrpc.MaxStreamFrameBytes),
-	)...)
-	nodegrpc.RegisterPanelServer(server, handler.NewReportHandler(db, !cfg.DirectTLS))
-	go func() {
-		logger.Infof("gRPC 流量上报服务监听 %s", listener.Addr())
-		if err := server.Serve(listener); err != nil {
-			logger.Fatalf("流量上报服务失败: %v", err)
-		}
-	}()
-	return server, fingerprint, nil
-}
-
-func reportTransport(cfg config.ReportConfig, panel nodegrpc.PanelHost) ([]grpc.ServerOption, string, error) {
-	if !cfg.DirectTLS {
-		return nil, "", nil
-	}
-	certificate, err := loadReportCertificate(cfg, panel)
-	if err != nil {
-		return nil, "", err
-	}
-	fingerprint := ""
-	if cfg.CertFile == "" && cfg.KeyFile == "" {
-		fingerprint = reportCertificateFingerprint(certificate)
-	}
-	transport := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{certificate}})
-	return []grpc.ServerOption{grpc.Creds(transport)}, fingerprint, nil
 }
 
 // initDatabase 初始化数据库

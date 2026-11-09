@@ -8,6 +8,10 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+
+	"yagp/pkg/nodegrpc"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func TestRunRejectsInvalidCLIAndConfiguration(t *testing.T) {
@@ -34,12 +38,12 @@ func TestRunRejectsInvalidCLIAndConfiguration(t *testing.T) {
 		{"unknown configuration field", []string{"-c", unknown}, "not_a_node_field"},
 		{"missing configuration file", []string{"-c", missing}, "missing.yaml"},
 		{"invalid bridge config", []string{"-c", configPath}, "node ID and credentials are required"},
-		{"enrollment flags", []string{"enroll"}, "requires --host and --output"},
+		{"enrollment flags", []string{"enroll"}, "requires --host and exactly one"},
 		{"prepare flags", []string{"prepare-gost"}, "requires --output"},
 		{"ensure config missing", []string{"ensure-gost", "-c", missing}, "missing.yaml"},
 		{"ensure API is loopback", []string{"ensure-gost", "-c", configPath}, "loopback Gost API address"},
 		{"template config missing", []string{"nft-template", "-c", missing}, "missing.yaml"},
-		{"template invalid panel host", []string{"nft-template", "-c", configPath}, "panel host must be a bare DNS name or IP address"},
+		{"template requires daemon cache", []string{"nft-template", "-c", configPath}, "read node configuration cached by the daemon"},
 		{"upgrade flags", []string{"upgrade-component", "--component", "gost"}, "requires --component and --tag"},
 		{"upgrade config missing", []string{"upgrade-component", "--component", "gost", "--tag", "v3.3.3", "-c", missing}, "missing.yaml"},
 		{"installed ID flag", []string{"--upgrade-installed"}, "requires --node-id"},
@@ -102,6 +106,37 @@ host: panel.example.com
 	}
 	if _, err := readConfig(path); err == nil || !strings.Contains(err.Error(), "report_address") {
 		t.Fatalf("retired configuration field was accepted: %v", err)
+	}
+}
+
+func TestNftTemplateCLIPrintsCachedTemplate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "node.yaml")
+	if err := os.WriteFile(path, []byte("node_id: 42\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	const template = `{"nftables":[]}`
+	data, err := proto.Marshal(&nodegrpc.NodeConfig{NftTemplate: template, ConfigYaml: []byte("node_id: 42")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "panel-config.pb"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stdout.Close() })
+	original := os.Stdout
+	os.Stdout = stdout
+	defer func() { os.Stdout = original }()
+	if err = run(t.Context(), []string{"nft-template", "-c", path}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(stdout.Name())
+	if err != nil || string(got) != template+"\n" {
+		t.Fatalf("nft-template printed %q, %v", got, err)
 	}
 }
 

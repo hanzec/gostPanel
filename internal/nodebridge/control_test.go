@@ -2,11 +2,9 @@ package nodebridge
 
 import (
 	"context"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,9 +15,7 @@ import (
 
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -122,6 +118,7 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 	valid := Config{
 		NodeID: 42, Username: controlTestUser, Password: controlTestPassword,
 		AdminAddress: "127.0.0.1:1", Host: "127.0.0.1", ObserverListen: "127.0.0.1:0",
+		ConfigFile: preparePanelCredentials(t),
 	}
 	for _, test := range []struct {
 		name, want string
@@ -130,7 +127,8 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 		{"credentials", "node ID and credentials", func(cfg *Config) { cfg.Username = "node:invalid" }},
 		{"admin address", "loopback", func(cfg *Config) { cfg.AdminAddress = "192.0.2.1:80" }},
 		{"panel host", "bare DNS name or IP address", func(cfg *Config) { cfg.Host = "127.0.0.1:1" }},
-		{"panel CA", "create panel report client", func(cfg *Config) { cfg.ReportCAFile = missingCA }},
+		{"panel CA", "configure panel TLS", func(cfg *Config) { cfg.ReportCAFile = missingCA }},
+		{"missing panel credentials", "read panel credentials", func(cfg *Config) { cfg.ConfigFile = filepath.Join(t.TempDir(), "node.yaml") }},
 		{"occupied observer", "listen for local Gost observer", func(cfg *Config) { cfg.ObserverListen = occupied }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -145,9 +143,7 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 	}
 	t.Run("optional state does not prevent startup", func(t *testing.T) {
 		cfg := valid
-		dir := t.TempDir()
-		cfg.NftConfigFile = dir
-		cfg.ConfigFile = filepath.Join(dir, "node.yaml")
+		cfg.NftConfigFile = filepath.Dir(cfg.ConfigFile)
 		if err := os.WriteFile(trafficQuotaPath(cfg.ConfigFile), []byte("malformed quota state"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -188,45 +184,33 @@ func TestNftConfigurationRPC(t *testing.T) {
 	}
 }
 
-type nftTemplatePanel struct {
-	nodegrpc.UnimplementedV1Server
-}
-
-func (nftTemplatePanel) GetNftTemplate(ctx context.Context, request *nodegrpc.NftTemplateRequest) (*nodegrpc.NftConfig, error) {
-	if !nodegrpc.MatchCredentials(ctx, controlTestUser, controlTestPassword) {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
+func TestNftTemplateReadsDaemonSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node.yaml")
+	cachePath := filepath.Join(filepath.Dir(path), panelConfigCache)
+	if _, err := ReadNftTemplate(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing daemon cache returned %v", err)
 	}
-	if request.GetNodeId() != 42 {
-		return nil, status.Error(codes.NotFound, "unknown node")
-	}
-	return &nodegrpc.NftConfig{Config: "{\"nftables\":[]}"}, nil
-}
-
-func TestGetNftTemplateAuthenticatesToPanel(t *testing.T) {
-	certFile, keyFile, _ := testTLSFiles(t, x509.Certificate{IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)}})
-	serverTLS, err := credentials.NewServerTLSFromFile(certFile, keyFile)
-	if err != nil {
+	if err := storePanelConfig(path, &nodegrpc.NodeConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	server := grpc.NewServer(grpc.Creds(serverTLS))
-	t.Cleanup(server.Stop)
-	nodegrpc.RegisterPanelServer(server, nftTemplatePanel{})
-	listener := listenLocal(t)
-	go func() { _ = server.Serve(listener) }()
-	cfg := Config{NodeID: 42, Username: controlTestUser, Password: controlTestPassword,
-		Host: "127.0.0.1", ReportCAFile: certFile}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if got, err := GetNftTemplate(ctx, cfg, dialPanelAt(listener)); err != nil || got != "{\"nftables\":[]}" {
+	if _, err := ReadNftTemplate(path); err == nil || !strings.Contains(err.Error(), "no nftables template") {
+		t.Fatalf("empty template returned %v", err)
+	}
+	if err := os.WriteFile(cachePath, []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadNftTemplate(path); err == nil || !strings.Contains(err.Error(), "decode cached") {
+		t.Fatalf("invalid cache returned %v", err)
+	}
+	const template = `{"nftables":[]}`
+	if err := storePanelConfig(path, &nodegrpc.NodeConfig{NftTemplate: template, ConfigYaml: []byte("policy: default")}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadNftTemplate(path); err != nil || got != template {
 		t.Fatalf("template = %q, %v", got, err)
 	}
-	cfg.NodeID = 1
-	if _, err := GetNftTemplate(ctx, cfg, dialPanelAt(listener)); status.Code(err) != codes.NotFound {
-		t.Fatalf("unknown node returned %v", err)
-	}
-	cfg.ReportCAFile = filepath.Join(t.TempDir(), "missing.pem")
-	if _, err := GetNftTemplate(ctx, cfg); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing CA returned %v", err)
+	if info, err := os.Stat(cachePath); err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("cache is not private: %v, %v", info, err)
 	}
 }
 
