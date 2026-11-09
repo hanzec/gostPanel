@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page settings-page">
-    <PageHeader eyebrow="CONFIGURATION" title="系统设置" description="管理面板品牌、通知渠道、数据库备份和 Gost 配置。">
+    <PageHeader title="系统设置" description="管理面板品牌、通知渠道、数据库备份和 Gost 配置。">
       <template #actions>
         <el-button v-if="!activeTab.startsWith('gost-')" type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
           保存设置

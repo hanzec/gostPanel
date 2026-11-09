@@ -1,7 +1,6 @@
 <template>
   <header class="page-heading">
     <div class="page-heading__intro">
-      <span class="page-heading__eyebrow">{{ eyebrow }}</span>
       <h1>{{ title }}</h1>
       <p v-if="description">{{ description }}</p>
     </div>
@@ -13,7 +12,6 @@
 
 <script setup>
 defineProps({
-  eyebrow: { type: String, required: true },
   title: { type: String, required: true },
   description: { type: String, default: '' }
 })
@@ -30,24 +28,7 @@ defineProps({
 
 .page-heading__intro { min-width: 0; }
 
-.page-heading__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--ops-accent);
-  font: 600 11px/1.4 var(--ops-mono);
-  letter-spacing: .13em;
-}
-
-.page-heading__eyebrow::before {
-  width: 16px;
-  height: 1px;
-  background: currentColor;
-  content: '';
-}
-
 .page-heading h1 {
-  margin-top: 6px;
   color: var(--ops-text);
   font-size: clamp(27px, 3vw, 38px);
   font-weight: 730;

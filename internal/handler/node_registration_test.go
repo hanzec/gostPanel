@@ -283,6 +283,54 @@ func TestNodeRegistration(t *testing.T) {
 	}
 }
 
+func TestNodeSessionReportsMultipleAddresses(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	node := model.GostNode{
+		Name: "multi-IP", Username: "multi-IP", Password: "password",
+		Address: "198.51.100.9", IPv4: "198.51.100.9", IPv6: "2001:db8::7",
+	}
+	if err := f.db.Create(&node).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	session := startTestReportStream(t, ctx, startTestReportServer(t, f.db), node, nil)
+	report := &nodegrpc.NodeIPsRequest{
+		NodeId: uint64(node.ID), Ipv4: node.IPv4,
+		Addresses: []string{"198.51.100.10", "::ffff:198.51.100.9", "198.51.100.10"},
+	}
+	if _, err := session.UpdateNodeIPs(ctx, report); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.First(&node, node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"198.51.100.10", "198.51.100.9"}
+	if node.Address != "198.51.100.9" || node.IPv6 != "" || !slices.Equal(node.Addresses, want) {
+		t.Fatalf("unexpected node address snapshot: %q, %q, %v", node.Address, node.IPv6, node.Addresses)
+	}
+	allowlist, err := service.NewGostAllowlistService(f.db).Update(ctx, []uint{node.ID})
+	if err != nil || !slices.Equal(allowlist.Addresses, want) {
+		t.Fatalf("relay allowlist = %v, %v", allowlist.Addresses, err)
+	}
+	report.Ipv4, report.Ipv6 = "", "2001:db8::7"
+	report.Addresses = []string{report.Ipv6}
+	if _, err := session.UpdateNodeIPs(ctx, report); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.First(&node, node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"198.51.100.9", "2001:db8::7"}
+	if node.Address != want[0] || node.IPv4 != want[0] || node.IPv6 != want[1] || !slices.Equal(node.Addresses, want) {
+		t.Fatalf("IPv6-only report displaced known IPv4: %q, %q, %q, %v", node.Address, node.IPv4, node.IPv6, node.Addresses)
+	}
+	report.Addresses = []string{"fe80::1%eth0"}
+	if _, err := session.UpdateNodeIPs(ctx, report); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("invalid additional address was accepted: %v", err)
+	}
+}
+
 func TestNodeRefreshRotationAndReplay(t *testing.T) {
 	f := newNodeAuthFixture(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)

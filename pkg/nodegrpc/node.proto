@@ -55,6 +55,7 @@ message GostLogsReply {
 
 message NftConfig {
   string config = 1;
+  string table = 2;
 }
 
 message NodeConfig {
@@ -68,10 +69,12 @@ message TrafficQuotaRequest {
   int64 window_start = 3;
   repeated uint32 tcp_ports = 4;
   repeated uint32 udp_ports = 5;
+  optional uint64 calibrated_used_bytes = 6;
 }
 
 message TrafficQuotaReply {
   uint64 used_bytes = 1;
+  bool calibrated = 2;
 }
 
 message NodeUpgradeRequest {
@@ -87,6 +90,7 @@ message NodeUpgradeStatus {
   string target_version = 5;
   string state = 6;
   string error = 7;
+  bool runtime_update_required = 8;
 }
 
 message ReportRequest {
@@ -130,6 +134,7 @@ message NodeIPsRequest {
   uint64 node_id = 1;
   string ipv4 = 2;
   string ipv6 = 3;
+  repeated string addresses = 4;
 }
 
 message StreamFrame {

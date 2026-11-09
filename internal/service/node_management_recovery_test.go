@@ -29,7 +29,8 @@ func TestAutomaticUpgradeRecoversAfterReleaseAndWorkerFailures(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"tag_name":"v3.2.8"}`))
 		case "/repos/hanzec/yagp/releases/latest":
-			_, _ = w.Write([]byte(`{"tag_name":"0.1.90-abcdef0"}`))
+			t.Error("daemon policy queried the remote latest release")
+			http.NotFound(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -69,6 +70,7 @@ func TestAutomaticUpgradeRecoversAfterReleaseAndWorkerFailures(t *testing.T) {
 			saveServiceFixtures(t, db, &node)
 
 			service := NewNodeUpgradeService(db)
+			service.panelVersion = "0.1.90-abcdef0"
 			service.runAutomatic(t.Context())
 			close(remote.started)
 			var started []string
@@ -105,7 +107,7 @@ func TestAutomaticUpgradeStopsWhenWorkerCannotConfirmCompletion(t *testing.T) {
 	saveServiceFixtures(t, db, &node)
 	service := NewNodeUpgradeService(db)
 	service.cache["gost"] = nodeUpgradeRelease{version: "v3.2.8", expiresAt: time.Now().Add(time.Minute)}
-	service.cache["daemon"] = nodeUpgradeRelease{version: "0.1.90-abcdef0", expiresAt: time.Now().Add(time.Minute)}
+	service.panelVersion = "0.1.90-abcdef0"
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()

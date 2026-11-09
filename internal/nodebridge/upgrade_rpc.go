@@ -21,7 +21,8 @@ func (s *controlServer) GetUpgradeStatus(ctx context.Context, _ *emptypb.Empty) 
 	}
 	return &nodegrpc.NodeUpgradeStatus{
 		Supported: current.Supported, GostVersion: current.GostVersion, DaemonVersion: current.DaemonVersion,
-		Component: current.Component, TargetVersion: current.Tag, State: current.State, Error: current.Message,
+		RuntimeUpdateRequired: current.RuntimeUpdateRequired,
+		Component:             current.Component, TargetVersion: current.Tag, State: current.State, Error: current.Message,
 	}, nil
 }
 

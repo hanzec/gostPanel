@@ -97,10 +97,12 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	mustPersist(t, nodes.UpdateIPs(ctx, current, "198.51.100.2", "2001:db8::2"))
 	mustPersist(t, nodes.UpdateStats(current.ID, 3, 4))
 	mustPersist(t, nodes.UpdateStats(current.ID, 5, 2))
+	mustPersist(t, nodes.SetStats(ctx, current.ID, 2, 9))
+	mustPersist(t, nodes.UpdateStats(current.ID, 1, 4))
 	online, err := nodes.GetAllOnline()
 	mustPersist(t, err)
 	if len(online) != 1 || online[0].ID != current.ID || online[0].Address != "198.51.100.2" || online[0].IPv6 != "2001:db8::2" ||
-		online[0].InputBytes != 8 || online[0].OutputBytes != 6 || online[0].TotalBytes != 14 {
+		online[0].InputBytes != 3 || online[0].OutputBytes != 13 || online[0].TotalBytes != 16 {
 		t.Fatalf("online node state: %+v", online)
 	}
 }

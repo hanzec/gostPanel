@@ -2,9 +2,7 @@
   <div class="ops-page">
     <div v-if="detailId" ref="detailPage" class="ops-page">
       <nav class="node-detail-crumb" aria-label="节点详情导航">
-        <RouterLink :to="nodesLocation" class="node-detail-back"><el-icon aria-hidden="true"><ArrowLeft /></el-icon>节点管理</RouterLink>
-        <el-icon aria-hidden="true"><ArrowRight /></el-icon>
-        <span aria-current="page">节点详情</span>
+        <RouterLink :to="nodesLocation" class="node-detail-back"><el-icon aria-hidden="true"><ArrowLeft /></el-icon>返回节点列表</RouterLink>
       </nav>
       <NodeDetails v-if="detailNode" :node="detailNode" @action="handleNodeAction($event, detailNode)" />
       <section v-else class="ops-panel inventory-state">
@@ -19,7 +17,7 @@
       </section>
     </div>
 
-    <PageHeader v-else eyebrow="NODE INVENTORY" title="节点管理" description="登记 Gost 实例，查看节点连接状态和流量，并管理节点服务。">
+    <PageHeader v-else title="节点管理" description="登记 Gost 实例，查看节点连接状态和流量，并管理节点服务。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
@@ -100,8 +98,9 @@
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">节点 IP</span>
                 <strong class="ops-mono">{{ node.address || '待获取地址' }}</strong>
-                <span v-if="node.ipv4" class="inventory-secondary ops-muted">IPv4 · <span class="ops-mono">{{ node.ipv4 }}</span></span>
-                <span v-if="node.ipv6" class="inventory-secondary ops-muted">IPv6 · <span class="ops-mono">{{ node.ipv6 }}</span></span>
+                <span v-for="ip in nodeIPs(node, 4)" :key="ip" class="inventory-secondary ops-muted">IPv4 · <span class="ops-mono">{{ ip }}</span></span>
+                <span v-for="ip in nodeIPs(node, 6)" :key="ip" class="inventory-secondary ops-muted">IPv6 · <span class="ops-mono">{{ ip }}</span></span>
+                <span v-if="!nodeIPs(node, 6).length" class="inventory-secondary ops-muted">IPv6 · 不支持</span>
                 <span class="inventory-secondary ops-muted">检查 · {{ node.last_check_at ? formatTime(node.last_check_at) : '待检查' }}</span>
               </td>
               <td class="inventory-status" role="cell">
@@ -139,7 +138,7 @@
               <td class="inventory-actions-cell" role="cell">
                 <div class="inventory-actions">
                   <el-button @click.stop="showInstallCommand(node)">安装</el-button>
-                  <el-button @click.stop="handleViewConfig(node)">配置</el-button>
+                  <el-button @click.stop="openDialog(node)">配置</el-button>
                 </div>
               </td>
             </tr>
@@ -167,64 +166,55 @@
 
     <PanelDialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑节点' : '添加节点'"
+      :title="isEdit ? '节点配置 · ' + editingNode.name : '添加节点'"
+      :size="isEdit ? 'wide' : 'standard'"
+      :description="isEdit ? '管理基本设置、Gost 配置与流量统计。' : ''"
       :close-on-click-modal="false"
       :close-on-press-escape="!submitLoading"
       :show-close="!submitLoading"
       @closed="openCreatedNodeInstall"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="handleSubmit">
-        <p class="node-address-help ops-muted">节点主动连接面板，注册时会自动上报 IP。</p>
-        <div class="inventory-form-grid">
-          <el-form-item label="节点名称" prop="name" class="inventory-form-wide">
-            <el-input v-model="form.name" placeholder="例如 华东入口" />
-          </el-form-item>
-          <el-form-item label="流量上限（GiB，可选）" prop="trafficLimitGiB" class="inventory-form-wide">
-            <el-input v-model.trim="form.trafficLimitGiB" inputmode="decimal" placeholder="例如 100.5" aria-describedby="node-traffic-limit-help" clearable />
-            <p id="node-traffic-limit-help" class="node-traffic-help ops-muted">
-              留空或输入 0 表示不限。达额后节点立即拦截转发，额度恢复后自动解除限制。在线节点约每 5 秒同步用量和周期。
-            </p>
-          </el-form-item>
-          <el-form-item label="重置周期" prop="trafficResetPeriod" class="inventory-form-wide">
-            <el-select v-model="form.trafficResetPeriod" :disabled="!trafficLimitBytes" aria-describedby="node-traffic-reset-help">
-              <el-option v-for="(label, period) in trafficResetPeriods" :key="period" :label="label" :value="period" />
-            </el-select>
-            <p id="node-traffic-reset-help" class="node-traffic-help ops-muted">按北京时间零点重置，每周从周一开始。</p>
-          </el-form-item>
-          <el-form-item label="备注" prop="remark" class="inventory-form-wide">
-            <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录节点用途或部署位置" />
-          </el-form-item>
-        </div>
-      </el-form>
-      <template #footer>
-        <el-button :disabled="submitLoading" @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加节点' }}</el-button>
-      </template>
-    </PanelDialog>
-
-    <PanelDialog v-model="configDialogVisible" :title="'节点配置 · ' + (configNode?.name || '')" size="wide">
-      <div v-if="configLoading" class="inventory-state" role="status">
-        <el-skeleton :rows="4" animated />
-        <span class="ops-muted">正在读取节点配置</span>
-      </div>
-      <div v-else-if="configError" class="inventory-error" role="alert">
-        <span>无法读取该节点的配置。</span>
-        <el-button @click="handleViewConfig(configNode)">重新加载</el-button>
-      </div>
-      <el-tabs v-else v-model="configActiveTab" stretch>
-        <el-tab-pane v-for="tab in configTabs" :key="tab.name" :label="tab.label" :name="tab.name">
-          <p v-if="!nodeConfig?.[tab.name]?.length" class="config-empty ops-muted">暂无{{ tab.label }}</p>
-          <details v-for="entry in nodeConfig?.[tab.name] || []" :key="entry.name" class="config-entry">
-            <summary>
-              <strong>{{ entry.name || '未命名' }}</strong>
-              <span class="ops-mono ops-muted">{{ configSummary(tab.name, entry) }}</span>
-            </summary>
-            <pre class="config-code">{{ JSON.stringify(entry, null, 2) }}</pre>
-          </details>
+      <NodeSettingsForm v-if="!isEdit" ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" @submit="handleSubmit" />
+      <el-tabs v-else v-model="settingsTab" class="node-settings-tabs">
+        <el-tab-pane label="基本设置" name="basic">
+          <NodeSettingsForm ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" @submit="handleSubmit" />
+        </el-tab-pane>
+        <el-tab-pane label="Gost 配置" name="gost" lazy>
+          <div v-if="configLoading" class="inventory-state" role="status">
+            <el-skeleton :rows="4" animated />
+            <span class="ops-muted">正在读取节点配置</span>
+          </div>
+          <div v-else-if="configError" class="inventory-error" role="alert">
+            <span>无法读取该节点的配置。</span>
+            <el-button @click="fetchSettingsConfig">重新加载</el-button>
+          </div>
+          <el-tabs v-else v-model="configActiveTab">
+            <el-tab-pane v-for="tab in configTabs" :key="tab.name" :label="tab.label" :name="tab.name">
+              <p v-if="!nodeConfig?.[tab.name]?.length" class="config-empty ops-muted">暂无{{ tab.label }}</p>
+              <details v-for="entry in nodeConfig?.[tab.name] || []" :key="entry.name" class="config-entry">
+                <summary>
+                  <strong>{{ entry.name || '未命名' }}</strong>
+                  <span class="ops-mono ops-muted">{{ configSummary(tab.name, entry) }}</span>
+                </summary>
+                <pre class="config-code">{{ JSON.stringify(entry, null, 2) }}</pre>
+              </details>
+            </el-tab-pane>
+          </el-tabs>
+        </el-tab-pane>
+        <el-tab-pane label="流量校准" name="traffic" lazy>
+          <NodeTrafficCalibration :key="editingNode.id" :node="liveEditingNode" @saved="refreshCurrentView()" />
+        </el-tab-pane>
+        <el-tab-pane label="危险操作" name="danger" lazy>
+          <section class="ops-panel node-settings-danger">
+            <h3>删除节点</h3>
+            <p class="ops-muted">从面板移除此节点。删除后无法恢复。</p>
+            <el-button type="danger" plain :loading="deleting" @click="handleDelete(editingNode)">删除节点</el-button>
+          </section>
         </el-tab-pane>
       </el-tabs>
       <template #footer>
-        <el-button @click="configDialogVisible = false">关闭</el-button>
+        <el-button :disabled="submitLoading || deleting" @click="dialogVisible = false">{{ isEdit ? '关闭' : '取消' }}</el-button>
+        <el-button v-if="!isEdit || settingsTab === 'basic'" type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加节点' }}</el-button>
       </template>
     </PanelDialog>
 
@@ -279,17 +269,19 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, ArrowRight, CopyDocument, Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import NodeDetails from '@/components/NodeDetails.vue'
+import NodeSettingsForm from '@/components/NodeSettingsForm.vue'
+import NodeTrafficCalibration from '@/components/NodeTrafficCalibration.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
-import { formatBytes, formatRegion, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
+import { formatBytes, formatRegion, formatTime, nodeIPs, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
 const NodeNftDialog = defineAsyncComponent(() => import('@/components/NodeNftDialog.vue'))
-const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh'
+const INSTALL_SCRIPT_ROOT = 'https://raw.githubusercontent.com/hanzec/yagp/'
 const configTabs = [
   { name: 'services', label: '服务' },
   { name: 'chains', label: '转发链' },
@@ -330,9 +322,16 @@ const nodeMetrics = computed(() => [
 ])
 
 const dialogVisible = ref(false)
-const editId = ref(null)
-const isEdit = computed(() => editId.value !== null)
+const editingNode = ref(null)
+const isEdit = computed(() => editingNode.value !== null)
+const liveEditingNode = computed(() => {
+  const row = editingNode.value
+  if (detailNode.value?.id === row?.id) return detailNode.value
+  return nodeList.value.find(node => node.id === row?.id) || row
+})
+const settingsTab = ref('basic')
 const submitLoading = ref(false)
+const deleting = ref(false)
 const formRef = ref(null)
 const form = reactive({ name: '', remark: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
@@ -359,9 +358,7 @@ const rules = {
   }]
 }
 
-const configDialogVisible = ref(false)
 const configActiveTab = ref('services')
-const configNode = ref(null)
 const nodeConfig = ref(null)
 const configLoading = ref(false)
 const configError = ref(false)
@@ -400,8 +397,10 @@ const shellQuote = (value) => "'" + String(value).replaceAll("'", "'\"'\"'") + "
 
 const installCommand = computed(() => {
   if (!registration.value) return ''
-  const { host, token } = registration.value
-  return 'curl -fsSL ' + shellQuote(INSTALL_SCRIPT_URL) + ' | bash -s -- ' +
+  const { host, token, version } = registration.value
+  const script = INSTALL_SCRIPT_ROOT + (version ? 'refs/tags/' + encodeURIComponent(version) : 'HEAD') + '/scripts/install_node.sh'
+  const pin = version ? 'YAGP_DAEMON_VERSION=' + shellQuote(version) + ' ' : ''
+  return 'curl -fsSL ' + shellQuote(script) + ' | ' + pin + 'bash -s -- ' +
     '--host ' + shellQuote(host) + ' --token ' + shellQuote(token)
 })
 
@@ -470,7 +469,7 @@ const prepareInstall = async () => {
       expireRegistration()
       return
     }
-    registration.value = { host, token, expiresAt }
+    registration.value = { host, token, expiresAt, version: config.data?.daemonVersion }
     registrationTimer = setTimeout(expireRegistration, remaining)
   } finally {
     if (current()) installLoading.value = false
@@ -558,7 +557,12 @@ const clearFilters = () => {
 }
 
 const openDialog = (row = null) => {
-  editId.value = row?.id ?? null
+  editingNode.value = row
+  settingsTab.value = 'basic'
+  configActiveTab.value = 'services'
+  nodeConfig.value = null
+  configLoading.value = false
+  configError.value = false
   originalTrafficLimitBytes.value = row?.traffic_limit_bytes ?? 0
   originalTrafficResetPeriod = row?.traffic_reset_period || 'none'
   Object.assign(form, {
@@ -586,7 +590,7 @@ const handleSubmit = async () => {
       node.traffic_reset_period = form.trafficResetPeriod
     }
     if (isEdit.value) {
-      await updateNode(editId.value, node)
+      await updateNode(editingNode.value.id, node)
       ElMessage.success('节点已更新')
     } else {
       const res = await createNode(node)
@@ -610,6 +614,8 @@ const openCreatedNodeInstall = () => {
 }
 
 const handleDelete = async (row) => {
+  if (deleting.value) return
+  deleting.value = true
   try {
     await confirmPanelAction('确定要删除节点「' + row.name + '」吗？', '删除节点', {
       confirmButtonText: '删除节点',
@@ -619,17 +625,20 @@ const handleDelete = async (row) => {
     })
     await deleteNode(row.id)
     ElMessage.success('节点已删除')
+    dialogVisible.value = false
     nodeList.value = nodeList.value.filter(node => node.id !== row.id)
     if (detailId.value === row.id) router.replace(nodesLocation)
     else if (!detailId.value) fetchData()
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') console.error('删除节点失败:', error)
+  } finally {
+    deleting.value = false
   }
 }
 
 const handleNodeAction = (action, row) => {
   if (action === 'install') showInstallCommand(row)
-  if (action === 'config') handleViewConfig(row)
+  if (action === 'config') openDialog(row)
   if (action === 'gost') {
     gostNode.value = row
     gostDialogVisible.value = true
@@ -642,37 +651,31 @@ const handleNodeAction = (action, row) => {
     nftNode.value = row
     nftDialogVisible.value = true
   }
-  if (action === 'edit') openDialog(row)
-  if (action === 'delete') handleDelete(row)
-  if (action === 'copy') {
-    openDialog(row)
-    editId.value = null
-    form.name = row.name.slice(0, 95) + '-copy'
+}
+
+const fetchSettingsConfig = async () => {
+  const row = editingNode.value
+  configLoading.value = true
+  configError.value = false
+  try {
+    const res = await getNodeConfig(row.id)
+    if (editingNode.value === row) nodeConfig.value = res.data
+  } catch {
+    if (editingNode.value === row) configError.value = true
+  } finally {
+    if (editingNode.value === row) configLoading.value = false
   }
 }
 
-const handleViewConfig = async (row) => {
-  configNode.value = row
-  configActiveTab.value = 'services'
-  configLoading.value = true
-  configError.value = false
-  configDialogVisible.value = true
-  try {
-    const res = await getNodeConfig(row.id)
-    nodeConfig.value = res.data
-  } catch {
-    configError.value = true
-  } finally {
-    configLoading.value = false
-  }
-}
+watch(settingsTab, tab => {
+  if (tab === 'gost' && !nodeConfig.value && !configLoading.value) fetchSettingsConfig()
+})
 
 watch(detailId, async (id, previous) => {
   if (previous !== undefined) {
     createdInstallNode = null
     dialogVisible.value = false
     installDialogVisible.value = false
-    configDialogVisible.value = false
     gostDialogVisible.value = upgradeDialogVisible.value = nftDialogVisible.value = false
     gostNode.value = upgradeNode.value = nftNode.value = null
   }
@@ -714,8 +717,13 @@ onBeforeUnmount(() => {
   .node-row-link { min-height: 44px; }
   .inventory-status { align-self: center; }
 }
-.node-address-help { margin: 0 0 12px; line-height: 1.5; }
-.node-traffic-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+.node-settings-tabs :deep(.el-tabs__item) { min-height: 44px; }
+@media (max-width: 480px) {
+  .node-settings-tabs > :deep(.el-tabs__header .el-tabs__item) { padding-inline: 6px; font-size: 13px; }
+}
+.node-settings-danger { display: grid; justify-items: start; gap: 12px; padding: 16px; }
+.node-settings-danger h3 { color: var(--ops-danger); font-size: 1rem; }
+.node-settings-danger .el-button { min-height: 44px; }
 .node-traffic-status { margin-top: 4px; }
 .config-empty { text-align: center; padding: 24px 12px; }
 .config-entry { border: 1px solid var(--ops-border); border-radius: 8px; margin-bottom: 8px; min-width: 0; }

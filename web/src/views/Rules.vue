@@ -1,7 +1,6 @@
 <template>
   <div class="ops-page">
     <PageHeader
-      eyebrow="TRAFFIC ENTRY"
       title="入口管理"
       description="分别配置每个节点的监听端点，再到隧道管理连接源端与目的端。"
     >

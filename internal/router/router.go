@@ -92,6 +92,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.POST("/nodes/:id/registration-token", nodeHandler.IssueRegistrationToken)
 		authRoutes.DELETE("/nodes/:id/credentials", nodeHandler.RevokeCredentials)
 		authRoutes.PUT("/nodes/:id", nodeHandler.Update)
+		authRoutes.PUT("/nodes/:id/traffic", nodeHandler.CalibrateTraffic)
 		authRoutes.DELETE("/nodes/:id", nodeHandler.Delete)
 		authRoutes.GET("/nodes/:id/config", nodeHandler.GetConfig)
 		authRoutes.GET("/nodes/:id/upgrade", nodeHandler.GetUpgrade)

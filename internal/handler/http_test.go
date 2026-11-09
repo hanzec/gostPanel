@@ -111,6 +111,7 @@ func (f *handlerHTTPFixture) registerNodes() {
 	f.engine.POST("/nodes", h.Create)
 	f.engine.GET("/nodes/:id", h.GetByID)
 	f.engine.PUT("/nodes/:id", h.Update)
+	f.engine.PUT("/nodes/:id/traffic", h.CalibrateTraffic)
 	f.engine.DELETE("/nodes/:id", h.Delete)
 	f.engine.GET("/nodes/:id/config", h.GetConfig)
 	f.engine.POST("/nodes/:id/registration-token", h.IssueRegistrationToken)

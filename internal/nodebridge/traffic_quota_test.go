@@ -60,14 +60,14 @@ func TestTrafficQuotaStateFile(t *testing.T) {
 	}
 
 	active := trafficQuotaState{LimitBytes: 100, UsedBytes: 120, WindowStart: 42, TCPPorts: []uint32{8080}}
-	if err := applyTrafficQuota(ctx, "", path, "yagp_quota_42", active, false); err != nil {
+	if err := applyTrafficQuota(ctx, "", path, active, nil); err != nil {
 		t.Fatal(err)
 	}
 	if saved, err := readTrafficQuotaState(path); err != nil || !reflect.DeepEqual(saved, &active) {
 		t.Fatalf("saved quota = %+v, %v, want %+v", saved, err, active)
 	}
 
-	if err := applyTrafficQuota(ctx, "", path, "yagp_quota_42", trafficQuotaState{WindowStart: -1}, false); err != nil {
+	if err := applyTrafficQuota(ctx, "", path, trafficQuotaState{WindowStart: -1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := restoreTrafficQuota(ctx, cfg); err != nil {
@@ -207,6 +207,32 @@ func TestNativeTrafficQuotaLifecycle(t *testing.T) {
 	}
 	if quota := live(); quota == nil || quota.Used != 5_000 {
 		t.Fatalf("restored kernel quota = %+v, want 5000 used bytes", quota)
+	}
+	control.config.RuntimeLayout = RuntimeLayoutVersion
+	if err := restoreTrafficQuota(ctx, control.config); err != nil {
+		t.Fatal(err)
+	}
+	if quota := live(); quota != nil {
+		t.Fatalf("legacy quota still present after migration: %+v", quota)
+	}
+	table = singleNodeQuotaTable
+	if quota := live(); quota == nil || quota.Used != 5_000 {
+		t.Fatalf("migrated kernel quota = %+v, want 5000 used bytes", quota)
+	}
+	newCount := uint64(0)
+	reply, err := control.SyncTrafficQuota(ctx, &nodegrpc.TrafficQuotaRequest{
+		LimitBytes: state.LimitBytes, UsedBytes: 5_000, WindowStart: state.WindowStart,
+		UdpPorts: state.UDPPorts, CalibratedUsedBytes: &newCount,
+	})
+	if err != nil || !reply.GetCalibrated() || reply.GetUsedBytes() != newCount {
+		t.Fatalf("calibration reply = %+v, %v", reply, err)
+	}
+	if quota := live(); quota == nil || quota.Used != newCount {
+		t.Fatalf("calibrated kernel quota = %+v, want %d used bytes", quota, newCount)
+	}
+	state.UsedBytes = 0
+	if used := apply(state); used != newCount {
+		t.Fatalf("regular sync restored old quota count: %d", used)
 	}
 	if used := apply(trafficQuotaState{WindowStart: -1, UsedBytes: 5_000}); used != 0 {
 		t.Fatalf("clearing quota retained %d bytes", used)

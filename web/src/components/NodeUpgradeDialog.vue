@@ -29,7 +29,7 @@
           </header>
           <dl class="upgrade-versions">
             <div><dt>当前版本</dt><dd class="ops-mono">{{ item.currentVersion || '未上报' }}</dd></div>
-            <div><dt>最新版本</dt><dd class="ops-mono">{{ item.latestVersion || '未知' }}</dd></div>
+            <div><dt>{{ item.key === 'daemon' ? '面板版本' : '最新版本' }}</dt><dd class="ops-mono">{{ item.latestVersion || '未知' }}</dd></div>
           </dl>
           <div class="upgrade-controls">
             <div class="upgrade-policy">
@@ -199,9 +199,9 @@ const savePolicy = async (item, enabled) => {
 
 const startUpgrade = async (item) => {
   if (busy.value || isUpgrading.value || refreshError.value || !status.value.available || !item.hasUpdate) return
-  const interruption = item.key === 'gost' ? '正在处理的转发连接' : '面板与节点之间的管理连接'
+  const target = item.key === 'gost' ? '最新稳定版' : `当前面板版本 ${item.latestVersion}`
   const confirmed = await confirmPanelAction(
-    `将节点「${props.node.name}」的 ${item.name} 升级至最新稳定版。升级会重启服务，${interruption}可能短暂中断。`,
+    `将节点「${props.node.name}」的 ${item.name} 更新至${target}。服务会重启，转发连接可能短暂中断。`,
     `升级 ${item.name}`,
     { confirmButtonText: '确认升级', cancelButtonText: '取消', type: 'warning' }
   ).catch(() => false)

@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page">
-    <PageHeader eyebrow="RELAY TUNNELS" title="隧道管理" description="连接已创建的源端入口和目的端入口，统一管理两端的转发配置。">
+    <PageHeader title="隧道管理" description="连接已创建的源端入口和目的端入口，统一管理两端的转发配置。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>

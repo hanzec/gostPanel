@@ -46,7 +46,7 @@ func TestAutomaticNodeUpgradeUsesStoredComponentPolicy(t *testing.T) {
 	service := NewNodeUpgradeService(db)
 	validUntil := time.Now().Add(time.Minute)
 	service.cache["gost"] = nodeUpgradeRelease{version: "v3.2.6", expiresAt: validUntil}
-	service.cache["daemon"] = nodeUpgradeRelease{version: "0.1.73-abcdef0", expiresAt: validUntil}
+	service.panelVersion = "0.1.73-abcdef0"
 	service.runAutomatic(ctx)
 	if len(fixtures[0].started)+len(fixtures[1].started) != 0 {
 		t.Fatal("new nodes must not be upgraded until an administrator enables their policy")

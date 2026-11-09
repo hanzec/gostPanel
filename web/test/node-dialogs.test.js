@@ -306,7 +306,7 @@ describe('node upgrade dialog', () => {
     messages.confirm.mockRejectedValueOnce('cancel')
     await manual(view, 'Gost').trigger('click')
     await flushPromises()
-    expect(messages.confirm).toHaveBeenCalledWith(expect.stringContaining('正在处理的转发连接'), '升级 Gost', expect.anything())
+    expect(messages.confirm).toHaveBeenCalledWith(expect.stringContaining('最新稳定版'), '升级 Gost', expect.anything())
     expect(api.upgradeNodeComponent).not.toHaveBeenCalled()
 
     api.upgradeNodeComponent.mockRejectedValueOnce({ isAxiosError: true }).mockResolvedValueOnce(response({
@@ -317,7 +317,7 @@ describe('node upgrade dialog', () => {
     expect(view.get('[role="alert"]').text()).toContain('无法确认升级请求已提交')
     await manual(view, 'yagp-daemon').trigger('click')
     await flushPromises()
-    expect(messages.confirm).toHaveBeenLastCalledWith(expect.stringContaining('面板与节点之间的管理连接'), '升级 yagp-daemon', expect.anything())
+    expect(messages.confirm).toHaveBeenLastCalledWith(expect.stringContaining('当前面板版本 1.1'), '升级 yagp-daemon', expect.anything())
     expect(api.upgradeNodeComponent).toHaveBeenLastCalledWith(node.id, 'daemon')
     expect(view.text()).toContain('等待执行')
     expect(messages.success).toHaveBeenCalledWith('升级请求已提交')

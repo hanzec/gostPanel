@@ -63,7 +63,7 @@ func TestTrafficQuotaSync(t *testing.T) {
 		}
 		fixture.used = used
 		fixture.mu.Unlock()
-		if err := syncTrafficQuota(repo, client, node, services, now); err != nil {
+		if err := syncTrafficQuota(repo, client, node.ID, services, now); err != nil {
 			t.Fatal(err)
 		}
 		saved, err := repo.FindByID(node.ID)
@@ -89,6 +89,46 @@ func TestTrafficQuotaSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	sync(0, 0, 0, model.TrafficQuotaWindowUnset, "")
+}
+
+func TestTrafficCalibrationSurvivesSyncWithStaleNode(t *testing.T) {
+	db := newTrafficQuotaTestDB(t)
+	repo := repository.NewNodeRepository(db)
+	config := trafficQuotaAdminCommand{"GET /config", http.StatusOK, `{"services":[]}`}
+	remote := &trafficQuotaAdminTestNode{t: t, commands: []trafficQuotaAdminCommand{config, config}}
+	node := startServiceTestNode(t, remote)
+	node.TrafficLimitBytes = 100
+	if err := repo.Create(&node); err != nil {
+		t.Fatal(err)
+	}
+	requireServiceError(t, repo.UpdateTrafficQuota(node, 0, 120, model.TrafficQuotaBlocked), nil)
+	stale, err := repo.FindByID(node.ID)
+	requireServiceError(t, err, nil)
+	remote.check = func(req *nodegrpc.TrafficQuotaRequest) {
+		if req.CalibratedUsedBytes == nil || req.GetCalibratedUsedBytes() != 0 || req.GetUsedBytes() != 120 {
+			t.Errorf("unexpected quota calibration request: %v", req)
+		}
+	}
+	remote.calibrated = true
+	service := NewNodeService(db, "")
+	requireServiceError(t, service.CalibrateNodeTotals(t.Context(), node.ID, 30, 60), nil)
+	requireServiceError(t, service.CalibrateNodeQuota(t.Context(), node.ID, 0), nil)
+
+	remote.mu.Lock()
+	remote.calibrated, remote.used = false, 3
+	remote.check = func(req *nodegrpc.TrafficQuotaRequest) {
+		if req.CalibratedUsedBytes != nil || req.GetUsedBytes() != 0 {
+			t.Errorf("sync reseeded the previous quota count: %v", req)
+		}
+	}
+	remote.mu.Unlock()
+	_, err = NewRuleSyncService(db).getNodeConfig(utils.GetGostClient(stale), *stale)
+	requireServiceError(t, err, nil)
+	saved, err := repo.FindByID(node.ID)
+	requireServiceError(t, err, nil)
+	if saved.TotalBytes != 90 || saved.TrafficQuotaUsedBytes != 3 || saved.TrafficQuotaState != model.TrafficQuotaActive {
+		t.Fatalf("unexpected counters after calibration and sync: total=%d quota=%d state=%s", saved.TotalBytes, saved.TrafficQuotaUsedBytes, saved.TrafficQuotaState)
+	}
 }
 
 func TestCreateServiceWithTrafficQuotaRollsBackOnlyNewService(t *testing.T) {
@@ -235,11 +275,12 @@ func newTrafficQuotaTestDB(t *testing.T) *gorm.DB {
 
 type trafficQuotaTestNode struct {
 	nodegrpc.UnimplementedV1Server
-	mu       sync.Mutex
-	check    func(*nodegrpc.TrafficQuotaRequest)
-	used     uint64
-	quotaErr error
-	calls    int
+	mu         sync.Mutex
+	check      func(*nodegrpc.TrafficQuotaRequest)
+	used       uint64
+	quotaErr   error
+	calls      int
+	calibrated bool
 }
 
 func (s *trafficQuotaTestNode) SyncTrafficQuota(_ context.Context, req *nodegrpc.TrafficQuotaRequest) (*nodegrpc.TrafficQuotaReply, error) {
@@ -250,7 +291,7 @@ func (s *trafficQuotaTestNode) SyncTrafficQuota(_ context.Context, req *nodegrpc
 	if s.quotaErr != nil {
 		return nil, s.quotaErr
 	}
-	return &nodegrpc.TrafficQuotaReply{UsedBytes: s.used}, nil
+	return &nodegrpc.TrafficQuotaReply{UsedBytes: s.used, Calibrated: s.calibrated}, nil
 }
 
 type trafficQuotaAdminCommand struct {

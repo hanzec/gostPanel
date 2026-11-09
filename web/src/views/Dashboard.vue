@@ -2,7 +2,6 @@
   <div class="ops-page overview">
     <PageHeader
       class="ops-panel overview-banner"
-      eyebrow="OVERVIEW / CONTROL PLANE"
       title="运行总览"
       description="实时查看隧道出口流量、节点和转发状态。"
     >

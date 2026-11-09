@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"yagp/internal/buildinfo"
 	bizerrors "yagp/internal/errors"
 	"yagp/internal/model"
 	"yagp/internal/utils"
@@ -52,15 +53,16 @@ type nodeUpgradeRelease struct {
 }
 
 type NodeUpgradeService struct {
-	db       *gorm.DB
-	releases *upgrade.Client
-	cacheMu  sync.Mutex
-	cache    map[string]nodeUpgradeRelease
+	db           *gorm.DB
+	releases     *upgrade.Client
+	panelVersion string
+	cacheMu      sync.Mutex
+	cache        map[string]nodeUpgradeRelease
 }
 
 func NewNodeUpgradeService(db *gorm.DB) *NodeUpgradeService {
 	return &NodeUpgradeService{
-		db: db, releases: upgrade.NewClient(), cache: make(map[string]nodeUpgradeRelease),
+		db: db, releases: upgrade.NewClient(), panelVersion: buildinfo.Version, cache: make(map[string]nodeUpgradeRelease),
 	}
 }
 
@@ -92,25 +94,13 @@ func (s *NodeUpgradeService) Get(ctx context.Context, id uint) (*NodeUpgradeView
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	var lookup sync.WaitGroup
-	var gostErr, daemonErr error
-	lookup.Add(1)
-	go func() {
-		defer lookup.Done()
-		view.LatestGostVersion, gostErr = s.cachedLatest(lookupCtx, "gost")
-	}()
-	view.LatestDaemonVersion, daemonErr = s.cachedLatest(lookupCtx, "daemon")
-	lookup.Wait()
-	switch {
-	case gostErr != nil && daemonErr != nil:
-		view.Reason = "暂时无法查询 Gost 和 yagp-daemon 的最新稳定版本"
-	case gostErr != nil:
+	view.LatestGostVersion, err = s.cachedLatest(lookupCtx, "gost")
+	view.LatestDaemonVersion = s.daemonTarget()
+	if err != nil {
 		view.Reason = "暂时无法查询 Gost 的最新稳定版本"
-	case daemonErr != nil:
-		view.Reason = "暂时无法查询 yagp-daemon 的最新稳定版本"
 	}
 	view.GostUpdateAvailable = upgrade.IsNewer("gost", view.GostVersion, view.LatestGostVersion)
-	view.DaemonUpdateAvailable = upgrade.IsNewer("daemon", view.DaemonVersion, view.LatestDaemonVersion)
+	view.DaemonUpdateAvailable = nodeUpgradeAvailable(state, "daemon", view.LatestDaemonVersion)
 	return view, nil
 }
 
@@ -148,14 +138,17 @@ func (s *NodeUpgradeService) Upgrade(ctx context.Context, id uint, component str
 	if current == "" {
 		return nil, status.Error(codes.FailedPrecondition, "无法识别当前安装版本")
 	}
-	lookupCtx, cancel := context.WithTimeout(ctx, nodeUpgradeLookup)
-	target, err := s.releases.Latest(lookupCtx, component)
-	cancel()
-	if err != nil {
-		logger.Warnf("查询 %s 最新版本失败: %v", component, err)
-		return nil, bizerrors.New(50001, "无法查询最新稳定版本，请检查面板的网络连接", http.StatusBadGateway)
+	target := s.daemonTarget()
+	if component == "gost" {
+		lookupCtx, cancel := context.WithTimeout(ctx, nodeUpgradeLookup)
+		target, err = s.releases.Latest(lookupCtx, component)
+		cancel()
+		if err != nil {
+			logger.Warnf("查询 %s 最新版本失败: %v", component, err)
+			return nil, bizerrors.New(50001, "无法查询最新稳定版本，请检查面板的网络连接", http.StatusBadGateway)
+		}
 	}
-	if !upgrade.IsNewer(component, current, target) {
+	if !nodeUpgradeAvailable(state, component, target) {
 		return nil, status.Error(codes.FailedPrecondition, "没有可用的更高稳定版本")
 	}
 	return client.StartUpgrade(ctx, component, target)
@@ -224,7 +217,7 @@ func (s *NodeUpgradeService) upgradeAutomatically(ctx context.Context, id uint, 
 		}
 		targets[component] = target
 	}
-	if !upgrade.IsNewer(component, nodeComponentVersion(state, component), target) {
+	if !nodeUpgradeAvailable(state, component, target) {
 		return nil
 	}
 	state, err = client.StartUpgrade(ctx, component, target)
@@ -254,6 +247,9 @@ func (s *NodeUpgradeService) findNode(ctx context.Context, id uint) (*model.Gost
 }
 
 func (s *NodeUpgradeService) cachedLatest(ctx context.Context, component string) (string, error) {
+	if component == "daemon" {
+		return s.daemonTarget(), nil
+	}
 	s.cacheMu.Lock()
 	entry := s.cache[component]
 	s.cacheMu.Unlock()
@@ -276,11 +272,24 @@ func (s *NodeUpgradeService) cachedLatest(ctx context.Context, component string)
 	return version, err
 }
 
+func (s *NodeUpgradeService) daemonTarget() string {
+	if upgrade.ValidateTag("daemon", s.panelVersion) {
+		return s.panelVersion
+	}
+	return ""
+}
+
 func nodeComponentVersion(state *nodegrpc.NodeUpgradeStatus, component string) string {
 	if component == "gost" {
 		return state.GetGostVersion()
 	}
 	return state.GetDaemonVersion()
+}
+
+func nodeUpgradeAvailable(state *nodegrpc.NodeUpgradeStatus, component, target string) bool {
+	current := nodeComponentVersion(state, component)
+	return upgrade.IsNewer(component, current, target) ||
+		(component == "daemon" && target != "" && current == target && state.GetRuntimeUpdateRequired())
 }
 
 func nodeUpgradeBusy(state *nodegrpc.NodeUpgradeStatus) bool {

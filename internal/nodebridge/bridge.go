@@ -39,6 +39,7 @@ type Config struct {
 	ReportCertSHA256 string `yaml:"report_cert_sha256,omitempty"`
 	NftConfigFile    string `yaml:"-"`
 	ConfigFile       string `yaml:"-"`
+	RuntimeLayout    int    `yaml:"-"`
 }
 
 func Run(ctx context.Context, cfg Config) error {

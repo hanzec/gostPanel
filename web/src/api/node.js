@@ -75,6 +75,10 @@ export function getNodeConfig(id) {
     })
 }
 
+export function calibrateNodeTraffic(id, calibration) {
+    return request.put(`/nodes/${id}/traffic`, calibration, { timeout: 25000, silentError: true })
+}
+
 export function getGostService(id) {
     return request.get(`/nodes/${id}/gost/service`)
 }

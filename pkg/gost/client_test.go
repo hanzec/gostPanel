@@ -238,6 +238,16 @@ func TestGostTypedControlCalls(t *testing.T) {
 	if used, err := client.SyncTrafficQuota(ctx, 200, 100, 50, []uint32{80}, []uint32{53}); err != nil || used != 101 {
 		t.Fatalf("sync quota = %v, %v", used, err)
 	}
+	zero := uint64(0)
+	quota.CalibratedUsedBytes = &zero
+	calls <- controlCall{method: nodegrpc.V1_SyncTrafficQuota_FullMethodName, request: quota, response: &nodegrpc.TrafficQuotaReply{UsedBytes: 101}}
+	if _, err := client.CalibrateTrafficQuota(ctx, quota); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("legacy response to quota calibration = %v", err)
+	}
+	calls <- controlCall{method: nodegrpc.V1_SyncTrafficQuota_FullMethodName, request: quota, response: &nodegrpc.TrafficQuotaReply{Calibrated: true}}
+	if used, err := client.CalibrateTrafficQuota(ctx, quota); err != nil || used != 0 {
+		t.Fatalf("calibrate quota = %v, %v", used, err)
+	}
 	unregistered := NewClient(&Config{})
 	if _, err := unregistered.GostServiceStatus(ctx); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("unregistered service status = %v", err)
