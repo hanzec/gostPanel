@@ -118,6 +118,7 @@ func main() {
 	defer stopBackground()
 	go service.NewGostRulesetService(db).Run(backgroundCtx)
 	go nodeUpgrade.Run(backgroundCtx)
+	go service.RunNodeRegions(backgroundCtx, db)
 
 	// 启动自动备份服务
 	backupService := service.NewBackupService(db)

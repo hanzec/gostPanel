@@ -140,6 +140,7 @@ func TestReleaseDownloadSelectsAndVerifiesLinuxAssets(t *testing.T) {
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		t.Skip("release archive downloads target Linux amd64 and arm64")
 	}
+	t.Setenv("GH_PROXY", "")
 	for _, test := range []struct {
 		name, component, tag, repo, assetName, binary, variant, wantError string
 	}{
@@ -190,6 +191,53 @@ func TestReleaseDownloadSelectsAndVerifiesLinuxAssets(t *testing.T) {
 				t.Fatalf("download = %q, %v", dest.String(), err)
 			}
 		})
+	}
+}
+
+func TestLatestReleaseUsesConfiguredAPIProxy(t *testing.T) {
+	t.Setenv("GH_PROXY", "https://proxy.example/")
+	client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
+		if req.Host != "proxy.example" || req.URL.Path != "/https://api.github.com/repos/go-gost/gost/releases/latest" {
+			t.Errorf("unexpected release lookup: %s%s", req.Host, req.URL.Path)
+			http.NotFound(w, req)
+			return
+		}
+		_, _ = io.WriteString(w, `{"tag_name":"v3.3.3"}`)
+	})
+	tag, err := client.Latest(t.Context(), "gost")
+	if err != nil || tag != "v3.3.3" {
+		t.Fatalf("latest release through GH_PROXY = %q, %v", tag, err)
+	}
+}
+
+func TestAutomaticMirrorFallsBackBeforeExtracting(t *testing.T) {
+	t.Setenv("GH_PROXY", "")
+	if err := os.Unsetenv("GH_PROXY"); err != nil {
+		t.Fatal(err)
+	}
+	const url = "https://github.com/go-gost/gost/releases/download/v3.3.3/gost.tar.gz"
+	archive := buildReleaseTestArchive(t, "gost", "official executable")
+	client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
+		switch req.Host {
+		case "get.geojs.io":
+			_, _ = io.WriteString(w, "HK\n")
+		case "ghfast.top":
+			_, _ = w.Write(bytes.Repeat([]byte{'x'}, len(archive)))
+		case "github.com":
+			_, _ = w.Write(archive)
+		default:
+			t.Errorf("unexpected host: %s", req.Host)
+			http.NotFound(w, req)
+		}
+	})
+	sources := client.AssetURLs(t.Context(), url)
+	if len(sources) != 2 || sources[0] != "https://ghfast.top/"+url || sources[1] != url {
+		t.Fatalf("HK asset sources = %v", sources)
+	}
+	info := asset{Size: int64(len(archive)), Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(archive))}
+	var output bytes.Buffer
+	if err := client.downloadAsset(t.Context(), sources[0], info, "gost", &output, sources[1]); err != nil || output.String() != "official executable" {
+		t.Fatalf("download with bad mirror = %q, %v", output.String(), err)
 	}
 }
 

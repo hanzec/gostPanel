@@ -17,6 +17,9 @@ export const trafficQuotaStates = {
 const dateFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
 export const formatTime = (value) => dateFormatter.format(new Date(value))
 
+const regionNames = new Intl.DisplayNames(['zh-CN'], { type: 'region' })
+export const formatRegion = (code) => regionNames.of(code)
+
 export const formatBytes = (bytes) => {
   if (!bytes) return '0 B'
   const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB']

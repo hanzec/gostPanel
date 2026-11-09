@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -31,8 +32,9 @@ func NewClient() *Client {
 		Timeout: 90 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			host := req.URL.Hostname()
+			sameHost := req.URL.Host == via[0].URL.Host
 			if len(via) >= 5 || req.URL.Scheme != "https" ||
-				(host != "github.com" && host != "api.github.com" && host != "release-assets.githubusercontent.com") {
+				(!sameHost && host != "github.com" && host != "api.github.com" && host != "release-assets.githubusercontent.com") {
 				return errors.New("unexpected GitHub release redirect")
 			}
 			return nil
@@ -123,17 +125,42 @@ func (c *Client) LatestGostArchiveURL(ctx context.Context, arch string) (string,
 	if err != nil {
 		return "", err
 	}
+	return GostArchiveURL(tag, arch), nil
+}
+
+// GostArchiveURL formats the archive URL for a validated stable Gost tag.
+func GostArchiveURL(tag, arch string) string {
 	archive, _ := releaseNames("gost", tag, "", arch)
-	return releaseArchiveURL("gost", tag, archive), nil
+	return releaseArchiveURL("gost", tag, archive)
 }
 
 func (c *Client) release(ctx context.Context, component, endpoint string) (release, error) {
-	var result release
 	repo := repository(component)
 	if repo == "" {
-		return result, errors.New("invalid upgrade component")
+		return release{}, errors.New("invalid upgrade component")
 	}
-	res, err := c.get(ctx, "https://api.github.com/repos/"+repo+"/releases/"+endpoint)
+	url := "https://api.github.com/repos/" + repo + "/releases/" + endpoint
+	var proxyErr error
+	// gh-fast accepts archives, but returns 403 for GitHub API URLs.
+	if prefix := os.Getenv("GH_PROXY"); prefix != "" && prefix != ghFast {
+		proxyCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		result, err := c.readRelease(proxyCtx, component, prefix+url)
+		cancel()
+		if err == nil {
+			return result, nil
+		}
+		proxyErr = fmt.Errorf("query release via GH_PROXY: %w", err)
+	}
+	result, err := c.readRelease(ctx, component, url)
+	if err != nil && proxyErr != nil {
+		return result, errors.Join(proxyErr, err)
+	}
+	return result, err
+}
+
+func (c *Client) readRelease(ctx context.Context, component, url string) (release, error) {
+	var result release
+	res, err := c.get(ctx, url)
 	if err != nil {
 		return result, err
 	}
@@ -163,7 +190,8 @@ func (c *Client) Download(ctx context.Context, component, tag, variant string, d
 	for _, asset := range info.Assets {
 		if asset.Name == archiveName {
 			url := releaseArchiveURL(component, tag, archiveName)
-			return c.downloadAsset(ctx, url, asset, binaryName, dest)
+			sources := c.AssetURLs(ctx, url)
+			return c.downloadAsset(ctx, sources[0], asset, binaryName, dest, sources[1:]...)
 		}
 	}
 	return errors.New("release does not contain the required Linux archive")
@@ -185,35 +213,59 @@ func releaseNames(component, tag, variant, arch string) (archive, binary string)
 	return archive, binary
 }
 
-func (c *Client) downloadAsset(ctx context.Context, url string, asset asset, binary string, dest io.Writer) error {
+func (c *Client) downloadAsset(ctx context.Context, url string, asset asset, binary string, dest io.Writer, fallback ...string) error {
 	digest, ok := strings.CutPrefix(asset.Digest, "sha256:")
 	checksum, err := hex.DecodeString(digest)
 	if !ok || err != nil || len(checksum) != sha256.Size || asset.Size <= 0 || asset.Size > maxArchiveSize {
 		return errors.New("release asset has no usable SHA-256 digest or size")
 	}
-	res, err := c.get(ctx, url)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
 	file, err := os.CreateTemp("", "yagp-release-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(file.Name())
 	defer file.Close()
-	hash := sha256.New()
-	length, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(res.Body, asset.Size+1))
-	if err != nil {
-		return err
+	if len(fallback) != 0 {
+		mirrorCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		err = c.copyVerifiedAsset(mirrorCtx, url, asset.Size, checksum, file)
+		cancel()
+		if err != nil {
+			log.Printf("gh-fast download failed: %v; retrying GitHub directly", err)
+			url = fallback[0]
+		}
 	}
-	if length != asset.Size || !bytes.Equal(hash.Sum(nil), checksum) {
-		return errors.New("release archive SHA-256 or size does not match")
+	if len(fallback) == 0 || err != nil {
+		if err = c.copyVerifiedAsset(ctx, url, asset.Size, checksum, file); err != nil {
+			return err
+		}
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
 	return extractBinary(file, binary, dest)
+}
+
+func (c *Client) copyVerifiedAsset(ctx context.Context, url string, size int64, checksum []byte, file *os.File) error {
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	res, err := c.get(ctx, url)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	hash := sha256.New()
+	length, err := io.Copy(io.MultiWriter(file, hash), io.LimitReader(res.Body, size+1))
+	if err != nil {
+		return err
+	}
+	if length != size || !bytes.Equal(hash.Sum(nil), checksum) {
+		return errors.New("release archive SHA-256 or size does not match")
+	}
+	return nil
 }
 
 func extractBinary(source io.Reader, binary string, dest io.Writer) error {

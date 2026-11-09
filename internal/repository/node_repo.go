@@ -83,6 +83,7 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 		values["address"] = node.Address
 		values["ipv4"] = node.IPv4
 		values["ipv6"] = node.IPv6
+		values["region"] = ""
 		values["session_generation"] = gorm.Expr("session_generation + 1")
 		result := tx.Model(&model.GostNode{}).
 			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
@@ -117,6 +118,7 @@ func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ip
 	if len(updates) == 0 {
 		return nil
 	}
+	updates["region"] = ""
 	// Keep the generation predicate on the write if the node re-enrolls concurrently.
 	result := query.Updates(updates)
 	if result.Error == nil && result.RowsAffected == 0 {

@@ -95,6 +95,7 @@
                   <el-icon class="node-row-arrow" aria-hidden="true"><ArrowRight /></el-icon>
                 </RouterLink>
                 <span class="inventory-secondary ops-mono ops-muted">#{{ node.id }}</span>
+                <span v-if="node.region" class="inventory-secondary ops-muted">{{ formatRegion(node.region) }}</span>
               </td>
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">节点 IP</span>
@@ -282,7 +283,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
-import { formatBytes, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
+import { formatBytes, formatRegion, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))

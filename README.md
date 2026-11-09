@@ -28,6 +28,8 @@ curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/s
   | YAGP_DAEMON_VERSION="$version" bash -s -- --host 'panel.example.com' --token 'TOKEN_FROM_PANEL'
 ```
 
+安装 Gost 及在线升级时按节点的网络出口判断地区。中国大陆、香港和澳门优先通过 gh-fast 下载发布包，代理失败、其他地区或检测失败时使用 GitHub。安装脚本首次拉取 `yagp-daemon` 默认直连。可在管道右侧为 `bash` 设置 `GH_PROXY` 覆盖下载路径，设置 `GH_PROXY=''` 可强制直连。使用只支持文件下载的代理且无法访问 GitHub API 时，可同时设置 `YAGP_GOST_VERSION` 为官方稳定版标签，例如 `v3.3.3`，跳过初装时的 Gost 版本查询。
+
 ### 升级已安装节点
 
 从公网 gRPC 迁移到 WebSocket 前，先备份面板数据库和节点配置。更新面板和反向代理后，在节点管理中为已有节点签发新的注册令牌，再在节点主机上以 root 身份执行原地重新注册命令，将 `42` 换成原节点 ID。脚本暂停 `yagp-daemon`，写入新凭据后启动新版守护进程。现有 Gost 服务继续转发，沿用节点 ID 和 nftables 配置。支持 systemd 和 OpenRC。
@@ -221,6 +223,8 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 We
 ### 升级已注册的节点
 
 在 **节点管理** 点击节点行，再打开 **版本与升级**，可查看 Gost 和 `yagp-daemon` 的当前版本、最新稳定版本和升级结果。每个节点可分别开启两个组件的自动升级，开关默认关闭。面板每小时检查一次已开启自动升级的在线节点，并依次处理。也可以在对话框中手动升级任一组件。
+
+节点列表和详情的地区由面板用 GeoJS 查询已上报的公网 IP。优先查询 IPv4，未查到时再尝试 IPv6。
 
 在线升级适用于 systemd 节点。面板和节点需要能通过 HTTPS 访问 GitHub。节点校验发布包的 SHA-256，再替换对应的二进制并重启服务。配置、凭据、证书和节点 ID 都会保留。Gost 重启会中断该实例正在转发的连接，新版服务启动检查失败时会尝试恢复旧版。
 
