@@ -17,7 +17,8 @@ export function getNodeList(params) {
 export function getNode(id) {
     return request({
         url: `/nodes/${id}`,
-        method: 'get'
+        method: 'get',
+        silentError: true
     })
 }
 

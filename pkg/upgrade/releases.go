@@ -118,6 +118,15 @@ func (c *Client) Latest(ctx context.Context, component string) (string, error) {
 	return release.Tag, nil
 }
 
+func (c *Client) LatestGostArchiveURL(ctx context.Context, arch string) (string, error) {
+	tag, err := c.Latest(ctx, "gost")
+	if err != nil {
+		return "", err
+	}
+	archive, _ := releaseNames("gost", tag, "", arch)
+	return releaseArchiveURL("gost", tag, archive), nil
+}
+
 func (c *Client) release(ctx context.Context, component, endpoint string) (release, error) {
 	var result release
 	repo := repository(component)
@@ -153,11 +162,15 @@ func (c *Client) Download(ctx context.Context, component, tag, variant string, d
 	}
 	for _, asset := range info.Assets {
 		if asset.Name == archiveName {
-			url := "https://github.com/" + repository(component) + "/releases/download/" + tag + "/" + archiveName
+			url := releaseArchiveURL(component, tag, archiveName)
 			return c.downloadAsset(ctx, url, asset, binaryName, dest)
 		}
 	}
 	return errors.New("release does not contain the required Linux archive")
+}
+
+func releaseArchiveURL(component, tag, archive string) string {
+	return "https://github.com/" + repository(component) + "/releases/download/" + tag + "/" + archive
 }
 
 func releaseNames(component, tag, variant, arch string) (archive, binary string) {
