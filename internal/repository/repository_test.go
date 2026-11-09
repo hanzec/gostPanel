@@ -98,11 +98,13 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	mustPersist(t, nodes.UpdateIPs(ctx, current, "198.51.100.2", "2001:db8::2"))
 	mustPersist(t, nodes.UpdateStats(current.ID, 3, 4))
 	mustPersist(t, nodes.UpdateStats(current.ID, 5, 2))
+	mustPersist(t, nodes.SetStats(ctx, current.ID, 2, 9))
+	mustPersist(t, nodes.UpdateStats(current.ID, 1, 4))
 	mustPersist(t, nodes.UpdateStatus(current.ID, model.NodeStatusOnline))
 	online, err := nodes.GetAllOnline()
 	mustPersist(t, err)
 	if len(online) != 1 || online[0].ID != current.ID || online[0].Address != "198.51.100.2" || online[0].IPv6 != "2001:db8::2" ||
-		online[0].InputBytes != 8 || online[0].OutputBytes != 6 || online[0].TotalBytes != 14 {
+		online[0].InputBytes != 3 || online[0].OutputBytes != 13 || online[0].TotalBytes != 16 {
 		t.Fatalf("online node state: %+v", online)
 	}
 }
@@ -126,6 +128,32 @@ func TestNodeRepositoryRejectsStaleQuotaSnapshots(t *testing.T) {
 	mustPersist(t, err)
 	if current.TrafficLimitBytes != 200 || current.TrafficResetPeriod != "weekly" || current.TrafficQuotaState != model.TrafficQuotaPending || current.TrafficQuotaUsedBytes != 50 {
 		t.Fatalf("a snapshot for the old policy overwrote the changed quota: %+v", current)
+	}
+}
+
+func TestNodeRepositoryKeepsPrimaryIPv4InNewAddressSnapshots(t *testing.T) {
+	nodes := NewNodeRepository(openRepositoryDB(t))
+	ctx := t.Context()
+	node := model.GostNode{Name: "edge"}
+	mustPersist(t, nodes.Create(&node))
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::1", "2001:db8::1"))
+	saved, err := nodes.FindByID(node.ID)
+	mustPersist(t, err)
+	if saved.Address != "2001:db8::1" || saved.IPv4 != "" {
+		t.Fatalf("IPv6-only node did not keep an IPv6 primary address: %+v", saved)
+	}
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "192.0.2.1", "", "192.0.2.1"))
+	saved, err = nodes.FindByID(node.ID)
+	mustPersist(t, err)
+	if saved.IPv6 != "" || !slices.Equal(saved.Addresses, []string{"192.0.2.1"}) {
+		t.Fatalf("new address snapshot did not clear IPv6: %+v", saved)
+	}
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::2", "2001:db8::2"))
+	saved, err = nodes.FindByID(node.ID)
+	mustPersist(t, err)
+	if saved.Address != "192.0.2.1" || saved.IPv4 != "192.0.2.1" || saved.IPv6 != "2001:db8::2" ||
+		!slices.Equal(saved.Addresses, []string{"192.0.2.1", "2001:db8::2"}) {
+		t.Fatalf("an IPv6-only snapshot erased the known IPv4 address: %+v", saved)
 	}
 }
 

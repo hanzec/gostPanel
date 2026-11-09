@@ -38,9 +38,12 @@ func nftTemplate(table string) string {
 }`, table)
 }
 
-func nftConfigResponse(id uint, config string) nodeNftConfig {
-	table := nodegrpc.NftTableName(uint64(id))
-	return nodeNftConfig{Config: config, Table: table, Template: nftTemplate(table)}
+func nftConfigResponse(id uint, config *nodegrpc.NftConfig) nodeNftConfig {
+	table := config.GetTable()
+	if table != nodegrpc.SingleNodeNftTable {
+		table = nodegrpc.NftTableName(uint64(id))
+	}
+	return nodeNftConfig{Config: config.GetConfig(), Table: table, Template: nftTemplate(table)}
 }
 
 func loopbackNftTemplate(table string, port uint64) string {
@@ -84,7 +87,7 @@ func (h *NodeHandler) GetNftConfig(c *gin.Context) {
 		nodeOperationError(c, err)
 		return
 	}
-	result := nftConfigResponse(id, config.GetConfig())
+	result := nftConfigResponse(id, config)
 	if loopbackPort > 0 {
 		result.Template = loopbackNftTemplate(result.Table, loopbackPort)
 	}
@@ -111,5 +114,5 @@ func (h *NodeHandler) ApplyNftConfig(c *gin.Context) {
 		return
 	}
 	h.recordOperation(c, id, "应用 nftables 配置")
-	response.Success(c, nftConfigResponse(id, config.GetConfig()))
+	response.Success(c, nftConfigResponse(id, config))
 }

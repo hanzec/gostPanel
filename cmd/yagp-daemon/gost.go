@@ -47,11 +47,7 @@ func ensureGost(ctx context.Context, configFile string) error {
 		return fmt.Errorf("load Gost configuration: %w", err)
 	}
 	gostBinary := filepath.Join(basePath, "gost")
-	if _, err = os.Stat(gostBinary); errors.Is(err, os.ErrNotExist) {
-		if err = downloadGost(ctx, gostBinary, false); err != nil {
-			return fmt.Errorf("install Gost binary: %w", err)
-		}
-	} else if err != nil {
+	if err = ensureGostBinary(ctx, gostBinary); err != nil {
 		return err
 	}
 	unit := fmt.Sprintf("yagp-gost-%d.service", config.NodeID)
@@ -74,6 +70,17 @@ func ensureGost(ctx context.Context, configFile string) error {
 		}
 	}
 	return nodebridge.WaitForGost(ctx, config)
+}
+
+func ensureGostBinary(ctx context.Context, path string) error {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if err = downloadGost(ctx, path, false); err != nil {
+			return fmt.Errorf("install Gost binary: %w", err)
+		}
+	} else if err != nil {
+		return err
+	}
+	return nil
 }
 
 func installGostUnit(ctx context.Context, unit, basePath, binary, config string) error {

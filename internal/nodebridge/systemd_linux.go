@@ -30,7 +30,7 @@ const (
 	maxLogBytes    = 4096
 )
 
-func gostServiceStatus(ctx context.Context, id uint64) (*nodegrpc.GostServiceStatus, error) {
+func gostServiceStatus(ctx context.Context, unit string) (*nodegrpc.GostServiceStatus, error) {
 	api, err := loadSystemd()
 	if err != nil {
 		return nil, err
@@ -40,11 +40,11 @@ func gostServiceStatus(ctx context.Context, id uint64) (*nodegrpc.GostServiceSta
 		return nil, err
 	}
 	defer api.busUnref(bus)
-	info, err := api.serviceStatus(ctx, bus, gostUnit(id))
+	info, err := api.serviceStatus(ctx, bus, unit)
 	return info, systemdRPCError(err)
 }
 
-func restartGostService(ctx context.Context, id uint64) (*nodegrpc.GostServiceStatus, error) {
+func restartGostService(ctx context.Context, unit string) (*nodegrpc.GostServiceStatus, error) {
 	api, err := loadSystemd()
 	if err != nil {
 		return nil, err
@@ -56,7 +56,6 @@ func restartGostService(ctx context.Context, id uint64) (*nodegrpc.GostServiceSt
 	defer api.busUnref(bus)
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	unit := gostUnit(id)
 	job, err := api.managerCall(ctx, bus, "RestartUnit", "ss", unit, "replace")
 	if err != nil {
 		return nil, systemdRPCError(err)
@@ -74,7 +73,7 @@ func restartGostService(ctx context.Context, id uint64) (*nodegrpc.GostServiceSt
 	return info, nil
 }
 
-func gostServiceLogs(ctx context.Context, id uint64, lines uint32) (*nodegrpc.GostLogsReply, error) {
+func gostServiceLogs(ctx context.Context, unit string, lines uint32) (*nodegrpc.GostLogsReply, error) {
 	api, err := loadSystemd()
 	if err != nil {
 		return nil, err
@@ -85,7 +84,7 @@ func gostServiceLogs(ctx context.Context, id uint64, lines uint32) (*nodegrpc.Go
 	// libsystemd journal handles stay on the same OS thread for their lifetime.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	journal, err := api.openJournal(gostUnit(id))
+	journal, err := api.openJournal(unit)
 	if err != nil {
 		return nil, systemdRPCError(err)
 	}
@@ -95,10 +94,6 @@ func gostServiceLogs(ctx context.Context, id uint64, lines uint32) (*nodegrpc.Go
 		return nil, systemdRPCError(err)
 	}
 	return &nodegrpc.GostLogsReply{Entries: entries}, nil
-}
-
-func gostUnit(id uint64) string {
-	return fmt.Sprintf("yagp-gost-%d.service", id)
 }
 
 type systemdAPI struct {

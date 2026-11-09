@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page">
-    <PageHeader eyebrow="AUDIT TRAIL" title="操作日志" description="按管理员、操作和资源追溯面板变更，查看来源与详情。">
+    <PageHeader title="操作日志" description="按管理员、操作和资源追溯面板变更，查看来源与详情。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData">刷新日志</el-button>
       </template>

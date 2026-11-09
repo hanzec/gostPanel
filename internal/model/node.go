@@ -33,16 +33,17 @@ type NodeUpgradePolicy struct {
 
 // GostNode Gost 节点模型
 type GostNode struct {
-	ID       uint       `gorm:"primaryKey" json:"id"`
-	Name     string     `gorm:"size:100;not null" json:"name"`         // 节点名称
-	Address  string     `gorm:"size:255;not null" json:"address"`      // 转发地址，优先使用 IPv4
-	Port     int        `gorm:"not null" json:"-"`                     // 保留已部署数据库中的非空列
-	Username string     `gorm:"size:50" json:"username"`               // API 认证用户名
-	Password string     `gorm:"size:255" json:"-"`                     // API 认证密码
-	Status   NodeStatus `gorm:"size:20;default:offline" json:"status"` // 状态
-	IPv4     string     `gorm:"column:ipv4;size:45" json:"ipv4"`
-	IPv6     string     `gorm:"column:ipv6;size:45" json:"ipv6"`
-	Region   string     `gorm:"size:2;not null;default:''" json:"region"`
+	ID        uint       `gorm:"primaryKey" json:"id"`
+	Name      string     `gorm:"size:100;not null" json:"name"`         // 节点名称
+	Address   string     `gorm:"size:255;not null" json:"address"`      // 转发地址，优先使用 IPv4
+	Port      int        `gorm:"not null" json:"-"`                     // 保留已部署数据库中的非空列
+	Username  string     `gorm:"size:50" json:"username"`               // API 认证用户名
+	Password  string     `gorm:"size:255" json:"-"`                     // API 认证密码
+	Status    NodeStatus `gorm:"size:20;default:offline" json:"status"` // 状态
+	IPv4      string     `gorm:"column:ipv4;size:45" json:"ipv4"`
+	IPv6      string     `gorm:"column:ipv6;size:45" json:"ipv6"`
+	Region    string     `gorm:"size:2;not null;default:''" json:"region"`
+	Addresses []string   `gorm:"serializer:json;type:text" json:"addresses,omitempty"`
 
 	RegistrationTokenHash string     `gorm:"size:64" json:"-"`
 	RegistrationExpiresAt *time.Time `json:"-"`

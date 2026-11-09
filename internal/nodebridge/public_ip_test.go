@@ -2,6 +2,7 @@ package nodebridge
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -15,6 +16,23 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+func TestPublicAddressesIncludesPublicInterfacesAndNAT(t *testing.T) {
+	var interfaces []net.Addr
+	for _, address := range []string{"198.51.100.1/24", "198.51.100.2/24", "2001:db8::1/64", "10.0.0.1/8", "fc00::1/64", "fe80::1/64", "127.0.0.1/8"} {
+		ip, network, err := net.ParseCIDR(address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		network.IP = ip
+		interfaces = append(interfaces, network)
+	}
+	const egress = "203.0.113.1"
+	v4, v6, addresses := publicAddresses(egress, "", interfaces)
+	if v4 != egress || v6 != "2001:db8::1" || !slices.Equal(addresses, []string{"198.51.100.1", "198.51.100.2", "2001:db8::1", egress}) {
+		t.Fatalf("primary addresses %q %q; all addresses %v", v4, v6, addresses)
+	}
+}
 
 func TestReportPublicIPChanges(t *testing.T) {
 	reports := &ipReportRecorder{requests: make(chan *nodegrpc.NodeIPsRequest, 8)}
@@ -48,10 +66,10 @@ func TestReportPublicIPChanges(t *testing.T) {
 	go func() {
 		defer close(done)
 		next := 0
-		reportPublicIPChanges(ctx, 42, nodegrpc.NewV1Client(session), func(context.Context) (string, string) {
+		reportPublicIPChanges(ctx, 42, nodegrpc.NewV1Client(session), func(context.Context) (string, string, []string) {
 			address := addresses[next]
 			next++
-			return address[0], address[1]
+			return address[0], address[1], nil
 		}, ticks)
 	}()
 

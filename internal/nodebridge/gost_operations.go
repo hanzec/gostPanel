@@ -9,13 +9,13 @@ import (
 )
 
 func (s *controlServer) GetGostServiceStatus(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.GostServiceStatus, error) {
-	return gostServiceStatus(ctx, s.config.NodeID)
+	return gostServiceStatus(ctx, s.config.runtimeUnit("gost"))
 }
 
 func (s *controlServer) RestartGostService(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.GostServiceStatus, error) {
-	return restartGostService(ctx, s.config.NodeID)
+	return restartGostService(ctx, s.config.runtimeUnit("gost"))
 }
 
 func (s *controlServer) GetGostLogs(ctx context.Context, req *nodegrpc.GostLogsRequest) (*nodegrpc.GostLogsReply, error) {
-	return gostServiceLogs(ctx, s.config.NodeID, req.GetLines())
+	return gostServiceLogs(ctx, s.config.runtimeUnit("gost"), req.GetLines())
 }

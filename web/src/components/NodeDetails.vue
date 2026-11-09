@@ -80,29 +80,12 @@
     </div>
   </section>
 
-  <div class="detail-admin">
-    <section class="ops-panel admin-card" aria-labelledby="node-admin-title">
-      <h2 id="node-admin-title"><el-icon aria-hidden="true"><Setting /></el-icon>节点管理</h2>
-      <p class="ops-muted">修改名称、备注或流量配额，也可用这些设置创建新节点。</p>
-      <div class="detail-buttons">
-        <el-button :icon="Edit" @click="$emit('action', 'edit')">编辑节点</el-button>
-        <el-button :icon="CopyDocument" @click="$emit('action', 'copy')">复制节点</el-button>
-      </div>
-    </section>
-    <section class="ops-panel admin-card admin-danger" aria-labelledby="node-delete-title">
-      <h2 id="node-delete-title"><el-icon aria-hidden="true"><Warning /></el-icon>危险操作</h2>
-      <p class="ops-muted">从面板移除此节点。删除后无法恢复。</p>
-      <div class="detail-buttons">
-        <el-button type="danger" plain :icon="Delete" @click="$emit('action', 'delete')">删除节点</el-button>
-      </div>
-    </section>
-  </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, Connection, CopyDocument, Delete, Download, Edit, Location, Lock, Monitor, PieChart, Setting, Warning } from '@element-plus/icons-vue'
-import { formatBytes, formatRegion, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
+import { ArrowRight, Connection, Download, Location, Lock, Monitor, PieChart, Setting } from '@element-plus/icons-vue'
+import { formatBytes, formatRegion, formatTime, nodeIPs, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 
 const props = defineProps({ node: { type: Object, required: true } })
 defineEmits(['action'])
@@ -114,8 +97,8 @@ const actions = [
 ]
 const endpoints = computed(() => [
   { label: '节点 IP', value: props.node.address || '待获取地址' },
-  { label: 'IPv4', value: props.node.ipv4 || '未上报' },
-  { label: 'IPv6', value: props.node.ipv6 || '未上报' }
+  { label: 'IPv4', value: nodeIPs(props.node, 4).join(' · ') || '未上报' },
+  { label: 'IPv6', value: nodeIPs(props.node, 6).join(' · ') || '不支持' }
 ])
 const hasQuota = computed(() => props.node.traffic_limit_bytes > 0)
 const quotaSynced = computed(() => ['active', 'blocked'].includes(props.node.traffic_quota_state))
@@ -156,7 +139,7 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .overview-section:first-child { padding-inline-end: 20px; }
 .overview-section + .overview-section { padding-inline-start: 20px; border-inline-start: 1px solid var(--ops-border); }
 .section-title { justify-content: space-between; }
-.detail-overview h2, .detail-admin h2, .detail-maintenance h2 {
+.detail-overview h2, .detail-maintenance h2 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -210,9 +193,7 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .detail-quota progress::-webkit-progress-value { background: currentColor; }
 .detail-quota progress::-moz-progress-bar { background: currentColor; }
 .detail-maintenance { display: grid; gap: 10px; }
-.maintenance-grid, .detail-admin { display: grid; gap: 12px; }
-.maintenance-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.detail-admin { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.maintenance-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .maintenance-card {
   display: flex;
   align-items: center;
@@ -237,13 +218,9 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .maintenance-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
 .maintenance-copy small { color: var(--ops-muted); font-size: 13px; }
 .maintenance-arrow { color: var(--ops-muted); }
-.admin-card { display: grid; align-content: start; gap: 8px; padding: 16px; }
-.admin-card p { font-size: 13px; }
-.admin-card .detail-buttons { margin-top: 4px; }
-.admin-danger h2 .el-icon { color: var(--ops-danger); }
 
 @media (max-width: 760px) {
-  .detail-overview, .maintenance-grid, .detail-admin { grid-template-columns: minmax(0, 1fr); }
+  .detail-overview, .maintenance-grid { grid-template-columns: minmax(0, 1fr); }
   .detail-overview { gap: 14px; padding: 14px; }
   .overview-section:first-child { padding-inline-end: 0; }
   .overview-section + .overview-section { padding: 14px 0 0; border-inline-start: 0; border-top: 1px solid var(--ops-border); }

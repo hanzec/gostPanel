@@ -13,14 +13,14 @@ import (
 
 const systemdUnsupported = "Gost service management requires a Linux systemd node build"
 
-func gostServiceStatus(context.Context, uint64) (*nodegrpc.GostServiceStatus, error) {
+func gostServiceStatus(context.Context, string) (*nodegrpc.GostServiceStatus, error) {
 	return nil, status.Error(codes.Unimplemented, systemdUnsupported)
 }
 
-func restartGostService(context.Context, uint64) (*nodegrpc.GostServiceStatus, error) {
+func restartGostService(context.Context, string) (*nodegrpc.GostServiceStatus, error) {
 	return nil, status.Error(codes.Unimplemented, systemdUnsupported)
 }
 
-func gostServiceLogs(context.Context, uint64, uint32) (*nodegrpc.GostLogsReply, error) {
+func gostServiceLogs(context.Context, string, uint32) (*nodegrpc.GostLogsReply, error) {
 	return nil, status.Error(codes.Unimplemented, systemdUnsupported)
 }

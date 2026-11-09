@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
 	"time"
 	"yagp/internal/model"
 
@@ -89,6 +91,7 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 		values["ipv4"] = node.IPv4
 		values["ipv6"] = node.IPv6
 		values["region"] = ""
+		values["addresses"] = nil
 		values["session_generation"] = gorm.Expr("session_generation + 1")
 		result := tx.Model(&model.GostNode{}).
 			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
@@ -104,7 +107,7 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 	})
 }
 
-func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string) error {
+func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses ...string) error {
 	// The session keeps its authenticated generation, but the addresses can change while it is connected.
 	query := r.DB.WithContext(ctx).Model(&model.GostNode{}).
 		Where("id = ? AND session_generation = ?", node.ID, node.SessionGeneration)
@@ -113,18 +116,40 @@ func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ip
 		return err
 	}
 	updates := make(map[string]any)
-	if ipv6 != "" && ipv6 != current.IPv6 {
-		updates["ipv6"] = ipv6
-		updates["address"] = gorm.Expr("COALESCE(NULLIF(ipv4, ''), ?)", ipv6)
+	// A transient public IP probe failure can hide the IPv4 address of a node behind NAT.
+	if ipv4 == "" {
+		ipv4 = current.IPv4
+		if ipv4 != "" && len(addresses) != 0 && !slices.Contains(addresses, ipv4) {
+			addresses = append(slices.Clone(addresses), ipv4)
+			slices.Sort(addresses)
+		}
 	}
-	if ipv4 != "" && ipv4 != current.IPv4 {
+	// Legacy daemons omit the snapshot and cannot report IPv6 removal.
+	if len(addresses) == 0 && ipv6 == "" {
+		ipv6 = current.IPv6
+	}
+	if ipv4 != current.IPv4 || ipv6 != current.IPv6 {
 		updates["ipv4"] = ipv4
+		updates["ipv6"] = ipv6
 		updates["address"] = ipv4
+		if ipv4 == "" {
+			updates["address"] = ipv6
+		}
+		updates["region"] = ""
+		if len(addresses) == 0 {
+			updates["addresses"] = nil
+		}
+	}
+	if len(addresses) != 0 {
+		encoded, err := json.Marshal(addresses)
+		if err != nil {
+			return err
+		}
+		updates["addresses"] = string(encoded)
 	}
 	if len(updates) == 0 {
 		return nil
 	}
-	updates["region"] = ""
 	// Keep the generation predicate on the write if the node re-enrolls concurrently.
 	result := query.Updates(updates)
 	if result.Error == nil && result.RowsAffected == 0 {
@@ -251,4 +276,10 @@ func (r *NodeRepository) UpdateStats(id uint, inputBytes, outputBytes int64) err
 			"output_bytes": gorm.Expr("output_bytes + ?", outputBytes),
 			"total_bytes":  gorm.Expr("total_bytes + ?", inputBytes+outputBytes),
 		}).Error
+}
+
+func (r *NodeRepository) SetStats(ctx context.Context, id uint, inputBytes, outputBytes int64) error {
+	return r.DB.WithContext(ctx).Model(&model.GostNode{}).Where("id = ?", id).Updates(map[string]any{
+		"input_bytes": inputBytes, "output_bytes": outputBytes, "total_bytes": inputBytes + outputBytes,
+	}).Error
 }

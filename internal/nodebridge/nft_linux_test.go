@@ -86,7 +86,9 @@ esac
 	}
 	path := filepath.Join(dir, ".traffic-quota.json")
 	command := filepath.Join(bin, "nft")
-	if err := applyTrafficQuota(ctx, command, path, "yagp_quota_42", trafficQuotaState{LimitBytes: 100}, true); status.Code(err) != codes.FailedPrecondition {
+	quota := trafficQuotaState{LimitBytes: 100}
+	batch := trafficQuotaBatch("yagp_quota_42", quota)
+	if err := applyTrafficQuota(ctx, command, path, quota, batch); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("quota replacement returned %v", err)
 	}
 	if state, err := readTrafficQuotaState(path); err != nil || state != nil {
@@ -95,7 +97,7 @@ esac
 	if err := applyNftConfig(ctx, 42, dir, previous); status.Code(err) != codes.Internal {
 		t.Fatalf("staging config over a directory returned %v", err)
 	}
-	if err := applyTrafficQuota(ctx, command, dir, "yagp_quota_42", trafficQuotaState{LimitBytes: 100}, true); status.Code(err) != codes.Internal {
+	if err := applyTrafficQuota(ctx, command, dir, quota, batch); status.Code(err) != codes.Internal {
 		t.Fatalf("staging quota over a directory returned %v", err)
 	}
 	entries, err := os.ReadDir(dir)

@@ -162,8 +162,8 @@ func registrationTokenHash(token string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (s *NodeService) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string) error {
-	return s.nodeRepo.UpdateIPs(ctx, node, ipv4, ipv6)
+func (s *NodeService) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses ...string) error {
+	return s.nodeRepo.UpdateIPs(ctx, node, ipv4, ipv6, addresses...)
 }
 
 func (s *NodeService) RevokeCredentials(ctx context.Context, id uint) error {
@@ -252,7 +252,7 @@ func (s *NodeService) List(req *dto.NodeListReq) ([]model.GostNode, int64, error
 	// 关键词搜索
 	if req.Keyword != "" {
 		keyword := "%" + req.Keyword + "%"
-		opt.Conditions["name LIKE ? OR address LIKE ? OR ipv4 LIKE ? OR ipv6 LIKE ?"] = []any{keyword, keyword, keyword, keyword}
+		opt.Conditions["name LIKE ? OR address LIKE ? OR ipv4 LIKE ? OR ipv6 LIKE ? OR addresses LIKE ?"] = []any{keyword, keyword, keyword, keyword, keyword}
 	}
 
 	return s.nodeRepo.List(opt)

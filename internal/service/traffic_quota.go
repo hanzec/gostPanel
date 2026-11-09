@@ -29,7 +29,12 @@ func lockTrafficQuota(nodeID uint) func() {
 	return lock.Unlock
 }
 
-func syncTrafficQuota(repo *repository.NodeRepository, client *gost.Client, node model.GostNode, services []gost.ServiceConfig, now time.Time) error {
+func syncTrafficQuota(repo *repository.NodeRepository, client *gost.Client, nodeID uint, services []gost.ServiceConfig, now time.Time) error {
+	// The caller may have loaded its node before a calibration acquired the quota lock.
+	node, err := repo.FindByID(nodeID)
+	if err != nil {
+		return err
+	}
 	window := model.TrafficQuotaWindow(node.TrafficResetPeriod, now)
 	var used uint64
 	switch {
@@ -52,11 +57,11 @@ func syncTrafficQuota(repo *repository.NodeRepository, client *gost.Client, node
 		state := model.TrafficQuotaPending
 		if status.Code(err) == codes.Unimplemented {
 			if limit == 0 && node.TrafficQuotaWindowStart == model.TrafficQuotaWindowUnset {
-				return repo.UpdateTrafficQuota(node, window, 0, "")
+				return repo.UpdateTrafficQuota(*node, window, 0, "")
 			}
 			state = model.TrafficQuotaUnsupported
 		}
-		if writeErr := repo.UpdateTrafficQuota(node, node.TrafficQuotaWindowStart, node.TrafficQuotaUsedBytes, state); writeErr != nil {
+		if writeErr := repo.UpdateTrafficQuota(*node, node.TrafficQuotaWindowStart, node.TrafficQuotaUsedBytes, state); writeErr != nil {
 			logger.Warnf("[Sync] 保存节点 %d 的流量配额状态失败: %v", node.ID, writeErr)
 		}
 		return err
@@ -69,7 +74,7 @@ func syncTrafficQuota(repo *repository.NodeRepository, client *gost.Client, node
 			state = model.TrafficQuotaBlocked
 		}
 	}
-	return repo.UpdateTrafficQuota(node, window, reported, state)
+	return repo.UpdateTrafficQuota(*node, window, reported, state)
 }
 
 func quotaPorts(services []gost.ServiceConfig) (tcp, udp []uint32) {
@@ -132,7 +137,7 @@ func createServiceWithTrafficQuota(repo *repository.NodeRepository, client *gost
 	}
 	current, err := client.GetConfig()
 	if err == nil {
-		err = syncTrafficQuota(repo, client, node, current.Services, time.Now())
+		err = syncTrafficQuota(repo, client, node.ID, current.Services, time.Now())
 	}
 	if err != nil {
 		if created {

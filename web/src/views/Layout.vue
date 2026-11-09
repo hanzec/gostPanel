@@ -20,11 +20,6 @@
             >
               <el-icon aria-hidden="true"><Menu /></el-icon>
             </button>
-            <nav class="console-crumb" aria-label="面包屑">
-              <RouterLink to="/dashboard">控制台</RouterLink>
-              <span aria-hidden="true">/</span>
-              <span aria-current="page">{{ route.meta.title }}</span>
-            </nav>
           </div>
 
           <div v-if="username" class="console-identity">
@@ -78,13 +73,11 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
 import { Loading, Menu, SwitchButton, User } from '@element-plus/icons-vue'
 import { getUserInfo } from '@/api/auth'
 import ConsoleNav from '@/components/ConsoleNav.vue'
 import { defaultLogoUrl, useSystemStore } from '@/store/system'
 
-const route = useRoute()
 const system = useSystemStore()
 const upstream = 'https://github.com/code-gopher/gostPanel'
 const mainContent = ref(null)
@@ -166,18 +159,13 @@ onMounted(loadIdentity)
   padding-inline: 28px;
 }
 
-.console-topbar__inner, .console-topbar__location, .console-crumb, .console-identity {
+.console-topbar__inner, .console-topbar__location, .console-identity {
   display: flex;
   min-width: 0;
   align-items: center;
 }
 
 .console-topbar__inner { min-height: 56px; justify-content: space-between; gap: 10px; }
-.console-topbar__location, .console-crumb { gap: 10px; }
-.console-crumb { color: var(--ops-faint); font-size: 13px; }
-.console-crumb a { color: var(--ops-muted); text-decoration: none; white-space: nowrap; }
-.console-crumb a:hover { color: var(--ops-accent); }
-.console-crumb [aria-current] { color: var(--ops-text); font-weight: 600; white-space: nowrap; }
 
 .console-identity { gap: 9px; }
 .console-identity__text { display: grid; min-width: 0; line-height: 1.4; }
@@ -240,7 +228,7 @@ onMounted(loadIdentity)
   .console-topbar__inner, .console-main, .console-footer { padding-inline: 16px; }
   .console-main { padding-block: 20px 28px; }
   .console-topbar__location { gap: 8px; }
-  .console-crumb a, .console-crumb [aria-hidden], .console-identity__avatar { display: none; }
+  .console-identity__avatar { display: none; }
   .console-identity__text strong { max-width: 12ch; }
 }
 </style>

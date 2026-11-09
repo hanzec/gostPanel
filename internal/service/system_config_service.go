@@ -1,10 +1,12 @@
 package service
 
 import (
+	"yagp/internal/buildinfo"
 	"yagp/internal/config"
 	"yagp/internal/dto"
 	"yagp/internal/errors"
 	"yagp/internal/repository"
+	"yagp/pkg/upgrade"
 )
 
 // SystemConfigService 系统配置服务
@@ -66,6 +68,9 @@ func (s *SystemConfigService) GetPublicConfig() (*dto.PublicSystemConfigResp, er
 	}
 	if cfg := config.Get(); cfg.Report.Listen != "" {
 		public.Host = cfg.Host
+	}
+	if upgrade.ValidateTag("daemon", buildinfo.Version) {
+		public.DaemonVersion = buildinfo.Version
 	}
 	return public, nil
 }

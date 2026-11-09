@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"yagp/internal/buildinfo"
 	"yagp/internal/model"
 	"yagp/internal/service"
 	"yagp/pkg/gost"
@@ -37,7 +38,7 @@ func (f *handlerHTTPFixture) enrollFixtureNode(t *testing.T, name string, nodeCo
 	dispatch := nodegrpc.NewDispatcher(nodeControl,
 		nodegrpc.V1_Execute_FullMethodName, nodegrpc.V1_GetGostServiceStatus_FullMethodName, nodegrpc.V1_RestartGostService_FullMethodName,
 		nodegrpc.V1_GetGostLogs_FullMethodName, nodegrpc.V1_GetNftConfig_FullMethodName, nodegrpc.V1_ApplyNftConfig_FullMethodName,
-		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName)
+		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName, nodegrpc.V1_SyncTrafficQuota_FullMethodName)
 	startTestReportStream(t, t.Context(), startTestReportServer(t, f.db), node, func(ctx context.Context, method string, body []byte) ([]byte, error) {
 		if err := nodeControl.before(method); err != nil {
 			return nil, err
@@ -53,6 +54,8 @@ type handlerNodeControl struct {
 	mu          sync.Mutex
 	nft         string
 	upgrade     *nodegrpc.NodeUpgradeRequest
+	quota       *nodegrpc.TrafficQuotaRequest
+	calibrates  bool
 	failures    map[string]codes.Code
 	restartCall int
 }
@@ -125,6 +128,73 @@ func (n *handlerNodeControl) StartUpgrade(_ context.Context, req *nodegrpc.NodeU
 	defer n.mu.Unlock()
 	n.upgrade = req
 	return &nodegrpc.NodeUpgradeStatus{Component: req.GetComponent(), TargetVersion: req.GetVersion(), State: "queued"}, nil
+}
+
+func (n *handlerNodeControl) SyncTrafficQuota(_ context.Context, req *nodegrpc.TrafficQuotaRequest) (*nodegrpc.TrafficQuotaReply, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.quota = req
+	if n.calibrates {
+		return &nodegrpc.TrafficQuotaReply{UsedBytes: req.GetCalibratedUsedBytes(), Calibrated: true}, nil
+	}
+	return &nodegrpc.TrafficQuotaReply{UsedBytes: req.GetUsedBytes()}, nil
+}
+
+func TestNodeHTTPTrafficCalibration(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	control := &handlerNodeControl{
+		failures: make(map[string]codes.Code),
+		admin: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, `{"services":[{"name":"rule-1","addr":":9000","handler":{"type":"forward"},"listener":{"type":"tcp"}}]}`)
+		}),
+	}
+	node := f.enrollFixtureNode(t, "calibrate", control)
+	path := fmt.Sprintf("/nodes/%d/traffic", node.ID)
+	for _, invalid := range []string{`{`, `{"input_bytes":-1,"output_bytes":0}`, `{"input_bytes":1}`, `{"input_bytes":9223372036854775807,"output_bytes":1}`, `{"input_bytes":0,"quota_used_bytes":0}`, `{"quota_used_bytes":9223372036854775808}`} {
+		f.request(t, "PUT", path, invalid, 400)
+	}
+	f.request(t, "PUT", "/nodes/0/traffic", `{"input_bytes":0,"output_bytes":0}`, 400)
+	f.request(t, "PUT", "/nodes/999/traffic", `{"input_bytes":0,"output_bytes":0}`, 404)
+	f.request(t, "PUT", path, `{"quota_used_bytes":0}`, 409)
+	if err := f.db.Model(&node).Updates(map[string]any{
+		"traffic_limit_bytes": 100, "traffic_quota_used_bytes": 140, "traffic_quota_state": model.TrafficQuotaBlocked, "traffic_quota_window_start": 0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.request(t, "PUT", path, `{"input_bytes":30,"output_bytes":65}`, 200)
+	readNode := func() model.GostNode {
+		t.Helper()
+		var stored model.GostNode
+		if err := f.db.First(&stored, node.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		return stored
+	}
+	if stored := readNode(); stored.InputBytes != 30 || stored.OutputBytes != 65 || stored.TotalBytes != 95 || stored.TrafficQuotaUsedBytes != 140 {
+		t.Fatalf("incorrect totals after calibration: %+v", stored)
+	}
+	f.request(t, "PUT", path, `{"quota_used_bytes":0}`, 501)
+	if stored := readNode(); stored.TrafficQuotaUsedBytes != 140 {
+		t.Fatalf("an old daemon changed the panel's quota counter: %d", stored.TrafficQuotaUsedBytes)
+	}
+	control.mu.Lock()
+	control.calibrates = true
+	control.mu.Unlock()
+	f.request(t, "PUT", path, `{"quota_used_bytes":0}`, 200)
+	if stored := readNode(); stored.TotalBytes != 95 || stored.TrafficQuotaUsedBytes != 0 || stored.TrafficQuotaState != model.TrafficQuotaActive {
+		t.Fatalf("incorrect quota after calibration: %+v", stored)
+	}
+	control.mu.Lock()
+	request := control.quota
+	control.mu.Unlock()
+	if request.CalibratedUsedBytes == nil || request.GetCalibratedUsedBytes() != 0 || request.GetUsedBytes() != 140 || len(request.TcpPorts) != 1 || request.TcpPorts[0] != 9000 {
+		t.Fatalf("incorrect calibration RPC: %v", request)
+	}
+	f.request(t, "PUT", path, `{"quota_used_bytes":200}`, 200)
+	if stored := readNode(); stored.TrafficQuotaUsedBytes != 200 || stored.TrafficQuotaState != model.TrafficQuotaBlocked {
+		t.Fatalf("raising usage above the limit failed: %+v", stored)
+	}
 }
 
 type handlerReleaseTransport func(*http.Request) (*http.Response, error)
@@ -234,6 +304,9 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 }
 
 func TestNodeHTTPUpgradeLifecycle(t *testing.T) {
+	version := buildinfo.Version
+	buildinfo.Version = "0.1.2-abcdef1"
+	t.Cleanup(func() { buildinfo.Version = version })
 	f := newHandlerHTTPFixture(t)
 	f.registerNodes()
 	control := &handlerNodeControl{failures: make(map[string]codes.Code)}
@@ -246,8 +319,6 @@ func TestNodeHTTPUpgradeLifecycle(t *testing.T) {
 		switch req.URL.String() {
 		case "https://api.github.com/repos/go-gost/gost/releases/latest":
 			tag = "v3.1.0"
-		case "https://api.github.com/repos/hanzec/yagp/releases/latest":
-			tag = "0.1.2-abcdef1"
 		default:
 			return nil, fmt.Errorf("unexpected release lookup: %s", req.URL)
 		}

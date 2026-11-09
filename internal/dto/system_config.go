@@ -12,10 +12,11 @@ type SystemConfigResp struct {
 }
 
 type PublicSystemConfigResp struct {
-	SiteTitle string `json:"siteTitle"`
-	LogoURL   string `json:"logoUrl"`
-	Copyright string `json:"copyright"`
-	Host      string `json:"host"`
+	SiteTitle     string `json:"siteTitle"`
+	LogoURL       string `json:"logoUrl"`
+	Copyright     string `json:"copyright"`
+	Host          string `json:"host"`
+	DaemonVersion string `json:"daemonVersion,omitempty"`
 }
 
 type EmailConfigResp struct {

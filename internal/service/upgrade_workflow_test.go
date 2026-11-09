@@ -39,16 +39,13 @@ func TestManualUpgradeValidatesStateAndStartsStableRelease(t *testing.T) {
 			}
 			_, _ = fmt.Fprint(w, "{\"tag_name\":\"v3.2.8\"}")
 		case "/repos/hanzec/yagp/releases/latest":
-			if releaseFailures.Load()&2 != 0 {
-				http.Error(w, "unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			_, _ = fmt.Fprint(w, "{\"tag_name\":\"0.1.90-abcdef0\"}")
+			_, _ = fmt.Fprint(w, "{\"tag_name\":\"0.1.99-abcdef0\"}")
 		default:
 			http.NotFound(w, r)
 		}
 	})
 	s := NewNodeUpgradeService(db)
+	s.panelVersion = "0.1.90-abcdef0"
 	ctx := context.Background()
 
 	_, err := s.Get(ctx, 99)
@@ -98,13 +95,31 @@ func TestManualUpgradeValidatesStateAndStartsStableRelease(t *testing.T) {
 	}
 	_, err = s.Get(ctx, node.ID)
 	requireServiceError(t, err, nil)
-	if requests.Load() != 2 {
-		t.Fatalf("version lookup failed to reuse the two cached responses: %d requests", requests.Load())
+	if requests.Load() != 1 {
+		t.Fatalf("expected one cached Gost lookup and no daemon lookup, got %d requests", requests.Load())
 	}
 	response, err := s.Upgrade(ctx, node.ID, "gost")
 	requireServiceError(t, err, nil)
 	if response.GetState() != "succeeded" || len(remote.started) != 1 || <-remote.started != "gost/v3.2.8" {
 		t.Fatalf("upgrade response = %+v", response)
+	}
+	before := requests.Load()
+	_, err = s.Upgrade(ctx, node.ID, "daemon")
+	requireServiceError(t, err, nil)
+	if len(remote.started) != 1 || <-remote.started != "daemon/0.1.90-abcdef0" || requests.Load() != before {
+		t.Fatal("manual daemon upgrade must target the running panel version without a remote lookup")
+	}
+	remote.setStatus(&nodegrpc.NodeUpgradeStatus{Supported: true, DaemonVersion: s.panelVersion}, nil)
+	_, err = s.Upgrade(ctx, node.ID, "daemon")
+	requireUpgradeCode(t, err, codes.FailedPrecondition)
+	remote.setStatus(&nodegrpc.NodeUpgradeStatus{Supported: true, DaemonVersion: "0.1.99-abcdef0", RuntimeUpdateRequired: true}, nil)
+	_, err = s.Upgrade(ctx, node.ID, "daemon")
+	requireUpgradeCode(t, err, codes.FailedPrecondition)
+	remote.setStatus(&nodegrpc.NodeUpgradeStatus{Supported: true, DaemonVersion: s.panelVersion, RuntimeUpdateRequired: true}, nil)
+	_, err = s.Upgrade(ctx, node.ID, "daemon")
+	requireServiceError(t, err, nil)
+	if len(remote.started) != 1 || <-remote.started != "daemon/0.1.90-abcdef0" {
+		t.Fatal("same-version upgrade must be available when the unit layout needs migration")
 	}
 	remote.setStatus(&nodegrpc.NodeUpgradeStatus{Supported: true, GostVersion: "v3.2.8"}, nil)
 	_, err = s.Upgrade(ctx, node.ID, "gost")
@@ -115,20 +130,10 @@ func TestManualUpgradeValidatesStateAndStartsStableRelease(t *testing.T) {
 	if e, ok := err.(*bizerrors.BizError); !ok || e.HTTPCode != http.StatusBadGateway {
 		t.Fatalf("upstream lookup error = %v", err)
 	}
-	for _, tc := range []struct {
-		failures int32
-		reason   string
-	}{
-		{1, "暂时无法查询 Gost 的最新稳定版本"},
-		{2, "暂时无法查询 yagp-daemon 的最新稳定版本"},
-		{3, "暂时无法查询 Gost 和 yagp-daemon 的最新稳定版本"},
-	} {
-		releaseFailures.Store(tc.failures)
-		view, err := NewNodeUpgradeService(db).Get(ctx, node.ID)
-		requireServiceError(t, err, nil)
-		if view.Reason != tc.reason {
-			t.Fatalf("partial release failures %d yielded %q", tc.failures, view.Reason)
-		}
+	view, err = NewNodeUpgradeService(db).Get(ctx, node.ID)
+	requireServiceError(t, err, nil)
+	if view.Reason != "暂时无法查询 Gost 的最新稳定版本" {
+		t.Fatalf("Gost lookup failure yielded %q", view.Reason)
 	}
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()

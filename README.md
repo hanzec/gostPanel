@@ -18,7 +18,7 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 ### 安装新节点
 
-先在面板配置 [TLS 注册和上报](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写节点名称，打开安装窗口并获取一次性令牌。在目标 Linux 主机以 root 身份执行下方命令，`RELEASE_TAG` 使用与面板一致的发布标签。
+先在面板配置 [TLS 注册和上报](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写节点名称，打开安装窗口并获取一次性令牌。每台 Linux 主机安装一个节点。面板生成的安装命令使用当前面板的发布标签，也可以将下方的 `RELEASE_TAG` 替换为该标签后以 root 身份执行。
 
 把命令中的地址和令牌替换为面板提供的值。令牌有效期为 15 分钟，注册成功后立即失效。重新签发会撤销上一枚未使用的令牌。[节点安装脚本](./scripts/install_node.sh)
 
@@ -32,7 +32,7 @@ curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/s
 
 ### 升级已安装节点
 
-从公网 gRPC 迁移到 WebSocket 前，先备份面板数据库和节点配置。更新面板和反向代理后，等节点在面板中显示离线，再为它签发新的注册令牌。在节点主机上以 root 身份执行原地重新注册命令，将 `42` 换成原节点 ID。脚本暂停 `yagp-daemon`，写入新凭据后启动新版守护进程。现有 Gost 服务继续转发，沿用节点 ID 和 nftables 配置。支持 systemd 和 OpenRC。
+从公网 gRPC 迁移到 WebSocket 前，先备份面板数据库和节点配置。更新面板和反向代理后，等节点在面板中显示离线，再为它签发新的注册令牌。在节点主机上以 root 身份执行原地重新注册命令，将 `42` 换成原节点 ID。脚本暂停 `yagp-daemon`，写入新凭据后启动新版守护进程，并保留节点 ID 和 nftables 配置。systemd 服务迁移期间转发会短暂中断。支持 systemd 和 OpenRC。
 
 ```bash
 version='RELEASE_TAG'
@@ -80,7 +80,7 @@ AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
 docker compose up -d
 ```
 
-镜像支持 Linux amd64 和 arm64。部署 `main` 发布的版本时，如果 GitHub 默认分支仍是 `master`，请在 `docker-compose.yml` 中将镜像设为 `ghcr.io/hanzec/yagp:RELEASE_TAG`。`latest` 和面板复制命令使用的 `/HEAD/` 仍跟随默认分支，节点应按上文的固定标签命令安装、重新注册或升级。
+镜像支持 Linux amd64 和 arm64。可以在 `docker-compose.yml` 中将镜像设为 `ghcr.io/hanzec/yagp:RELEASE_TAG` 来固定面板版本。节点的安装、重新注册和升级使用同一发布标签。
 
 Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板容器中的 `/app/config`、`/app/data` 和 `/app/logs`。启动时，初始化服务会在 `config/config.yaml` 缺失时从镜像复制模板。面板以只读方式挂载配置，已有配置会继续使用。
 
@@ -208,37 +208,39 @@ report:
 
 参照 Komari，`yagp-daemon` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。直连部署可以在探测失败时使用注册连接的来源 IP。通过反向代理接入时，节点至少需探测到一种地址。转发和隧道优先使用记录到的 IPv4，其次使用 IPv6。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
 
-`yagp-daemon` 启动时立即探测一次，随后每 5 分钟探测。节点用现有凭据通过 TLS 上报地址变化，面板自动更新连接地址。某一地址族探测失败时保留其上次记录；上报失败则在下一轮重试。[Komari 上报周期](https://komari-monitor.github.io/komari-document/dev/agent.html)
+`yagp-daemon` 启动时及之后每 5 分钟探测一次。上报包含公网出口地址和网卡上的公网地址，列表和详情按 IPv4、IPv6 展示，缺少 IPv6 时显示「不支持」。面板用同一份地址列表更新连接地址和 Gost Relay 白名单。上报失败会在下一轮重试。[Komari 上报周期](https://komari-monitor.github.io/komari-document/dev/agent.html)
 
 Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 WebSocket 会话下发配置、读取日志和触发升级，节点执行后沿同一会话返回结果。节点断线后会自动重连，进行中的命令会报告连接错误。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
-如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-daemon/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载最新版 `yagp-daemon-linux-<架构>.tar.gz`，可用 `YAGP_DAEMON_VERSION` 指定发布版本。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_DAEMON_BIN=/path/to/yagp-daemon` 指定对应的二进制。
+如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-daemon/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本通过 `YAGP_DAEMON_VERSION` 选择与面板对应的发布包。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_DAEMON_BIN=/path/to/yagp-daemon` 指定对应的二进制。
 
-安装脚本为每个实例启用 `yagp-daemon-<ID>.service`。守护程序启动前检查对应的 `yagp-gost-<ID>.service`，在服务或程序缺少时尝试补装，并等待本机 Gost API 就绪。Gost 程序从官方 GitHub Releases 下载。
+systemd 节点使用 `yagp-daemon.service` 和 `yagp-gost.service`。Gost 在守护进程之后启动，并随守护进程停止或重启。Gost 程序从官方 GitHub Releases 下载。配置继续位于 `/etc/yagp-daemon/<ID>`。
 
-如果注册后服务启动失败，使用 `journalctl -u yagp-daemon-<ID> -u yagp-gost-<ID>` 查看日志。配置已写入实例目录时，排除故障后执行 `systemctl enable --now yagp-daemon-<ID>`。如果注册已完成但本地配置未写入，请重新签发令牌。
+如果注册后服务启动失败，使用 `journalctl -u yagp-daemon -u yagp-gost` 查看日志。配置已写入实例目录时，排除故障后按脚本提示运行 `update-runtime`。如果注册已完成但本地配置未写入，请重新签发令牌。
 
 执行 `bash scripts/install_node.sh uninstall --node-id <ID>` 可卸载实例并保留配置。给仍在同一台服务器上的节点更换公网凭据时，使用[原地重新注册](#升级已安装节点)。
 
 ### 升级已注册的节点
 
-在 **节点管理** 点击节点行，再打开 **版本与升级**，可查看 Gost 和 `yagp-daemon` 的当前版本、最新稳定版本和升级结果。每个节点可分别开启两个组件的自动升级，开关默认关闭。面板每小时检查一次已开启自动升级的在线节点，并依次处理。也可以在对话框中手动升级任一组件。
+在 **节点管理** 点击节点行，再打开 **版本与升级**，可查看已安装版本、目标版本和升级结果。Gost 的目标是官方最新稳定版，`yagp-daemon` 的目标是当前运行的面板版本。每个节点可分别开启两个组件的自动升级，开关默认关闭。面板每小时检查一次已开启自动升级的在线节点，并依次处理。也可以在对话框中手动升级任一组件。
 
 节点列表和详情的地区由面板用 GeoJS 查询已上报的公网 IP。优先查询 IPv4，未查到时再尝试 IPv6。
 
 在线升级适用于 systemd 节点。面板和节点需要能通过 HTTPS 访问 GitHub。节点校验发布包的 SHA-256，再替换对应的二进制并重启服务。配置、凭据、证书和节点 ID 都会保留。Gost 重启会中断该实例正在转发的连接，新版服务启动检查失败时会尝试恢复旧版。
 
-迁移到 WebSocket 后，可使用[一键升级命令](#升级已安装节点)更新已安装的守护进程。`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 的 systemd 实例，默认使用最新发布包。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 时，请选择与面板对应的版本。
+迁移到 WebSocket 后，可使用[一键升级命令](#升级已安装节点)更新已安装的守护进程。`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 的 systemd 实例，需要通过 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 选择与面板对应的版本。旧版的编号服务在升级到支持新布局的版本时迁移，首次由旧守护程序完成二进制升级的节点可再执行一次同版本升级。旧主机如果安装了多个节点，需先卸载多余实例。
 
 ### 查看和重启 Gost 服务
 
-在节点详情的 **Gost 服务** 中查看 `yagp-gost-<ID>.service` 的状态和最近 100 条日志，也可重启该实例。重启会中断该实例的活动转发连接。
+在节点详情的 **Gost 服务** 中查看 `yagp-gost.service` 的状态和最近 100 条日志，也可重启该实例。重启会中断该实例的活动转发连接。
 
 该功能使用节点上的 `libsystemd.so.0`。发布包包含 systemd 和通用构建，安装脚本会按服务管理器选择。在 Linux glibc 主机可用 `make build-node-systemd` 构建 systemd 版本。
 
 ### 设置节点流量配额
 
-在 **节点管理 → 添加节点** 或节点详情的 **编辑节点** 中填写流量上限，单位为 GiB，支持小数。默认不设上限，留空或填 `0` 即可解除限制。可选择不重置、每日、每周或每月重置。重置按北京时间（UTC+8）计算，每天、每周一或每月 1 日的零点开启新周期。
+在 **节点管理 → 添加节点** 或节点详情的 **配置 → 基本设置** 中填写流量上限，单位为 GiB，支持小数。默认不设上限，留空或填 `0` 即可解除限制。可选择不重置、每日、每周或每月重置。重置按北京时间（UTC+8）计算，每天、每周一或每月 1 日的零点开启新周期。
+
+在 **配置 → 流量校准** 可分别设置累计入站、累计出站及当前周期配额用量，单位为字节。累计总量为入站与出站之和。校准配额需要节点在线、已设上限并运行支持校准的守护程序，保存后从新用量继续计量和限流。
 
 配额按面板管理的 TCP 和 UDP 转发端口收发的数据包字节计量，包含 IP 首部和重传。隧道入口和出口 Relay 的流量分别计入各自节点的额度。首次启用不重置配额时，使用已有的节点累计流量作为起始用量。首次启用周期配额时，从启用开始计量。节点清单分别显示内核配额用量和 Gost 应用层累计流量，两者统计口径不同。周期重置时，历史累计流量继续保留。
 
@@ -252,7 +254,7 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 We
 
 在装有 `nftables` 的 Linux 节点上，通过节点详情的 **nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。守护进程连接后通过 WebSocket 获取配置和模板，并在实例目录中缓存为 `panel-config.pb`。节点可运行 `/etc/yagp-daemon/<ID>/yagp-daemon nft-template -c /etc/yagp-daemon/<ID>/node.yaml` 读取缓存中的模板。
 
-配置使用 `{"nftables":[...]}`，只允许为该节点专用的 `inet yagp_node_<ID>` 表添加链、规则、集合等对象。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除该表。卸载时安装脚本会清理该表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
+配置使用 `{"nftables":[...]}`，只允许为节点专用的 `inet yagp_node` 表添加链、规则、集合等对象。配额使用独立的 `inet yagp_quota` 表。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除规则表。升级运行布局时会迁移原有编号规则表及配额用量。卸载时脚本会清理节点规则和配额表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
 
 ### Gost Relay 来源 IP 白名单
 

@@ -21,6 +21,7 @@ import (
 )
 
 const trafficQuotaName = "traffic"
+const singleNodeQuotaTable = "yagp_quota"
 
 type trafficQuotaState struct {
 	LimitBytes  uint64   `json:"limit_bytes"`
@@ -28,17 +29,22 @@ type trafficQuotaState struct {
 	WindowStart int64    `json:"window_start"`
 	TCPPorts    []uint32 `json:"tcp_ports"`
 	UDPPorts    []uint32 `json:"udp_ports"`
+	calibrating bool
 }
 
 func (s *controlServer) SyncTrafficQuota(ctx context.Context, request *nodegrpc.TrafficQuotaRequest) (*nodegrpc.TrafficQuotaReply, error) {
-	used, err := syncTrafficQuota(ctx, s.config, trafficQuotaState{
+	next := trafficQuotaState{
 		LimitBytes: request.GetLimitBytes(), UsedBytes: request.GetUsedBytes(), WindowStart: request.GetWindowStart(),
 		TCPPorts: request.GetTcpPorts(), UDPPorts: request.GetUdpPorts(),
-	})
+	}
+	if request.CalibratedUsedBytes != nil {
+		next.UsedBytes, next.calibrating = request.GetCalibratedUsedBytes(), true
+	}
+	used, err := syncTrafficQuota(ctx, s.config, next)
 	if err != nil {
 		return nil, err
 	}
-	return &nodegrpc.TrafficQuotaReply{UsedBytes: used}, nil
+	return &nodegrpc.TrafficQuotaReply{UsedBytes: used, Calibrated: next.calibrating}, nil
 }
 
 func restoreTrafficQuota(ctx context.Context, cfg Config) error {
@@ -56,6 +62,7 @@ func syncTrafficQuota(ctx context.Context, cfg Config, next trafficQuotaState) (
 	}
 	clearing := next.LimitBytes == 0 && next.WindowStart == -1
 	if next.LimitBytes > math.MaxInt64 || (next.WindowStart < 0 && !clearing) ||
+		(next.calibrating && (next.LimitBytes == 0 || next.UsedBytes > math.MaxInt64)) ||
 		!validTrafficQuotaPorts(next.TCPPorts) || !validTrafficQuotaPorts(next.UDPPorts) {
 		return 0, status.Error(codes.InvalidArgument, "invalid traffic quota limit, window or ports")
 	}
@@ -67,6 +74,10 @@ func syncTrafficQuota(ctx context.Context, cfg Config, next trafficQuotaState) (
 	}
 	path := trafficQuotaPath(cfg.ConfigFile)
 	table := fmt.Sprintf("yagp_quota_%d", cfg.NodeID)
+	var legacy string
+	if cfg.RuntimeLayout >= singleNodeLayoutVersion {
+		table, legacy = singleNodeQuotaTable, table
+	}
 	nftApplyMu.Lock()
 	defer nftApplyMu.Unlock()
 	previous, err := readTrafficQuotaState(path)
@@ -77,10 +88,16 @@ func syncTrafficQuota(ctx context.Context, cfg Config, next trafficQuotaState) (
 	if err != nil {
 		return 0, trafficQuotaNftError(ctx, "read traffic quota", err)
 	}
+	if live == nil && legacy != "" {
+		live, err = readLiveTrafficQuota(ctx, nft, legacy)
+		if err != nil {
+			return 0, trafficQuotaNftError(ctx, "read legacy traffic quota", err)
+		}
+	}
 	if clearing {
 		next.UsedBytes = 0
 		next.TCPPorts, next.UDPPorts = nil, nil
-	} else if previous == nil || previous.WindowStart == next.WindowStart {
+	} else if !next.calibrating && (previous == nil || previous.WindowStart == next.WindowStart) {
 		if previous != nil {
 			next.UsedBytes = max(next.UsedBytes, previous.UsedBytes)
 		}
@@ -94,12 +111,19 @@ func syncTrafficQuota(ctx context.Context, cfg Config, next trafficQuotaState) (
 	samePolicy := previous != nil && previous.samePolicy(next)
 	replace := live != nil || (previous != nil && previous.LimitBytes != 0)
 	if next.LimitBytes != 0 {
-		replace = !samePolicy || live == nil || live.Bytes != next.LimitBytes || live.Used < min(next.UsedBytes, next.LimitBytes)
+		replace = next.calibrating || !samePolicy || live == nil || live.Table != table || live.Bytes != next.LimitBytes || live.Used < min(next.UsedBytes, next.LimitBytes)
 	}
 	if !replace && samePolicy && previous.UsedBytes == next.UsedBytes {
 		return next.UsedBytes, nil
 	}
-	if err := applyTrafficQuota(ctx, nft, path, table, next, replace); err != nil {
+	var batch []byte
+	if replace {
+		if live != nil && live.Table != table {
+			batch = trafficQuotaBatch(live.Table, trafficQuotaState{})
+		}
+		batch = append(batch, trafficQuotaBatch(table, next)...)
+	}
+	if err := applyTrafficQuota(ctx, nft, path, next, batch); err != nil {
 		return 0, err
 	}
 	return next.UsedBytes, nil
@@ -110,7 +134,7 @@ func (s trafficQuotaState) samePolicy(other trafficQuotaState) bool {
 		slices.Equal(s.TCPPorts, other.TCPPorts) && slices.Equal(s.UDPPorts, other.UDPPorts)
 }
 
-func applyTrafficQuota(ctx context.Context, nft, path, table string, next trafficQuotaState, replace bool) error {
+func applyTrafficQuota(ctx context.Context, nft, path string, next trafficQuotaState, batch []byte) error {
 	encoded, err := json.Marshal(next)
 	if err != nil {
 		return status.Errorf(codes.Internal, "encode traffic quota state: %v", err)
@@ -120,8 +144,8 @@ func applyTrafficQuota(ctx context.Context, nft, path, table string, next traffi
 		return status.Errorf(codes.Internal, "stage traffic quota state: %v", err)
 	}
 	defer os.Remove(staged)
-	if replace {
-		if err := runNft(ctx, nft, trafficQuotaBatch(table, next), "-f", "-"); err != nil {
+	if len(batch) != 0 {
+		if err := runNft(ctx, nft, batch, "-f", "-"); err != nil {
 			return trafficQuotaNftError(ctx, "apply traffic quota", err)
 		}
 	}

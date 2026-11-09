@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -79,7 +80,11 @@ func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.Nod
 	if ipv4 == "" && ipv6 == "" {
 		return nil, status.Error(codes.InvalidArgument, "missing node IP addresses")
 	}
-	if err := h.nodes.UpdateIPs(ctx, node, ipv4, ipv6); err != nil {
+	addresses, err := reportedAddresses(request.GetAddresses(), ipv4, ipv6)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.nodes.UpdateIPs(ctx, node, ipv4, ipv6, addresses...); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
 		}
@@ -87,6 +92,27 @@ func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.Nod
 		return nil, status.Error(codes.Internal, "could not update node IP addresses")
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func reportedAddresses(addresses []string, ipv4, ipv6 string) ([]string, error) {
+	if len(addresses) == 0 {
+		return nil, nil
+	}
+	result := make([]string, 0, len(addresses)+2)
+	for _, address := range addresses {
+		ip, err := netip.ParseAddr(address)
+		if err != nil || !isNodeIP(ip.Unmap()) {
+			return nil, status.Error(codes.InvalidArgument, "invalid node public address")
+		}
+		result = append(result, ip.Unmap().String())
+	}
+	for _, address := range []string{ipv4, ipv6} {
+		if address != "" {
+			result = append(result, address)
+		}
+	}
+	slices.Sort(result)
+	return slices.Compact(result), nil
 }
 
 func (h *ReportHandler) registrationIPs(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (string, string, error) {

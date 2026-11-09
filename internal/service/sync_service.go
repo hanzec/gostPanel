@@ -159,7 +159,7 @@ func (s *RuleSyncService) getNodeConfig(client *gost.Client, node model.GostNode
 	defer unlock()
 	if node.TrafficLimitBytes == 0 {
 		// Unblock even if the Gost admin API is temporarily down.
-		if err := syncTrafficQuota(s.nodeRepo, client, node, nil, time.Now()); err != nil {
+		if err := syncTrafficQuota(s.nodeRepo, client, node.ID, nil, time.Now()); err != nil {
 			logger.Debugf("[Sync] 清除节点 %d 的流量配额失败: %v", node.ID, err)
 		}
 		return client.GetConfig()
@@ -168,7 +168,7 @@ func (s *RuleSyncService) getNodeConfig(client *gost.Client, node model.GostNode
 	if err != nil {
 		return nil, err
 	}
-	if err := syncTrafficQuota(s.nodeRepo, client, node, current.Services, time.Now()); err != nil {
+	if err := syncTrafficQuota(s.nodeRepo, client, node.ID, current.Services, time.Now()); err != nil {
 		logger.Debugf("[Sync] 同步节点 %d 的流量配额失败: %v", node.ID, err)
 	}
 	return current, nil

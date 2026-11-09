@@ -68,6 +68,39 @@ func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 	}
 }
 
+func TestEnsureGostBinaryCLIDownloadsPinnedStableVersion(t *testing.T) {
+	archive := gostTestArchive(t, "gost")
+	var requests atomic.Int32
+	asset := "/https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet || req.URL.Path != asset {
+			t.Errorf("unexpected pinned release request: %s %s", req.Method, req.URL.Path)
+			http.NotFound(w, req)
+			return
+		}
+		requests.Add(1)
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("GH_PROXY", server.URL+"/")
+	dir := t.TempDir()
+	args := []string{"ensure-gost-binary", "-c", filepath.Join(dir, "node.yaml")}
+	t.Setenv("YAGP_GOST_VERSION", "v3.3.3-nightly")
+	if err := run(t.Context(), args); err == nil || !strings.Contains(err.Error(), "must be a stable Gost tag") {
+		t.Fatalf("ensure with a nightly version = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gost")); !os.IsNotExist(err) {
+		t.Fatalf("rejected release left a binary: %v", err)
+	}
+	t.Setenv("YAGP_GOST_VERSION", "v3.3.3")
+	if err := run(t.Context(), args); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(filepath.Join(dir, "gost")); err != nil || string(body) != "binary" || requests.Load() != 1 {
+		t.Fatalf("installed Gost = %q, %v, release requests = %d", body, err, requests.Load())
+	}
+}
+
 func TestEnsureGostBootstrapsMissingBinaryAndService(t *testing.T) {
 	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
 		t.Skip("set YAGP_TEST_UPGRADE=1 in a disposable Linux container")

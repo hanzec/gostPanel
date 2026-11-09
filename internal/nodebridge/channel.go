@@ -89,7 +89,7 @@ func runPanelSession(ctx context.Context, credentials *credentialManager, config
 	defer current.Store(nil)
 	ipTicks := time.NewTicker(5 * time.Minute)
 	defer ipTicks.Stop()
-	go reportPublicIPChanges(ctx, credentials.nodeID, client, DetectPublicIPs, ipTicks.C)
+	go reportPublicIPChanges(ctx, credentials.nodeID, client, detectPublicAddresses, ipTicks.C)
 	return true, <-done
 }
 

@@ -50,6 +50,9 @@ func runUpgrade(ctx context.Context, cfg Config, configPath, component, tag stri
 		return fmt.Errorf("record upgrade start: %w", err)
 	}
 	err := installUpgrade(ctx, cfg, dir, component, tag, writeBinary)
+	if err == nil && component == "daemon" && runtimeUpdateRequired(cfg, configPath, systemdUnitDir) {
+		err = upgradeCommand(ctx, filepath.Join(dir, "yagp-daemon"), "update-runtime", "-c", configPath)
+	}
 	status.State = "succeeded"
 	if err != nil {
 		status.State, status.Message = "failed", err.Error()
@@ -101,7 +104,7 @@ func installUpgrade(ctx context.Context, cfg Config, dir, component, tag string,
 	if err = os.Rename(candidate, target); err != nil {
 		return fmt.Errorf("replace installed executable: %w", err)
 	}
-	unit := fmt.Sprintf("yagp-%s-%d.service", component, cfg.NodeID)
+	unit := cfg.runtimeUnit(component)
 	if err = restartAndCheckUpgrade(ctx, cfg, unit, component, tag); err == nil {
 		return nil
 	}
@@ -147,7 +150,13 @@ func restartAndCheckUpgrade(ctx context.Context, cfg Config, unit, component, ta
 	if component == "gost" {
 		return WaitForGost(ctx, cfg)
 	}
-	return waitForDaemon(ctx, cfg, tag)
+	if err := waitForDaemon(ctx, cfg, tag); err != nil {
+		return err
+	}
+	if cfg.RuntimeLayout >= singleNodeLayoutVersion {
+		return WaitForGost(ctx, cfg)
+	}
+	return nil
 }
 
 // WaitForGost checks the same authenticated admin endpoint used by the bridge.

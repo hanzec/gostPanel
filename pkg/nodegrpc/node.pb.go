@@ -509,6 +509,7 @@ func (x *GostLogsReply) GetEntries() []*GostLogEntry {
 type NftConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Config        string                 `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	Table         string                 `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -546,6 +547,13 @@ func (*NftConfig) Descriptor() ([]byte, []int) {
 func (x *NftConfig) GetConfig() string {
 	if x != nil {
 		return x.Config
+	}
+	return ""
+}
+
+func (x *NftConfig) GetTable() string {
+	if x != nil {
+		return x.Table
 	}
 	return ""
 }
@@ -603,14 +611,15 @@ func (x *NodeConfig) GetNftTemplate() string {
 }
 
 type TrafficQuotaRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	LimitBytes    uint64                 `protobuf:"varint,1,opt,name=limit_bytes,json=limitBytes,proto3" json:"limit_bytes,omitempty"`
-	UsedBytes     uint64                 `protobuf:"varint,2,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
-	WindowStart   int64                  `protobuf:"varint,3,opt,name=window_start,json=windowStart,proto3" json:"window_start,omitempty"`
-	TcpPorts      []uint32               `protobuf:"varint,4,rep,packed,name=tcp_ports,json=tcpPorts,proto3" json:"tcp_ports,omitempty"`
-	UdpPorts      []uint32               `protobuf:"varint,5,rep,packed,name=udp_ports,json=udpPorts,proto3" json:"udp_ports,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	LimitBytes          uint64                 `protobuf:"varint,1,opt,name=limit_bytes,json=limitBytes,proto3" json:"limit_bytes,omitempty"`
+	UsedBytes           uint64                 `protobuf:"varint,2,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	WindowStart         int64                  `protobuf:"varint,3,opt,name=window_start,json=windowStart,proto3" json:"window_start,omitempty"`
+	TcpPorts            []uint32               `protobuf:"varint,4,rep,packed,name=tcp_ports,json=tcpPorts,proto3" json:"tcp_ports,omitempty"`
+	UdpPorts            []uint32               `protobuf:"varint,5,rep,packed,name=udp_ports,json=udpPorts,proto3" json:"udp_ports,omitempty"`
+	CalibratedUsedBytes *uint64                `protobuf:"varint,6,opt,name=calibrated_used_bytes,json=calibratedUsedBytes,proto3,oneof" json:"calibrated_used_bytes,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TrafficQuotaRequest) Reset() {
@@ -678,9 +687,17 @@ func (x *TrafficQuotaRequest) GetUdpPorts() []uint32 {
 	return nil
 }
 
+func (x *TrafficQuotaRequest) GetCalibratedUsedBytes() uint64 {
+	if x != nil && x.CalibratedUsedBytes != nil {
+		return *x.CalibratedUsedBytes
+	}
+	return 0
+}
+
 type TrafficQuotaReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UsedBytes     uint64                 `protobuf:"varint,1,opt,name=used_bytes,json=usedBytes,proto3" json:"used_bytes,omitempty"`
+	Calibrated    bool                   `protobuf:"varint,2,opt,name=calibrated,proto3" json:"calibrated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -720,6 +737,13 @@ func (x *TrafficQuotaReply) GetUsedBytes() uint64 {
 		return x.UsedBytes
 	}
 	return 0
+}
+
+func (x *TrafficQuotaReply) GetCalibrated() bool {
+	if x != nil {
+		return x.Calibrated
+	}
+	return false
 }
 
 type NodeUpgradeRequest struct {
@@ -775,16 +799,17 @@ func (x *NodeUpgradeRequest) GetVersion() string {
 }
 
 type NodeUpgradeStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Supported     bool                   `protobuf:"varint,1,opt,name=supported,proto3" json:"supported,omitempty"`
-	GostVersion   string                 `protobuf:"bytes,2,opt,name=gost_version,json=gostVersion,proto3" json:"gost_version,omitempty"`
-	DaemonVersion string                 `protobuf:"bytes,3,opt,name=daemon_version,json=daemonVersion,proto3" json:"daemon_version,omitempty"`
-	Component     string                 `protobuf:"bytes,4,opt,name=component,proto3" json:"component,omitempty"`
-	TargetVersion string                 `protobuf:"bytes,5,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
-	State         string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`
-	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	Supported             bool                   `protobuf:"varint,1,opt,name=supported,proto3" json:"supported,omitempty"`
+	GostVersion           string                 `protobuf:"bytes,2,opt,name=gost_version,json=gostVersion,proto3" json:"gost_version,omitempty"`
+	DaemonVersion         string                 `protobuf:"bytes,3,opt,name=daemon_version,json=daemonVersion,proto3" json:"daemon_version,omitempty"`
+	Component             string                 `protobuf:"bytes,4,opt,name=component,proto3" json:"component,omitempty"`
+	TargetVersion         string                 `protobuf:"bytes,5,opt,name=target_version,json=targetVersion,proto3" json:"target_version,omitempty"`
+	State                 string                 `protobuf:"bytes,6,opt,name=state,proto3" json:"state,omitempty"`
+	Error                 string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`
+	RuntimeUpdateRequired bool                   `protobuf:"varint,8,opt,name=runtime_update_required,json=runtimeUpdateRequired,proto3" json:"runtime_update_required,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *NodeUpgradeStatus) Reset() {
@@ -864,6 +889,13 @@ func (x *NodeUpgradeStatus) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *NodeUpgradeStatus) GetRuntimeUpdateRequired() bool {
+	if x != nil {
+		return x.RuntimeUpdateRequired
+	}
+	return false
 }
 
 type ReportRequest struct {
@@ -1179,6 +1211,7 @@ type NodeIPsRequest struct {
 	NodeId        uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	Ipv4          string                 `protobuf:"bytes,2,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
 	Ipv6          string                 `protobuf:"bytes,3,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	Addresses     []string               `protobuf:"bytes,4,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1232,6 +1265,13 @@ func (x *NodeIPsRequest) GetIpv6() string {
 		return x.Ipv6
 	}
 	return ""
+}
+
+func (x *NodeIPsRequest) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
 }
 
 type StreamFrame struct {
@@ -1356,14 +1396,15 @@ const file_node_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
 	"\bpriority\x18\x03 \x01(\x05R\bpriority\"E\n" +
 	"\rGostLogsReply\x124\n" +
-	"\aentries\x18\x01 \x03(\v2\x1a.yagp.node.v1.GostLogEntryR\aentries\"#\n" +
+	"\aentries\x18\x01 \x03(\v2\x1a.yagp.node.v1.GostLogEntryR\aentries\"9\n" +
 	"\tNftConfig\x12\x16\n" +
-	"\x06config\x18\x01 \x01(\tR\x06config\"P\n" +
+	"\x06config\x18\x01 \x01(\tR\x06config\x12\x14\n" +
+	"\x05table\x18\x02 \x01(\tR\x05table\"P\n" +
 	"\n" +
 	"NodeConfig\x12\x1f\n" +
 	"\vconfig_yaml\x18\x01 \x01(\fR\n" +
 	"configYaml\x12!\n" +
-	"\fnft_template\x18\x02 \x01(\tR\vnftTemplate\"\xb2\x01\n" +
+	"\fnft_template\x18\x02 \x01(\tR\vnftTemplate\"\x85\x02\n" +
 	"\x13TrafficQuotaRequest\x12\x1f\n" +
 	"\vlimit_bytes\x18\x01 \x01(\x04R\n" +
 	"limitBytes\x12\x1d\n" +
@@ -1371,13 +1412,18 @@ const file_node_proto_rawDesc = "" +
 	"used_bytes\x18\x02 \x01(\x04R\tusedBytes\x12!\n" +
 	"\fwindow_start\x18\x03 \x01(\x03R\vwindowStart\x12\x1b\n" +
 	"\ttcp_ports\x18\x04 \x03(\rR\btcpPorts\x12\x1b\n" +
-	"\tudp_ports\x18\x05 \x03(\rR\budpPorts\"2\n" +
+	"\tudp_ports\x18\x05 \x03(\rR\budpPorts\x127\n" +
+	"\x15calibrated_used_bytes\x18\x06 \x01(\x04H\x00R\x13calibratedUsedBytes\x88\x01\x01B\x18\n" +
+	"\x16_calibrated_used_bytes\"R\n" +
 	"\x11TrafficQuotaReply\x12\x1d\n" +
 	"\n" +
-	"used_bytes\x18\x01 \x01(\x04R\tusedBytes\"L\n" +
+	"used_bytes\x18\x01 \x01(\x04R\tusedBytes\x12\x1e\n" +
+	"\n" +
+	"calibrated\x18\x02 \x01(\bR\n" +
+	"calibrated\"L\n" +
 	"\x12NodeUpgradeRequest\x12\x1c\n" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\"\xec\x01\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\xa4\x02\n" +
 	"\x11NodeUpgradeStatus\x12\x1c\n" +
 	"\tsupported\x18\x01 \x01(\bR\tsupported\x12!\n" +
 	"\fgost_version\x18\x02 \x01(\tR\vgostVersion\x12%\n" +
@@ -1385,7 +1431,8 @@ const file_node_proto_rawDesc = "" +
 	"\tcomponent\x18\x04 \x01(\tR\tcomponent\x12%\n" +
 	"\x0etarget_version\x18\x05 \x01(\tR\rtargetVersion\x12\x14\n" +
 	"\x05state\x18\x06 \x01(\tR\x05state\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error\"a\n" +
+	"\x05error\x18\a \x01(\tR\x05error\x126\n" +
+	"\x17runtime_update_required\x18\b \x01(\bR\x15runtimeUpdateRequired\"a\n" +
 	"\rReportRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x127\n" +
 	"\vobservation\x18\x02 \x01(\v2\x15.proto.ObserveRequestR\vobservation\"o\n" +
@@ -1407,11 +1454,12 @@ const file_node_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12#\n" +
 	"\rrefresh_token\x18\x02 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x03 \x01(\tR\trequestId\"Q\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\"o\n" +
 	"\x0eNodeIPsRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x12\n" +
 	"\x04ipv4\x18\x02 \x01(\tR\x04ipv4\x12\x12\n" +
-	"\x04ipv6\x18\x03 \x01(\tR\x04ipv6\"\xa0\x01\n" +
+	"\x04ipv6\x18\x03 \x01(\tR\x04ipv6\x12\x1c\n" +
+	"\taddresses\x18\x04 \x03(\tR\taddresses\"\xa0\x01\n" +
 	"\vStreamFrame\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x16\n" +
 	"\x06method\x18\x02 \x01(\tR\x06method\x12\x18\n" +
@@ -1474,6 +1522,7 @@ func file_node_proto_init() {
 	if File_node_proto != nil {
 		return
 	}
+	file_node_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

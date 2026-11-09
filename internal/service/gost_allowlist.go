@@ -58,13 +58,17 @@ func (s *GostAllowlistService) resolveAddresses(ctx context.Context, nodeIDs []u
 		return addresses, nil
 	}
 	var nodes []model.GostNode
-	if err := s.db.WithContext(ctx).Select("id", "name", "ipv4", "ipv6").Where("id IN ?", nodeIDs).Find(&nodes).Error; err != nil {
+	if err := s.db.WithContext(ctx).Select("id", "name", "ipv4", "ipv6", "addresses").Where("id IN ?", nodeIDs).Find(&nodes).Error; err != nil {
 		return nil, err
 	}
 	if strict && len(nodes) != len(nodeIDs) {
 		return nil, bizerrors.New(40000, "白名单包含不存在的节点", http.StatusBadRequest)
 	}
 	for _, node := range nodes {
+		if len(node.Addresses) != 0 {
+			addresses = append(addresses, node.Addresses...)
+			continue
+		}
 		if strict && node.IPv4 == "" && node.IPv6 == "" {
 			return nil, bizerrors.New(40000, fmt.Sprintf("节点 %q 暂无 IP，请先注册节点或等待已注册的节点上报", node.Name), http.StatusBadRequest)
 		}

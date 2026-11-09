@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -54,7 +55,8 @@ func updateNft(ctx context.Context, id uint64, configPath, config string, persis
 	if runtime.GOOS != "linux" || configPath == "" {
 		return status.Error(codes.Unimplemented, "nftables management is unavailable on this node")
 	}
-	batch, err := nftBatch(id, config)
+	table, legacy := nftTables(id, configPath)
+	batch, err := nftBatch(table, legacy, config)
 	if err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -89,33 +91,73 @@ func updateNft(ctx context.Context, id uint64, configPath, config string, persis
 	return nil
 }
 
-func nftBatch(id uint64, config string) ([]byte, error) {
-	if len(config) > nodegrpc.MaxNftConfigBytes {
-		return nil, fmt.Errorf("nftables config exceeds %d bytes", nodegrpc.MaxNftConfigBytes)
+func nftTables(id uint64, configPath string) (table, legacy string) {
+	table = nodegrpc.NftTableName(id)
+	if configPath != "" && ReadRuntimeLayout(configPath) >= singleNodeLayoutVersion {
+		return nodegrpc.SingleNodeNftTable, table
 	}
+	return table, ""
+}
+
+func parseNftConfig(config string) (nftDocument, error) {
 	var document nftDocument
+	if len(config) > nodegrpc.MaxNftConfigBytes {
+		return document, fmt.Errorf("nftables config exceeds %d bytes", nodegrpc.MaxNftConfigBytes)
+	}
 	var trailing json.RawMessage
 	decoder := json.NewDecoder(strings.NewReader(config))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&document); err != nil || document.Commands == nil || decoder.Decode(&trailing) != io.EOF {
-		return nil, errors.New("expected one JSON object with an nftables command array")
+		return document, errors.New("expected one JSON object with an nftables command array")
 	}
-	table := nodegrpc.NftTableName(id)
+	return document, nil
+}
+
+func (d nftDocument) renameTable(from, to string) bool {
+	if from == "" {
+		return false
+	}
+	changed := false
+	for _, command := range d.Commands {
+		for _, object := range command["add"] {
+			var table string
+			if json.Unmarshal(object["table"], &table) == nil && table == from {
+				object["table"] = json.RawMessage(strconv.Quote(to))
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func nftBatch(table, legacy, config string) ([]byte, error) {
+	document, err := parseNftConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	document.renameTable(legacy, table)
 	for i, command := range document.Commands {
 		if err := validateNftCommand(command, table); err != nil {
 			return nil, fmt.Errorf("nftables command %d: %w", i+1, err)
 		}
 	}
-	identity := nftObject{"family": json.RawMessage(`"inet"`), "name": json.RawMessage(`"` + table + `"`)}
-	addTable := nftCommand{"add": {"table": identity}}
-	deleteTable := nftCommand{"delete": {"table": identity}}
 	// Add is idempotent. Add then delete handles absent tables on versions without destroy.
-	batch := []nftCommand{addTable, deleteTable}
+	var batch []nftCommand
+	if legacy != "" {
+		batch = append(batch, nftTableCommand("add", legacy), nftTableCommand("delete", legacy))
+	}
+	addTable := nftTableCommand("add", table)
+	batch = append(batch, addTable, nftTableCommand("delete", table))
 	if len(document.Commands) > 0 {
 		batch = append(batch, addTable)
 		batch = append(batch, document.Commands...)
 	}
 	return json.Marshal(nftDocument{Commands: batch})
+}
+
+func nftTableCommand(action, table string) nftCommand {
+	identity := nftObject{"family": json.RawMessage(`"inet"`), "name": json.RawMessage(strconv.Quote(table))}
+	return nftCommand{action: {"table": identity}}
 }
 
 func validateNftCommand(command nftCommand, table string) error {

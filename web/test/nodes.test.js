@@ -10,6 +10,7 @@ import { button, click, deferred, dialog, mockNodeMessages, mountNodeComponent, 
 
 vi.mock('@/api/node', () => ({
   getNode: vi.fn(), getNodeList: vi.fn(), createNode: vi.fn(), updateNode: vi.fn(), deleteNode: vi.fn(),
+  calibrateNodeTraffic: vi.fn(),
   issueNodeRegistrationToken: vi.fn(), getNodeConfig: vi.fn(),
   getGostService: vi.fn(), getGostLogs: vi.fn(), restartGostService: vi.fn(),
   getNodeNftConfig: vi.fn(), applyNodeNftConfig: vi.fn(),
@@ -29,6 +30,7 @@ const newNode = { id: 9, name: '新节点', status: 'offline' }
 const list = (nodes, total = nodes.length) => response({ list: nodes, total })
 const token = (value = 'secret', lifetime = 60_000) => response({ token: value, expires_at: new Date(Date.now() + lifetime).toISOString() })
 const editForm = (view, title) => dialog(view, title).get('form.el-form')
+const settingsTitle = '节点配置 · 边缘节点'
 const quotaInput = '[placeholder="例如 100.5"]'
 let wrapper
 let messages
@@ -134,7 +136,7 @@ describe('node inventory', () => {
 
   it('shows endpoints and quota states and sends the selected status and page', async () => {
     api.getNodeList.mockResolvedValue(list([
-      primary,
+      { ...primary, addresses: ['192.0.2.7', '192.0.2.17', '2001:db8::7', '2001:db8::17'] },
       { id: 8, name: '待注册', status: 'offline', traffic_quota_state: 'pending' },
       { id: 9, name: '未限流', status: 'error', address: '192.0.2.9' },
       { id: 10, name: '旧守护程序', status: 'unknown', address: '2001:db8::10', traffic_limit_bytes: GIB, traffic_quota_state: 'unsupported' },
@@ -145,12 +147,15 @@ describe('node inventory', () => {
     await flushPromises()
     const rows = view.findAll('tbody tr').map(row => row.text())
     expect(rows[0]).toContain('2001:db8::7')
+    expect(rows[0]).toContain('192.0.2.17')
+    expect(rows[0]).toContain('2001:db8::17')
     expect(rows[0]).toContain('1.5 KiB')
     expect(rows[0]).toContain('已达上限')
     expect(rows[0]).toContain('本期用量')
     expect(rows[1]).toContain('待获取地址')
     expect(rows[1]).toContain('解除限制待同步')
     expect(rows[2]).toContain('192.0.2.9')
+    expect(rows[2]).toContain('IPv6 · 不支持')
     expect(rows[2]).toContain('未设上限')
     expect(rows[3]).toContain('2001:db8::10')
     expect(rows[3]).toContain('需要支持流量配额的 yagp-daemon')
@@ -183,6 +188,7 @@ describe('node inventory', () => {
     await click(view, '配置')
     expect(router.currentRoute.value.query.node).toBeUndefined()
     const config = dialog(view, '节点配置 · 边缘节点')
+    await config.get('#tab-gost').trigger('click')
     expect(config.text()).toContain('正在读取节点配置')
     pending.reject(new Error('node offline'))
     await flushPromises()
@@ -201,6 +207,8 @@ describe('node inventory', () => {
     api.getNodeConfig.mockResolvedValueOnce(response({}))
     await click(view, '配置')
     const emptyConfig = dialog(view, '节点配置 · 边缘节点')
+    await emptyConfig.get('#tab-gost').trigger('click')
+    await flushPromises()
     expect(emptyConfig.text()).toContain('暂无服务')
     await emptyConfig.get('[aria-label="关闭弹窗"]').trigger('click')
     expect(view.find('[aria-label="节点配置 · 边缘节点"]').exists()).toBe(false)
@@ -271,36 +279,26 @@ describe('node registration and quota settings', () => {
     expect(messages.success).toHaveBeenCalledWith('节点已添加')
   })
 
-  it('omits unchanged quota values during updates and sends explicit changes and copies', async () => {
+  it('omits unchanged quota values during updates and sends explicit changes', async () => {
     api.updateNode.mockResolvedValue(response(primary))
-    api.createNode.mockResolvedValue(response({ ...newNode, name: primary.name + '-copy' }))
-    getPublicSystemConfig.mockRejectedValue(new Error('not configured'))
     const view = open()
     await flushPromises()
     await openDetail(view)
-    await click(view, '编辑节点')
-    expect(editForm(view, '编辑节点').get(quotaInput).element.value).toBe('1.0000000009')
-    await click(dialog(view, '编辑节点'), '保存更改')
+    expect(view.text()).not.toContain('复制节点')
+    await click(view, '配置')
+    expect(editForm(view, settingsTitle).get(quotaInput).element.value).toBe('1.0000000009')
+    await click(dialog(view, settingsTitle), '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, remark: primary.remark })
     expect(messages.success).toHaveBeenCalledWith('节点已更新')
 
-    await click(view, '编辑节点')
-    const form = editForm(view, '编辑节点')
+    await click(view, '配置')
+    const form = editForm(view, settingsTitle)
     form.findComponent(ElSelect).vm.$emit('update:modelValue', 'monthly')
     await form.get(quotaInput).setValue('')
-    await click(dialog(view, '编辑节点'), '保存更改')
+    await click(dialog(view, settingsTitle), '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
       name: primary.name, remark: primary.remark, traffic_limit_bytes: 0, traffic_reset_period: 'monthly'
     })
-    await click(view, '复制节点')
-    expect(editForm(view, '添加节点').get('[placeholder="例如 华东入口"]').element.value).toBe(primary.name + '-copy')
-    await click(dialog(view, '添加节点'), '添加节点')
-    expect(api.createNode).toHaveBeenCalledWith({
-      name: primary.name + '-copy', remark: primary.remark,
-      traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily'
-    })
-    expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
-    expect(dialog(view, '安装节点 · 边缘节点-copy').get('[role="alert"]').text()).toContain('无法读取面板注册地址')
   })
 
   it('uses the configured address to generate, retry, copy and expire a registration command', async () => {
@@ -311,7 +309,7 @@ describe('node registration and quota settings', () => {
     const execCommand = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false)
     Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
     getPublicSystemConfig.mockResolvedValueOnce(response({ host: '' }))
-      .mockResolvedValue(response({ host: '2001:db8::1' }))
+      .mockResolvedValue(response({ host: '2001:db8::1', daemonVersion: '0.1.2-abcdef1' }))
     api.issueNodeRegistrationToken.mockRejectedValueOnce(new Error('retry'))
       .mockImplementationOnce(async () => token('expired', -1000))
       .mockImplementationOnce(async () => token("one'two", 1000))
@@ -333,6 +331,7 @@ describe('node registration and quota settings', () => {
     const field = install.get('textarea').element
     const command = field.value
     expect(field.readOnly).toBe(true)
+    expect(command).toContain("/refs/tags/0.1.2-abcdef1/scripts/install_node.sh' | YAGP_DAEMON_VERSION='0.1.2-abcdef1' bash")
     expect(command).toContain("--host '2001:db8::1'")
     expect(command).toContain("--token 'one'\"'\"'two'")
     await click(install, '复制安装命令')
@@ -390,9 +389,9 @@ describe('node registration and quota settings', () => {
     const view = open()
     await flushPromises()
     await openDetail(view)
-    await click(view, '编辑节点')
-    const edit = dialog(view, '编辑节点')
-    const form = editForm(view, '编辑节点')
+    await click(view, '配置')
+    const edit = dialog(view, settingsTitle)
+    const form = editForm(view, settingsTitle)
     await form.get('[placeholder="例如 华东入口"]').setValue('更名节点')
     await click(edit, '保存更改')
     await form.trigger('submit')
@@ -403,7 +402,7 @@ describe('node registration and quota settings', () => {
     expect(form.get('[placeholder="例如 华东入口"]').element.value).toBe('更名节点')
     await click(edit, '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: '更名节点', remark: primary.remark })
-    expect(view.find('[aria-label="编辑节点"]').exists()).toBe(false)
+    expect(view.find(`[aria-label="${settingsTitle}"]`).exists()).toBe(false)
     await view.get('.node-detail-back').trigger('click')
     await flushPromises()
     await click(view, '添加节点')
@@ -413,6 +412,28 @@ describe('node registration and quota settings', () => {
 })
 
 describe('node actions', () => {
+  it('calibrates cumulative counters and the current quota independently', async () => {
+    api.calibrateNodeTraffic.mockResolvedValue(response({}))
+    const view = open()
+    await flushPromises()
+    await openDetail(view)
+    await click(view, '配置')
+    const settings = dialog(view, settingsTitle)
+    await settings.get('#tab-traffic').trigger('click')
+    await settings.get('#calibrate-input').setValue('-1')
+    expect(button(settings, '保存累计流量').element.disabled).toBe(true)
+    await settings.get('#calibrate-input').setValue('60')
+    await settings.get('#calibrate-output').setValue('80')
+    await settings.get('form[aria-labelledby="node-calibrate-totals"]').trigger('submit')
+    await flushPromises()
+    expect(api.calibrateNodeTraffic).toHaveBeenLastCalledWith(primary.id, { input_bytes: 60, output_bytes: 80 })
+    await settings.get('#calibrate-quota').setValue('0')
+    await settings.get('form[aria-labelledby="node-calibrate-quota"]').trigger('submit')
+    await flushPromises()
+    expect(api.calibrateNodeTraffic).toHaveBeenLastCalledWith(primary.id, { quota_used_bytes: 0 })
+    expect(messages.success).toHaveBeenCalledTimes(2)
+  })
+
   it('opens each asynchronous node control and cleans it up when closed', async () => {
     api.getGostService.mockResolvedValue(response({ unit: 'gost.service' }))
     api.getGostLogs.mockResolvedValue(response({ entries: [] }))
@@ -439,14 +460,17 @@ describe('node actions', () => {
     const view = open()
     await flushPromises()
     await openDetail(view)
+    await click(view, '配置')
+    const settings = dialog(view, settingsTitle)
+    await settings.get('#tab-danger').trigger('click')
     messages.confirm.mockRejectedValueOnce('cancel')
-    await click(view, '删除节点')
+    await click(settings, '删除节点')
     expect(api.deleteNode).not.toHaveBeenCalled()
-    await click(view, '删除节点')
+    await click(settings, '删除节点')
     expect(logger).toHaveBeenCalledWith('删除节点失败:', failure)
     expect(view.text()).toContain(primary.name)
     api.getNodeList.mockResolvedValueOnce(list([]))
-    await click(view, '删除节点')
+    await click(settings, '删除节点')
     expect(api.deleteNode).toHaveBeenLastCalledWith(primary.id)
     expect(messages.success).toHaveBeenCalledWith('节点已删除')
     expect(view.text()).toContain('尚未添加节点')

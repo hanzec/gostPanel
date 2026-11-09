@@ -19,13 +19,14 @@ import (
 const upgradeStatusFile = ".upgrade-status.json"
 
 type UpgradeStatus struct {
-	Supported     bool   `json:"-"`
-	DaemonVersion string `json:"-"`
-	GostVersion   string `json:"-"`
-	Component     string `json:"component"`
-	Tag           string `json:"tag"`
-	State         string `json:"state"`
-	Message       string `json:"message"`
+	Supported             bool   `json:"-"`
+	RuntimeUpdateRequired bool   `json:"-"`
+	DaemonVersion         string `json:"-"`
+	GostVersion           string `json:"-"`
+	Component             string `json:"component"`
+	Tag                   string `json:"tag"`
+	State                 string `json:"state"`
+	Message               string `json:"message"`
 }
 
 // StartUpgrade launches a separate service so restarting yagp-daemon cannot stop the worker.
@@ -68,6 +69,7 @@ func ReadUpgradeStatus(ctx context.Context, cfg Config, configPath string) (Upgr
 		status.GostVersion, _ = executableVersion(ctx, filepath.Join(dir, "gost"), "gost")
 	}
 	status.Supported = supported
+	status.RuntimeUpdateRequired = runtimeUpdateRequired(cfg, configPath, systemdUnitDir)
 	status.DaemonVersion = buildinfo.Version
 	return status, nil
 }

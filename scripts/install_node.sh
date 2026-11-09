@@ -11,8 +11,8 @@ usage() {
     cat <<'EOF'
 用法:
   install_node.sh --host HOST --token TOKEN
-  install_node.sh reenroll --node-id ID --host HOST --token TOKEN
-  install_node.sh upgrade --node-id ID
+  YAGP_DAEMON_VERSION=TAG install_node.sh reenroll --node-id ID --host HOST --token TOKEN
+  YAGP_DAEMON_VERSION=TAG install_node.sh upgrade --node-id ID
   install_node.sh uninstall --node-id ID
 EOF
 }
@@ -52,10 +52,21 @@ if [[ "$action" != install ]]; then
     [[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "请填写面板中的节点 ID"
     base_path="$state_dir/$node_id"
     bridge_unit="yagp-daemon-$node_id"
+    gost_unit="yagp-gost-$node_id"
+    nft_table="yagp_node_$node_id"
+    quota_table="yagp_quota_$node_id"
+    if [[ -x "$base_path/yagp-daemon" && -f "$base_path/.runtime-layout" ]] &&
+        [[ $(cat "$base_path/.runtime-layout") =~ ^[1-9][0-9]*$ ]]; then
+        nft_table=yagp_node
+        quota_table=yagp_quota
+        if [[ "$manager" == systemd ]]; then
+            bridge_unit=yagp-daemon
+            gost_unit=yagp-gost
+        fi
+    fi
 fi
 
 if [[ "$action" == uninstall ]]; then
-    gost_unit="yagp-gost-$node_id"
     if [[ "$manager" == systemd ]]; then
         systemctl disable --now "$bridge_unit" "$gost_unit" || true
         rm -f -- "/etc/systemd/system/$bridge_unit.service" "/etc/systemd/system/$gost_unit.service"
@@ -68,19 +79,37 @@ if [[ "$action" == uninstall ]]; then
         done
     fi
     if [[ -f "$base_path/nft.json" ]] && command -v nft >/dev/null 2>&1 &&
-        nft list table inet "yagp_node_$node_id" >/dev/null 2>&1; then
-        nft delete table inet "yagp_node_$node_id"
+        nft list table inet "$nft_table" >/dev/null 2>&1; then
+        nft delete table inet "$nft_table"
     fi
     if command -v nft >/dev/null 2>&1 &&
-        nft list table inet "yagp_quota_$node_id" >/dev/null 2>&1; then
-        nft delete table inet "yagp_quota_$node_id"
+        nft list table inet "$quota_table" >/dev/null 2>&1; then
+        nft delete table inet "$quota_table"
     fi
-    rm -f -- "$base_path/yagp-daemon" "$base_path/gost"
+    rm -f -- "$base_path/yagp-daemon" "$base_path/gost" "$base_path/.runtime-layout"
     printf '节点 %s 服务已卸载，配置位于 %s\n' "$node_id" "$base_path"
     exit 0
 fi
 
+for installed in "$state_dir"/*/yagp-daemon; do
+    [[ -f "$installed" ]] || continue
+    installed_dir=${installed%/*}
+    [[ ${installed_dir##*/} =~ ^[1-9][0-9]{0,17}$ ]] || continue
+    if [[ "$action" == install || "$installed_dir" != "$base_path" ]]; then
+        die "每台服务器只允许安装一个节点。已安装节点位于 $installed_dir。"
+    fi
+done
+
+if [[ "$action" == install && "$manager" == systemd ]]; then
+    for unit in yagp-daemon yagp-gost; do
+        [[ $(systemctl show --property=LoadState --value "$unit.service" 2>/dev/null || true) == not-found ]] ||
+            die "已有服务 $unit.service，请先检查该服务。"
+    done
+fi
+
 if [[ "$action" == upgrade || "$action" == reenroll ]]; then
+    [[ -n "${YAGP_DAEMON_VERSION:-}" || -n "${YAGP_DAEMON_BIN:-}" ]] ||
+        die '请通过 YAGP_DAEMON_VERSION 指定当前面板的版本标签，或通过 YAGP_DAEMON_BIN 指定对应的二进制。'
     [[ -f "$base_path/node.yaml" && -x "$base_path/yagp-daemon" ]] || die "未找到已安装的节点 $node_id"
     if [[ "$manager" == systemd ]]; then
         [[ $(systemctl show --property=LoadState --value "$bridge_unit.service") == loaded ]] || die "未找到服务 $bridge_unit.service"
@@ -131,6 +160,9 @@ cleanup() {
         printf '节点配置已保留在 %s，请检查服务后重新启动\n' "$base_path" >&2
         if [[ "$manager" == systemd ]]; then
             printf '查看日志: journalctl -u %s -u %s\n' "$bridge_unit" "$gost_unit" >&2
+            if [[ "$bridge_unit" == yagp-daemon ]]; then
+                printf '修复后运行: %s/yagp-daemon update-runtime -c %s/node.yaml\n' "$base_path" "$base_path" >&2
+            fi
         fi
     fi
     rm -rf -- "$tmp_dir"
@@ -170,6 +202,10 @@ fi
 if [[ "$action" == reenroll ]]; then
     candidate="$tmp_dir/yagp-daemon"
     install -m 0700 -- "$bridge_bin" "$candidate"
+    runtime_layout=$("$candidate" --runtime-layout-version 2>/dev/null || true)
+    if [[ -f "$base_path/.runtime-layout" && ! "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
+        die '该节点使用新版运行布局，请选择支持当前布局的 yagp-daemon。'
+    fi
     if [[ "$manager" == systemd ]]; then
         if systemctl is-active --quiet "$bridge_unit.service"; then restore_bridge=true; fi
     elif rc-service "$bridge_unit" status >/dev/null 2>&1; then
@@ -183,19 +219,27 @@ if [[ "$action" == reenroll ]]; then
     unset token
     [[ "$registered_id" == "$node_id" ]] || die "yagp-daemon 返回了不同的节点 ID"
     mv -fT -- "$candidate" "$base_path/yagp-daemon" || die "节点已重新注册，但未能替换守护进程"
-    restore_bridge=false
-    if ! bridge_service start; then
-        if [[ "$manager" == systemd ]]; then
-            die "节点已重新注册。服务启动失败，请查看日志: journalctl -u $bridge_unit"
+    if [[ "$manager" == systemd && "$bridge_unit" != yagp-daemon && "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
+        "$base_path/yagp-daemon" update-runtime -c "$base_path/node.yaml" || die '节点已重新注册。服务迁移失败，请检查上面的日志。'
+    else
+        if [[ "$manager" == openrc && "$runtime_layout" =~ ^[1-9][0-9]*$ && ! -f "$base_path/.runtime-layout" ]]; then
+            printf '%s\n' "$runtime_layout" > "$base_path/.runtime-layout"
         fi
-        die "节点已重新注册。服务启动失败，请检查 $bridge_unit"
+        if ! bridge_service start; then
+            if [[ "$manager" == systemd ]]; then
+                die "节点已重新注册。服务启动失败，请查看日志: journalctl -u $bridge_unit"
+            fi
+            die "节点已重新注册。服务启动失败，请检查 $bridge_unit"
+        fi
     fi
+    restore_bridge=false
     printf '节点 %s 已重新注册，面板地址 %s\n' "$node_id" "$panel_host"
     exit 0
 fi
 
 mkdir -- "$stage"
 install -m 0700 -- "$bridge_bin" "$stage/yagp-daemon"
+runtime_layout=$("$stage/yagp-daemon" --runtime-layout-version 2>/dev/null || true)
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
     install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$stage/LICENSE"
 fi
@@ -213,6 +257,17 @@ gost_unit="yagp-gost-$node_id"
 bridge_unit="yagp-daemon-$node_id"
 mv -T -n -- "$stage" "$base_path"
 [[ ! -e "$stage" ]] || die "节点安装目录已存在: $base_path"
+
+if [[ "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
+    if [[ "$manager" == systemd ]]; then
+        bridge_unit=yagp-daemon
+        gost_unit=yagp-gost
+        "$base_path/yagp-daemon" update-runtime -c "$base_path/node.yaml" || die '服务启动失败，请检查上面的日志。'
+        printf '节点 %s 已启动，面板地址 %s\n' "$node_id" "$panel_host"
+        exit 0
+    fi
+    printf '%s\n' "$runtime_layout" > "$base_path/.runtime-layout"
+fi
 
 write_service() {
     local name=$1 description=$2 executable=$3 config_flag=$4 config_file=$5

@@ -30,12 +30,25 @@ func run(ctx context.Context, args []string) error {
 		case "--version":
 			_, err := fmt.Fprintln(os.Stdout, buildinfo.Version)
 			return err
+		case "--runtime-layout-version":
+			_, err := fmt.Fprintln(os.Stdout, nodebridge.RuntimeLayoutVersion)
+			return err
 		case "enroll":
 			return enroll(ctx, args[1:])
 		case "prepare-gost":
 			return prepareGost(ctx, args[1:])
 		case "ensure-gost":
 			return ensureGost(ctx, parseConfigFlag(args[0], args[1:]))
+		case "ensure-gost-binary":
+			configFile := parseConfigFlag(args[0], args[1:])
+			return ensureGostBinary(ctx, filepath.Join(filepath.Dir(configFile), "gost"))
+		case "update-runtime":
+			configFile := parseConfigFlag(args[0], args[1:])
+			config, err := readConfig(configFile)
+			if err != nil {
+				return err
+			}
+			return nodebridge.UpdateSystemdRuntime(ctx, config, configFile)
 		case "nft-template":
 			return printNftTemplate(parseConfigFlag(args[0], args[1:]))
 		case "upgrade-component":
@@ -55,11 +68,11 @@ func run(ctx context.Context, args []string) error {
 }
 
 func printNftTemplate(configFile string) error {
-	_, err := readConfig(configFile)
+	config, err := readConfig(configFile)
 	if err != nil {
 		return err
 	}
-	template, err := nodebridge.ReadNftTemplate(configFile)
+	template, err := nodebridge.ReadNodeNftTemplate(configFile, config.NodeID)
 	if err != nil {
 		return err
 	}
@@ -90,5 +103,6 @@ func readConfig(configFile string) (nodebridge.Config, error) {
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
 	err = decoder.Decode(&stored)
+	stored.RuntimeLayout = nodebridge.ReadRuntimeLayout(configFile)
 	return stored.Config, err
 }
