@@ -1,19 +1,38 @@
 <template>
   <div class="ops-page">
-    <PageHeader eyebrow="NODE INVENTORY" title="节点管理" description="登记 Gost 实例，查看节点连接状态和流量，并管理节点服务。">
+    <div v-if="detailId" ref="detailPage" class="ops-page">
+      <nav class="node-detail-crumb" aria-label="节点详情导航">
+        <RouterLink :to="nodesLocation" class="node-detail-back"><el-icon aria-hidden="true"><ArrowLeft /></el-icon>节点管理</RouterLink>
+        <el-icon aria-hidden="true"><ArrowRight /></el-icon>
+        <span aria-current="page">节点详情</span>
+      </nav>
+      <NodeDetails v-if="detailNode" :node="detailNode" @action="handleNodeAction($event, detailNode)" />
+      <section v-else class="ops-panel inventory-state">
+        <template v-if="detailError">
+          <p role="alert">无法读取节点详情。</p>
+          <el-button @click="fetchDetail()">重新加载</el-button>
+        </template>
+        <template v-else>
+          <el-skeleton :rows="4" animated />
+          <span class="ops-muted" role="status">正在读取节点详情</span>
+        </template>
+      </section>
+    </div>
+
+    <PageHeader v-else eyebrow="NODE INVENTORY" title="节点管理" description="登记 Gost 实例，查看节点连接状态和流量，并管理节点服务。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
       </template>
     </PageHeader>
 
-    <MetricStrip label="节点统计" :items="nodeMetrics" />
+    <MetricStrip v-if="!detailId" label="节点统计" :items="nodeMetrics" />
 
-    <section class="ops-panel inventory-panel" aria-labelledby="node-inventory-title">
+    <section v-if="!detailId" ref="inventoryPanel" class="ops-panel inventory-panel" aria-labelledby="node-inventory-title">
       <div class="inventory-heading">
         <div>
-          <h2 id="node-inventory-title">节点清单</h2>
-          <p class="ops-muted">查看节点健康状态、累计上下行流量及上限。</p>
+          <h2 id="node-inventory-title" tabindex="-1">节点清单</h2>
+          <p class="ops-muted">查看节点状态与流量，点击任意节点行进入详情。</p>
         </div>
         <span class="inventory-badge ops-mono">gRPC / TLS</span>
       </div>
@@ -62,12 +81,19 @@
             </tr>
           </thead>
           <tbody role="rowgroup">
-            <tr v-for="node in nodeList" :key="node.id" role="row">
+            <tr v-for="node in nodeList" :key="node.id" class="node-list-row" role="row" @click="router.push(nodeLocation(node.id))">
               <td class="inventory-resource" role="cell">
-                <span class="inventory-row-name">
+                <RouterLink
+                  :id="'node-link-' + node.id"
+                  :to="nodeLocation(node.id)"
+                  class="inventory-row-name node-row-link"
+                  :aria-label="'查看节点详情：' + node.name"
+                  @click.stop
+                >
                   <el-icon class="inventory-row-icon" aria-hidden="true"><Monitor /></el-icon>
                   <strong>{{ node.name }}</strong>
-                </span>
+                  <el-icon class="node-row-arrow" aria-hidden="true"><ArrowRight /></el-icon>
+                </RouterLink>
                 <span class="inventory-secondary ops-mono ops-muted">#{{ node.id }}</span>
               </td>
               <td role="cell">
@@ -111,23 +137,8 @@
               </td>
               <td class="inventory-actions-cell" role="cell">
                 <div class="inventory-actions">
-                  <el-button @click="showInstallCommand(node)">安装</el-button>
-                  <el-button @click="handleViewConfig(node)">配置</el-button>
-                  <el-dropdown trigger="click" @command="handleNodeAction($event, node)">
-                    <el-button :aria-label="'节点 ' + node.name + ' 的更多操作'">
-                      更多<el-icon aria-hidden="true"><ArrowDown /></el-icon>
-                    </el-button>
-                    <template #dropdown>
-                      <el-dropdown-menu>
-                        <el-dropdown-item command="gost">Gost 服务</el-dropdown-item>
-                        <el-dropdown-item command="upgrade">版本与升级</el-dropdown-item>
-                        <el-dropdown-item command="nft">nft 配置</el-dropdown-item>
-                        <el-dropdown-item command="edit">编辑节点</el-dropdown-item>
-                        <el-dropdown-item command="copy">复制节点</el-dropdown-item>
-                        <el-dropdown-item command="delete" divided class="inventory-danger">删除节点</el-dropdown-item>
-                      </el-dropdown-menu>
-                    </template>
-                  </el-dropdown>
+                  <el-button @click.stop="showInstallCommand(node)">安装</el-button>
+                  <el-button @click.stop="handleViewConfig(node)">配置</el-button>
                 </div>
               </td>
             </tr>
@@ -247,7 +258,6 @@
             rows="3"
           ></textarea>
         </div>
-        <p v-if="copyFeedback" class="install-copy-feedback" role="status">{{ copyFeedback }}</p>
         <p class="install-hint ops-muted">生成新令牌会撤销上一枚未使用的令牌。</p>
         <p v-if="installNode?.username" class="install-replace-note">重新注册会使旧实例失去访问权限。</p>
       </div>
@@ -262,39 +272,43 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, defineAsyncComponent, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowDown, CircleCheck, CircleClose, CopyDocument, Monitor, Plus, Refresh, Search, Warning } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, CopyDocument, Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
+import NodeDetails from '@/components/NodeDetails.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
-import { getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
+import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
+import { formatBytes, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
 const NodeNftDialog = defineAsyncComponent(() => import('@/components/NodeNftDialog.vue'))
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh'
-const nodeStates = {
-  online: { label: '在线', icon: CircleCheck, tone: 'success' },
-  offline: { label: '离线', icon: CircleClose },
-  error: { label: '异常', icon: Warning, tone: 'danger' }
-}
-const trafficResetPeriods = { none: '不重置', daily: '每日重置', weekly: '每周重置', monthly: '每月重置' }
-const trafficQuotaStates = {
-  active: { label: '配额生效', tone: 'is-success' },
-  blocked: { label: '已达上限', tone: 'is-danger' },
-  pending: { label: '待同步', tone: 'is-muted' },
-  unsupported: { label: '需升级', tone: 'is-warning' }
-}
 const configTabs = [
   { name: 'services', label: '服务' },
   { name: 'chains', label: '转发链' },
   { name: 'observers', label: '观察器' }
 ]
 const GIB = 1024 ** 3
-const dateFormatter = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' })
+
+const route = useRoute()
+const router = useRouter()
+const nodesLocation = { name: 'Nodes' }
+const nodeLocation = (id) => ({ ...nodesLocation, query: { node: id } })
+const detailId = computed(() => {
+  const id = route.query.node
+  return typeof id === 'string' && /^[1-9]\d{0,9}$/.test(id) ? Number(id) : null
+})
+const detailPage = ref(null)
+const inventoryPanel = ref(null)
+const detailNode = ref(null)
+const detailLoading = ref(false)
+const detailError = ref(false)
 
 const nodeList = ref([])
 const loading = ref(true)
@@ -360,25 +374,19 @@ const nftDialogVisible = ref(false)
 
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
-const installNode = computed(() => nodeList.value.find(node => node.id === currentInstallNode.value?.id) || currentInstallNode.value)
+const installNode = computed(() => {
+  const row = currentInstallNode.value
+  if (detailNode.value?.id === row?.id) return detailNode.value
+  return nodeList.value.find(node => node.id === row?.id) || row
+})
 const registration = ref(null)
 const installLoading = ref(false)
 const installError = ref('')
 const installCommandField = ref(null)
-const copyFeedback = ref('')
 const pendingInstallTokens = new Map()
 let createdInstallNode
 let installSession = 0
 let registrationTimer
-
-const formatBytes = (bytes) => {
-  if (!bytes) return '0 B'
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB']
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1)
-  return Number((bytes / 1024 ** index).toFixed(2)) + ' ' + sizes[index]
-}
-
-const formatTime = (value) => dateFormatter.format(new Date(value))
 
 const configSummary = (tab, entry) => {
   if (tab === 'chains') return (entry.hops?.length || 0) + ' 跳'
@@ -409,7 +417,6 @@ const resetInstall = () => {
   registration.value = null
   installLoading.value = false
   installError.value = ''
-  copyFeedback.value = ''
 }
 
 const requestInstallToken = (nodeId) => {
@@ -425,7 +432,6 @@ const requestInstallToken = (nodeId) => {
 const expireRegistration = () => {
   clearTimeout(registrationTimer)
   registration.value = null
-  copyFeedback.value = ''
   installError.value = '令牌已过期，请重新生成。'
 }
 
@@ -495,7 +501,8 @@ const copyInstallCommand = async () => {
       copied = document.execCommand?.('copy') === true
     } catch {}
   }
-  copyFeedback.value = copied ? '安装命令已复制' : '已选中安装命令，请使用系统复制功能。'
+  if (copied) ElMessage.success('安装命令已复制')
+  else ElMessage.warning('已选中安装命令，请使用系统复制功能。')
 }
 
 const fetchData = async (isSilent = false) => {
@@ -517,6 +524,26 @@ const fetchData = async (isSilent = false) => {
     if (!isSilent) loading.value = false
   }
 }
+
+const fetchDetail = async (isSilent = false) => {
+  if (isSilent && (detailLoading.value || detailError.value)) return
+  const id = detailId.value
+  detailLoading.value = true
+  detailError.value = false
+  try {
+    const res = await getNode(id)
+    if (detailId.value === id) detailNode.value = res.data
+  } catch (error) {
+    if (detailId.value === id && (!isSilent || error.response?.status === 404)) {
+      detailNode.value = null
+      detailError.value = true
+    }
+  } finally {
+    if (detailId.value === id) detailLoading.value = false
+  }
+}
+
+const refreshCurrentView = (isSilent = false) => detailId.value ? fetchDetail(isSilent) : fetchData(isSilent)
 
 const handleSearch = () => {
   page.value = 1
@@ -566,7 +593,7 @@ const handleSubmit = async () => {
       ElMessage.success('节点已添加')
     }
     dialogVisible.value = false
-    fetchData()
+    refreshCurrentView()
   } catch (error) {
     console.error('保存节点失败:', error)
   } finally {
@@ -591,13 +618,17 @@ const handleDelete = async (row) => {
     })
     await deleteNode(row.id)
     ElMessage.success('节点已删除')
-    fetchData()
+    nodeList.value = nodeList.value.filter(node => node.id !== row.id)
+    if (detailId.value === row.id) router.replace(nodesLocation)
+    else if (!detailId.value) fetchData()
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') console.error('删除节点失败:', error)
   }
 }
 
 const handleNodeAction = (action, row) => {
+  if (action === 'install') showInstallCommand(row)
+  if (action === 'config') handleViewConfig(row)
   if (action === 'gost') {
     gostNode.value = row
     gostDialogVisible.value = true
@@ -635,10 +666,29 @@ const handleViewConfig = async (row) => {
   }
 }
 
+watch(detailId, async (id, previous) => {
+  if (previous !== undefined) {
+    createdInstallNode = null
+    dialogVisible.value = false
+    installDialogVisible.value = false
+    configDialogVisible.value = false
+    gostDialogVisible.value = upgradeDialogVisible.value = nftDialogVisible.value = false
+    gostNode.value = upgradeNode.value = nftNode.value = null
+  }
+  detailNode.value = nodeList.value.find(node => node.id === id) || null
+  detailLoading.value = detailError.value = false
+  refreshCurrentView()
+  if (previous === undefined) return
+  await nextTick()
+  const focusTarget = id
+    ? detailPage.value?.querySelector('.node-detail-back')
+    : inventoryPanel.value?.querySelector('#node-link-' + previous) || inventoryPanel.value?.querySelector('#node-inventory-title')
+  focusTarget?.focus()
+}, { immediate: true })
+
 let refreshTimer
 onMounted(() => {
-  fetchData()
-  refreshTimer = setInterval(() => fetchData(true), 5000)
+  refreshTimer = setInterval(() => refreshCurrentView(true), 5000)
 })
 onBeforeUnmount(() => {
   clearInterval(refreshTimer)
@@ -650,6 +700,19 @@ onBeforeUnmount(() => {
 <style scoped src="../inventory.css"></style>
 
 <style scoped>
+.node-list-row { cursor: pointer; }
+.inventory-table .node-list-row:focus-within { background: var(--ops-raised); }
+.node-row-link { width: fit-content; min-height: 30px; color: var(--ops-text); text-decoration: none; }
+.node-row-link:hover, .node-row-link:focus-visible { color: var(--ops-accent); text-decoration: underline; }
+.node-row-arrow { color: var(--ops-accent); flex: none; }
+.node-detail-crumb, .node-detail-back { display: flex; align-items: center; gap: 8px; }
+.node-detail-crumb { color: var(--ops-muted); font-size: 13px; }
+.node-detail-back { min-height: 44px; color: var(--ops-text); text-decoration: none; }
+.node-detail-back:hover { color: var(--ops-accent); text-decoration: underline; }
+@media (max-width: 700px) {
+  .node-row-link { min-height: 44px; }
+  .inventory-status { align-self: center; }
+}
 .node-address-help { margin: 0 0 12px; line-height: 1.5; }
 .node-traffic-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
 .node-traffic-status { margin-top: 4px; }
@@ -687,7 +750,6 @@ onBeforeUnmount(() => {
 .install-command { resize: vertical; white-space: pre-wrap; }
 .install-feedback { margin: 0; padding: 12px 0; }
 .install-error { color: var(--ops-danger); }
-.install-copy-feedback { margin: 0; color: var(--ops-accent); font-size: 13px; }
 .install-hint { margin: 0; font-size: 12px; }
 .install-replace-note {
   margin: 0;

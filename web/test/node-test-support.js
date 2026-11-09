@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus, { ElMessage, ElMessageBox } from 'element-plus'
-import { defineComponent, h, inject, provide, watch } from 'vue'
+import { defineComponent, h, watch } from 'vue'
 import { vi } from 'vitest'
 
 const Dialog = defineComponent({
@@ -21,36 +21,14 @@ const Dialog = defineComponent({
   }
 })
 
-const dropdownCommand = Symbol('dropdown command')
-const Dropdown = defineComponent({
-  emits: ['command'],
-  setup(_, { emit, slots }) {
-    provide(dropdownCommand, command => emit('command', command))
-    return () => h('div', [slots.default?.(), slots.dropdown?.()])
-  }
-})
-const DropdownItem = defineComponent({
-  props: { command: String },
-  setup(props, { slots }) {
-    const command = inject(dropdownCommand)
-    return () => h('button', { type: 'button', onClick: () => command(props.command) }, slots.default?.())
-  }
-})
-
-// Keep Element Plus validation and inputs in the DOM. Replace the portal and
-// popper lifecycles so tests can interact with dialogs and menu commands directly.
-export function mountNodeComponent(component, props = {}) {
+// Keep Element Plus validation and inputs in the DOM while replacing dialog transitions and portals.
+export function mountNodeComponent(component, props = {}, plugins = []) {
   return mount(component, {
     props,
     attachTo: document.body,
     global: {
-      plugins: [ElementPlus],
-      stubs: {
-        ElDialog: Dialog,
-        ElDropdown: Dropdown,
-        ElDropdownItem: DropdownItem,
-        ElDropdownMenu: { render() { return h('div', this.$slots.default?.()) } }
-      }
+      plugins: [ElementPlus, ...plugins],
+      stubs: { ElDialog: Dialog }
     }
   })
 }
@@ -59,12 +37,13 @@ export function mockNodeMessages() {
   return {
     confirm: vi.spyOn(ElMessageBox, 'confirm').mockResolvedValue('confirm'),
     success: vi.spyOn(ElMessage, 'success').mockImplementation(() => {}),
+    warning: vi.spyOn(ElMessage, 'warning').mockImplementation(() => {}),
     error: vi.spyOn(ElMessage, 'error').mockImplementation(() => {})
   }
 }
 
 export function button(wrapper, label) {
-  const control = wrapper.findAll('button').find(item => item.text() === label)
+  const control = wrapper.findAll('button').find(item => item.text() === label || item.attributes('aria-label') === label)
   if (!control) throw new Error(`Button not found: ${label}`)
   return control
 }

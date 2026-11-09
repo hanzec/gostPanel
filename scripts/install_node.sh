@@ -140,8 +140,12 @@ mkdir -p -- "$tmp_dir/bridge"
 
 bridge_bin="${YAGP_DAEMON_BIN:-}"
 if [[ -z "$bridge_bin" ]]; then
-    curl -fsSL "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-daemon-linux-$arch.tar.gz" \
-        -o "$tmp_dir/bridge.tar.gz"
+    bridge_url="${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-daemon-linux-$arch.tar.gz"
+    printf '正在下载 yagp-daemon: %s\n' "$bridge_url" >&2
+    curl -fSL --retry 2 --connect-timeout 10 \
+        --write-out 'HTTP %{http_code}, %{size_download} bytes in %{time_total}s\n' \
+        -o "$tmp_dir/bridge.tar.gz" -- "$bridge_url" >&2 ||
+        die 'yagp-daemon 下载失败，请检查上面的 curl 日志。'
     tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
     if [[ "$manager" == systemd ]]; then
         bridge_bin="$tmp_dir/bridge/yagp-daemon-systemd-linux-$arch"
@@ -195,7 +199,9 @@ install -m 0700 -- "$bridge_bin" "$stage/yagp-daemon"
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
     install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$stage/LICENSE"
 fi
-"$stage/yagp-daemon" prepare-gost --output "$stage/gost"
+printf '正在准备 Gost。\n' >&2
+"$stage/yagp-daemon" prepare-gost --output "$stage/gost" ||
+    die 'Gost 准备失败，尚未提交注册令牌。请检查上面的日志。'
 
 if ! node_id=$(printf '%s' "$token" | "$stage/yagp-daemon" enroll --host "$panel_host" --output "$stage"); then
     die "节点未安装。若 token 已失效，请在面板生成新的 token 后重试。"
