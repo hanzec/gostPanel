@@ -138,7 +138,7 @@
               </td>
               <td class="inventory-actions-cell" role="cell">
                 <div class="inventory-actions">
-                  <el-button @click.stop="showInstallCommand(node)">安装</el-button>
+                  <el-button v-if="node.status !== 'online'" @click.stop="showInstallCommand(node)">安装</el-button>
                   <el-button @click.stop="handleViewConfig(node)">配置</el-button>
                 </div>
               </td>
@@ -290,6 +290,7 @@ const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostD
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
 const NodeNftDialog = defineAsyncComponent(() => import('@/components/NodeNftDialog.vue'))
 const INSTALL_SCRIPT_URL = 'https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh'
+const NODE_ONLINE_CODE = 10008
 const configTabs = [
   { name: 'services', label: '服务' },
   { name: 'chains', label: '转发链' },
@@ -406,6 +407,7 @@ const installCommand = computed(() => {
 })
 
 const showInstallCommand = (row) => {
+  if (row.status === 'online') return
   resetInstall()
   currentInstallNode.value = row
   installDialogVisible.value = true
@@ -437,8 +439,8 @@ const expireRegistration = () => {
 }
 
 const prepareInstall = async () => {
-  const node = currentInstallNode.value
-  if (!node || installLoading.value) return
+  const node = installNode.value
+  if (!node || node.status === 'online' || installLoading.value) return
   const session = installSession
   const current = () => session === installSession && installDialogVisible.value
   installLoading.value = true
@@ -457,7 +459,13 @@ const prepareInstall = async () => {
       return
     }
 
-    const result = await requestInstallToken(node.id).catch(() => null)
+    const result = await requestInstallToken(node.id).catch(error => {
+      if (current() && error.response?.data?.code === NODE_ONLINE_CODE) {
+        closeOnlineInstall(error.response.data.message)
+        refreshCurrentView(true)
+      }
+      return null
+    })
     if (!current()) return
     const token = result?.data?.token
     const expiresAt = result?.data?.expires_at
@@ -545,6 +553,15 @@ const fetchDetail = async (isSilent = false) => {
 }
 
 const refreshCurrentView = (isSilent = false) => detailId.value ? fetchDetail(isSilent) : fetchData(isSilent)
+
+const closeOnlineInstall = (message) => {
+  installDialogVisible.value = false
+  ElMessage.warning(message || '节点已在线，无法重新安装')
+}
+
+watch([installDialogVisible, () => installNode.value?.status], ([visible, status]) => {
+  if (visible && status === 'online') closeOnlineInstall()
+})
 
 const handleSearch = () => {
   page.value = 1

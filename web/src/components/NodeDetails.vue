@@ -11,7 +11,7 @@
     </div>
     <div class="detail-buttons">
       <el-button :icon="Setting" @click="$emit('action', 'config')">配置</el-button>
-      <el-button type="primary" :icon="Download" @click="$emit('action', 'install')">安装</el-button>
+      <el-button v-if="node.status !== 'online'" type="primary" :icon="Download" @click="$emit('action', 'install')">安装</el-button>
     </div>
   </header>
 
