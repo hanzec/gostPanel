@@ -19,11 +19,13 @@ func TestMigrateSystemdRuntime(t *testing.T) {
 	}))
 	t.Cleanup(admin.Close)
 	for _, test := range []struct {
-		name string
-		fail string
+		name       string
+		fail       string
+		brokenGost bool
 	}{
 		{name: "installed"},
 		{name: "rollback", fail: "enable --now yagp-daemon.service yagp-gost.service"},
+		{name: "rollback when Gost is unhealthy", brokenGost: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			unitDir, nodeDir := t.TempDir(), t.TempDir()
@@ -42,12 +44,15 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			}
 			address := strings.TrimPrefix(admin.URL, "http://")
 			cfg := Config{NodeID: 42, AdminAddress: address, ObserverListen: address, Username: controlTestUser, Password: controlTestPassword}
+			if test.brokenGost {
+				cfg.AdminAddress = "192.0.2.1:8080"
+			}
 			err := migrateSystemdUnits(t.Context(), cfg, configPath, unitDir)
 			log, readErr := os.ReadFile(logPath)
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			if test.fail != "" {
+			if test.fail != "" || test.brokenGost {
 				if err == nil || ReadRuntimeLayout(configPath) != 0 || !strings.Contains(string(log), "enable --now yagp-daemon-42.service yagp-gost-42.service") {
 					t.Fatalf("failed migration did not restore the legacy layout: %v\n%s", err, log)
 				}
@@ -73,7 +78,40 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if err := UpdateSystemdRuntime(t.Context(), cfg, configPath); err != nil {
 				t.Fatalf("versioned layout was not recognized: %v", err)
 			}
+			if err := restartAndCheckUpgrade(t.Context(), cfg, cfg.runtimeUnit("daemon"), "daemon", ""); err != nil {
+				t.Fatalf("restart of the fixed daemon unit did not wait for both services: %v", err)
+			}
 		})
+	}
+}
+
+func TestRuntimeUpdateRequiresAnInstalledSingleNode(t *testing.T) {
+	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
+		t.Skip("requires an isolated Linux environment with /run/systemd/system")
+	}
+	unitDir, stateDir := t.TempDir(), t.TempDir()
+	t.Setenv("PATH", unitDir)
+	writeRuntimeTestFile(t, filepath.Join(unitDir, "systemd-run"), "#!/bin/sh\nexit 0\n")
+	for _, id := range []string{"42", "7"} {
+		if err := os.Mkdir(filepath.Join(stateDir, id), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configPath := filepath.Join(stateDir, "42", "node.yaml")
+	cfg := Config{NodeID: 42}
+	if runtimeUpdateRequired(cfg, configPath, unitDir) {
+		t.Fatal("migration was offered without a legacy service")
+	}
+	writeRuntimeTestFile(t, filepath.Join(unitDir, cfg.runtimeUnit("daemon")), "legacy")
+	if !runtimeUpdateRequired(cfg, configPath, unitDir) {
+		t.Fatal("legacy service did not request a runtime migration")
+	}
+	writeRuntimeTestFile(t, filepath.Join(stateDir, "7", "yagp-daemon"), "installed")
+	if runtimeUpdateRequired(cfg, configPath, unitDir) {
+		t.Fatal("migration was offered on a multi-node host")
+	}
+	if err := UpdateSystemdRuntime(t.Context(), cfg, configPath); err == nil || !strings.Contains(err.Error(), "only one node") {
+		t.Fatalf("migration did not reject a second node: %v", err)
 	}
 }
 

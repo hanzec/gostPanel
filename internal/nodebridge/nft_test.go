@@ -63,6 +63,12 @@ func TestNftConfigMigratesOwnedLegacyTable(t *testing.T) {
 	if reply.Table != nodegrpc.SingleNodeNftTable || !strings.Contains(reply.Config, `"table": "yagp_node"`) {
 		t.Fatalf("editor did not receive the migrated table: %v", reply)
 	}
+	if err := storePanelConfig(path, &nodegrpc.NodeConfig{NftTemplate: config}); err != nil {
+		t.Fatal(err)
+	}
+	if template, err := ReadNodeNftTemplate(path, 42); err != nil || template != reply.Config {
+		t.Fatalf("cached template did not migrate with the editor configuration: %q, %v", template, err)
+	}
 }
 
 func TestNftConfigApplyAndRestore(t *testing.T) {

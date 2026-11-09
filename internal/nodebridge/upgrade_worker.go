@@ -50,7 +50,7 @@ func runUpgrade(ctx context.Context, cfg Config, configPath, component, tag stri
 		return fmt.Errorf("record upgrade start: %w", err)
 	}
 	err := installUpgrade(ctx, cfg, dir, component, tag, writeBinary)
-	if err == nil && component == "daemon" && runtimeUpdateRequired(cfg, configPath) {
+	if err == nil && component == "daemon" && runtimeUpdateRequired(cfg, configPath, systemdUnitDir) {
 		err = upgradeCommand(ctx, filepath.Join(dir, "yagp-daemon"), "update-runtime", "-c", configPath)
 	}
 	status.State = "succeeded"

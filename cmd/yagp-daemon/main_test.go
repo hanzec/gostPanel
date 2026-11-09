@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
 
+	"yagp/internal/nodebridge"
 	"yagp/pkg/nodegrpc"
 
 	"google.golang.org/protobuf/proto"
@@ -42,6 +44,7 @@ func TestRunRejectsInvalidCLIAndConfiguration(t *testing.T) {
 		{"prepare flags", []string{"prepare-gost"}, "requires --output"},
 		{"ensure config missing", []string{"ensure-gost", "-c", missing}, "missing.yaml"},
 		{"ensure API is loopback", []string{"ensure-gost", "-c", configPath}, "loopback Gost API address"},
+		{"runtime config missing", []string{"update-runtime", "-c", missing}, "missing.yaml"},
 		{"template config missing", []string{"nft-template", "-c", missing}, "missing.yaml"},
 		{"template requires daemon cache", []string{"nft-template", "-c", configPath}, "read node configuration cached by the daemon"},
 		{"upgrade flags", []string{"upgrade-component", "--component", "gost"}, "requires --component and --tag"},
@@ -55,6 +58,59 @@ func TestRunRejectsInvalidCLIAndConfiguration(t *testing.T) {
 				t.Fatalf("run(%v) = %v, want error containing %q", scenario.args, err, scenario.want)
 			}
 		})
+	}
+}
+
+func TestUpdateRuntimeCLIRecognizesCurrentLayout(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir) // Keep the test independent of the host service manager.
+	config := filepath.Join(dir, "node.yaml")
+	if err := os.WriteFile(config, []byte("node_id: 42\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"update-runtime", "-c", config}
+	if err := run(t.Context(), args); err == nil || !strings.Contains(err.Error(), "requires an installed Linux systemd node") {
+		t.Fatalf("migration without systemd support = %v", err)
+	}
+	stdout, err := os.CreateTemp(dir, "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdout.Close()
+	original := os.Stdout
+	os.Stdout = stdout
+	err = run(t.Context(), []string{"--runtime-layout-version"})
+	os.Stdout = original
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := os.ReadFile(stdout.Name())
+	if want := strconv.Itoa(nodebridge.RuntimeLayoutVersion) + "\n"; err != nil || string(version) != want {
+		t.Fatalf("runtime layout version = %q, %v, want %q", version, err, want)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".runtime-layout"), version, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t.Context(), args); err != nil {
+		t.Fatalf("reapplying current runtime layout = %v", err)
+	}
+}
+
+func TestEnsureGostBinaryCLIReusesInstalledBinary(t *testing.T) {
+	t.Setenv("YAGP_GOST_VERSION", "v3.3.3-nightly")
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "gost")
+	if err := os.WriteFile(binary, []byte("installed Gost"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t.Context(), []string{"ensure-gost-binary", "-c", filepath.Join(dir, "node.yaml")}); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(binary); err != nil || string(data) != "installed Gost" {
+		t.Fatalf("existing Gost = %q, %v", data, err)
+	}
+	if err := run(t.Context(), []string{"ensure-gost-binary", "-c", filepath.Join(binary, "node.yaml")}); err == nil {
+		t.Fatal("accepted a node directory that is a file")
 	}
 }
 

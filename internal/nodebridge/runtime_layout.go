@@ -32,11 +32,11 @@ func (cfg Config) runtimeUnit(component string) string {
 	return fmt.Sprintf("yagp-%s-%d.service", component, cfg.NodeID)
 }
 
-func runtimeUpdateRequired(cfg Config, configFile string) bool {
+func runtimeUpdateRequired(cfg Config, configFile, unitDir string) bool {
 	if cfg.RuntimeLayout >= RuntimeLayoutVersion || !supportsUpgrade(configFile) {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(systemdUnitDir, cfg.runtimeUnit("daemon"))); err != nil {
+	if _, err := os.Stat(filepath.Join(unitDir, cfg.runtimeUnit("daemon"))); err != nil {
 		return false
 	}
 	return checkSingleNode(filepath.Dir(configFile)) == nil

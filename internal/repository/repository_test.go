@@ -129,6 +129,32 @@ func TestNodeRepositoryRejectsStaleQuotaSnapshots(t *testing.T) {
 	}
 }
 
+func TestNodeRepositoryKeepsPrimaryIPv4InNewAddressSnapshots(t *testing.T) {
+	nodes := NewNodeRepository(openRepositoryDB(t))
+	ctx := t.Context()
+	node := model.GostNode{Name: "edge"}
+	mustPersist(t, nodes.Create(&node))
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::1", "2001:db8::1"))
+	saved, err := nodes.FindByID(node.ID)
+	mustPersist(t, err)
+	if saved.Address != "2001:db8::1" || saved.IPv4 != "" {
+		t.Fatalf("IPv6-only node did not keep an IPv6 primary address: %+v", saved)
+	}
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "192.0.2.1", "", "192.0.2.1"))
+	saved, err = nodes.FindByID(node.ID)
+	mustPersist(t, err)
+	if saved.IPv6 != "" || !slices.Equal(saved.Addresses, []string{"192.0.2.1"}) {
+		t.Fatalf("new address snapshot did not clear IPv6: %+v", saved)
+	}
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::2", "2001:db8::2"))
+	saved, err = nodes.FindByID(node.ID)
+	mustPersist(t, err)
+	if saved.Address != "192.0.2.1" || saved.IPv4 != "192.0.2.1" || saved.IPv6 != "2001:db8::2" ||
+		!slices.Equal(saved.Addresses, []string{"192.0.2.1", "2001:db8::2"}) {
+		t.Fatalf("an IPv6-only snapshot erased the known IPv4 address: %+v", saved)
+	}
+}
+
 func TestRepositoryForwardingRelationsAndScopedUpdates(t *testing.T) {
 	db := openRepositoryDB(t)
 	nodes, tunnels, rules := NewNodeRepository(db), NewTunnelRepository(db), NewRuleRepository(db)

@@ -69,7 +69,7 @@ func ReadUpgradeStatus(ctx context.Context, cfg Config, configPath string) (Upgr
 		status.GostVersion, _ = executableVersion(ctx, filepath.Join(dir, "gost"), "gost")
 	}
 	status.Supported = supported
-	status.RuntimeUpdateRequired = runtimeUpdateRequired(cfg, configPath)
+	status.RuntimeUpdateRequired = runtimeUpdateRequired(cfg, configPath, systemdUnitDir)
 	status.DaemonVersion = buildinfo.Version
 	return status, nil
 }
