@@ -8,6 +8,18 @@ import (
 	"testing"
 )
 
+func TestGetRequiresLoad(t *testing.T) {
+	previous := cfg
+	t.Cleanup(func() { cfg = previous })
+	cfg = nil
+	defer func() {
+		if recover() == nil {
+			t.Error("read global configuration before Load succeeded")
+		}
+	}()
+	Get()
+}
+
 func TestLoadDefaultsAndDatabaseEnvironment(t *testing.T) {
 	t.Setenv("YAGP_HOST", "")
 	t.Setenv("YAGP_DATABASE_TYPE", "")

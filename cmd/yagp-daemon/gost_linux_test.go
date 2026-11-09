@@ -11,37 +11,42 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"yagp/internal/buildinfo"
 )
 
-func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
-	archive := func(t *testing.T, name string) []byte {
-		t.Helper()
-		var data bytes.Buffer
-		compressed := gzip.NewWriter(&data)
-		tarball := tar.NewWriter(compressed)
-		if err := tarball.WriteHeader(&tar.Header{Name: name, Size: 6, Mode: 0700}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tarball.Write([]byte("binary")); err != nil {
-			t.Fatal(err)
-		}
-		if err := tarball.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if err := compressed.Close(); err != nil {
-			t.Fatal(err)
-		}
-		return data.Bytes()
+func gostTestArchive(t *testing.T, name string) []byte {
+	t.Helper()
+	var data bytes.Buffer
+	compressed := gzip.NewWriter(&data)
+	tarball := tar.NewWriter(compressed)
+	if err := tarball.WriteHeader(&tar.Header{Name: name, Size: 6, Mode: 0700}); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := tarball.Write([]byte("binary")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarball.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := compressed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return data.Bytes()
+}
+
+func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		code int
 		body []byte
 		err  string
 	}{
-		{"valid", 200, archive(t, "gost"), ""},
-		{"wrong archive", 200, archive(t, "other"), "no executable"},
+		{"valid", 200, gostTestArchive(t, "gost"), ""},
+		{"wrong archive", 200, gostTestArchive(t, "other"), "no executable"},
 		{"invalid gzip", 200, []byte("invalid"), "EOF"},
 		{"missing download", 404, nil, "404"},
 	} {
@@ -74,6 +79,105 @@ func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 				t.Fatalf("installed Gost = %q, %v", body, err)
 			}
 		})
+	}
+}
+
+func TestEnsureGostBootstrapsMissingBinaryAndService(t *testing.T) {
+	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
+		t.Skip("set YAGP_TEST_UPGRADE=1 in a disposable Linux container")
+	}
+	archive := gostTestArchive(t, "gost")
+	var available atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/config" {
+			if user, pass, ok := r.BasicAuth(); !ok || user != "fixture" || pass != "secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+			}
+			return
+		}
+		if !available.Load() || !strings.Contains(r.URL.Path, "/releases/download/") {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("GH_PROXY", server.URL+"/")
+	dir := t.TempDir()
+	bin := t.TempDir()
+	logPath := filepath.Join(bin, "systemctl.log")
+	t.Setenv("YAGP_TEST_SYSTEMCTL_LOG", logPath)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(`#!/bin/sh
+case "$1" in
+show) echo not-found ;;
+is-active) exit 1 ;;
+daemon-reload|enable) printf '%s\n' "$*" >> "$YAGP_TEST_SYSTEMCTL_LOG" ;;
+*) exit 2 ;;
+esac
+`), 0700); err != nil {
+		t.Fatal(err)
+	}
+	const unitDir = "/etc/systemd/system"
+	for _, path := range []string{filepath.Dir(unitDir), unitDir} {
+		if err := os.Mkdir(path, 0755); err == nil {
+			t.Cleanup(func() { _ = os.Remove(path) })
+		} else if !os.IsExist(err) {
+			t.Fatal(err)
+		}
+	}
+	nodeID := uint64(time.Now().UnixNano())
+	unit := fmt.Sprintf("yagp-gost-%d.service", nodeID)
+	unitPath := filepath.Join(unitDir, unit)
+	if _, err := os.Lstat(unitPath); !os.IsNotExist(err) {
+		t.Fatalf("test unit path is unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(unitPath) })
+	configPath := filepath.Join(dir, "node.yaml")
+	config := fmt.Sprintf("node_id: %d\nadmin_address: %s\nusername: fixture\npassword: secret\n", nodeID, strings.TrimPrefix(server.URL, "http://"))
+	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gost.yaml"), []byte("api: {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureGost(t.Context(), configPath); err == nil || !strings.Contains(err.Error(), "install Gost binary") {
+		t.Fatalf("failed bootstrap download returned %v", err)
+	}
+	if _, err := os.Stat(unitPath); !os.IsNotExist(err) {
+		t.Fatalf("failed download installed a service unit: %v", err)
+	}
+	available.Store(true)
+	if err := ensureGost(t.Context(), configPath); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "gost")); err != nil || string(data) != "binary" {
+		t.Fatalf("bootstrapped Gost executable = %q, %v", data, err)
+	}
+	definition, err := os.ReadFile(unitPath)
+	wantStart := fmt.Sprintf("ExecStart=%q -C %q\n", filepath.Join(dir, "gost"), filepath.Join(dir, "gost.yaml"))
+	if err != nil || !strings.Contains(string(definition), wantStart) {
+		t.Fatalf("bootstrapped unit has wrong command: %q, %v", definition, err)
+	}
+	if calls, err := os.ReadFile(logPath); err != nil || string(calls) != "daemon-reload\nenable --now "+unit+"\n" {
+		t.Fatalf("bootstrap did not reload and start the service: %q, %v", calls, err)
+	}
+	if err := ensureGost(t.Context(), configPath); !os.IsExist(err) {
+		t.Fatalf("existing unit was overwritten: %v", err)
+	}
+}
+
+func TestUpgradeInstalledRejectsNonReleaseExecutable(t *testing.T) {
+	version := buildinfo.Version
+	buildinfo.Version = "dev"
+	t.Cleanup(func() { buildinfo.Version = version })
+	configPath := filepath.Join(t.TempDir(), "node.yaml")
+	if err := os.WriteFile(configPath, []byte("node_id: 42\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t.Context(), []string{"--upgrade-installed", "--node-id", "42", "-c", configPath}); err == nil ||
+		!strings.Contains(err.Error(), "invalid node, upgrade component or release tag") {
+		t.Fatalf("installer accepted an executable without a release version: %v", err)
 	}
 }
 

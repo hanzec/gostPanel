@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -20,6 +21,8 @@ func TestNodeEnrollmentAndDeletion(t *testing.T) {
 	db := newServiceTestDB(t)
 	fingerprint := strings.Repeat("f1", 32)
 	s := NewNodeService(db, fingerprint)
+	credentials, err := NewNodeCredentialService(db, bytes.Repeat([]byte{1}, 32))
+	requireServiceError(t, err, nil)
 	limit, reset := int64(12345), "daily"
 	request := &dto.CreateNodeReq{Name: "edge", Remark: "registered in test", TrafficLimitBytes: &limit, TrafficResetPeriod: &reset}
 	node, err := s.Create(request, testAdmin, testIP, testAgent)
@@ -43,15 +46,17 @@ func TestNodeEnrollmentAndDeletion(t *testing.T) {
 	if !strings.HasPrefix(token.Token, fmt.Sprintf("%d.", node.ID)) || !strings.HasSuffix(token.Token, "."+fingerprint) || time.Until(token.ExpiresAt) < 14*time.Minute {
 		t.Fatalf("issued token ID, fingerprint or expiration was invalid: %v", token.ExpiresAt)
 	}
-	_, err = s.Register(ctx, node.ID, strings.TrimSuffix(token.Token, "."+fingerprint), "", "2001:db8::8")
+	_, err = credentials.Enroll(ctx, node.ID, strings.TrimSuffix(token.Token, "."+fingerprint), "", "2001:db8::8")
 	requireServiceError(t, err, gorm.ErrRecordNotFound)
-	registered, err := s.Register(ctx, node.ID, token.Token, "", "2001:db8::8")
+	enrollment, err := credentials.Enroll(ctx, node.ID, token.Token, "", "2001:db8::8")
+	requireServiceError(t, err, nil)
+	registered, err := credentials.AuthenticateAccess(ctx, node.ID, enrollment.GetCredentials().GetAccessToken())
 	requireServiceError(t, err, nil)
 	if registered.ID != node.ID || registered.Address != "2001:db8::8" ||
 		registered.Username != fmt.Sprintf("node-%d", node.ID) || registered.Password == "" {
 		t.Fatal("registration returned unexpected identity, certificate or address")
 	}
-	_, err = s.Register(ctx, node.ID, token.Token, "192.0.2.99", "")
+	_, err = credentials.Enroll(ctx, node.ID, token.Token, "192.0.2.99", "")
 	requireServiceError(t, err, gorm.ErrRecordNotFound)
 	requireServiceError(t, s.UpdateIPs(ctx, registered, "192.0.2.8", ""), nil)
 	results, count, err := s.List(&dto.NodeListReq{Status: "offline", Keyword: "192.0.2.8"})

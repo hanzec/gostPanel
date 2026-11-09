@@ -2,16 +2,14 @@ package nodebridge
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"strconv"
 	"sync/atomic"
 	"time"
 
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func controlDispatcher(control *controlServer) nodegrpc.StreamHandler {
@@ -30,10 +28,27 @@ func controlDispatcher(control *controlServer) nodegrpc.StreamHandler {
 	)
 }
 
-func maintainPanelChannel(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client, current *atomic.Pointer[nodegrpc.Session], handler nodegrpc.StreamHandler) {
-	ctx = metadata.AppendToOutgoingContext(ctx, nodegrpc.NodeIDMetadata, strconv.FormatUint(nodeID, 10))
+func maintainCredentials(ctx context.Context, credentials *credentialManager) {
+	for delay := credentials.nextRefresh(); ctx.Err() == nil; {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		if _, err := credentials.accessToken(ctx, refreshLeadTime); err != nil {
+			if ctx.Err() == nil {
+				log.Printf("could not refresh panel credentials: %v", err)
+			}
+			delay = 30 * time.Second
+			continue
+		}
+		delay = credentials.nextRefresh()
+	}
+}
+
+func maintainPanelChannel(ctx context.Context, credentials *credentialManager, configPath string, current *atomic.Pointer[nodegrpc.Session], handler nodegrpc.StreamHandler) {
 	for delay := time.Second; ctx.Err() == nil; delay = min(delay*2, 30*time.Second) {
-		connected, err := runPanelSession(ctx, nodeID, panel, current, handler)
+		connected, err := runPanelSession(ctx, credentials, configPath, current, handler)
 		if ctx.Err() != nil {
 			return
 		}
@@ -49,33 +64,41 @@ func maintainPanelChannel(ctx context.Context, nodeID uint64, panel nodegrpc.V1C
 	}
 }
 
-func runPanelSession(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client, current *atomic.Pointer[nodegrpc.Session], handler nodegrpc.StreamHandler) (bool, error) {
+func runPanelSession(ctx context.Context, credentials *credentialManager, configPath string, current *atomic.Pointer[nodegrpc.Session], handler nodegrpc.StreamHandler) (bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	// Limit the handshake without imposing a deadline on the established stream.
-	handshake := time.AfterFunc(15*time.Second, cancel)
-	defer handshake.Stop()
-	stream, err := panel.Connect(ctx)
+	accessToken, err := credentials.accessToken(ctx, 0)
 	if err != nil {
 		return false, err
 	}
-	headers, err := stream.Header()
+	stream, err := credentials.host.DialSession(ctx, credentials.client, credentials.nodeID, accessToken)
 	if err != nil {
 		return false, err
 	}
-	if ready := headers.Get(nodegrpc.ReadyMetadata); len(ready) != 1 || ready[0] != "1" {
-		if _, err := stream.Recv(); err != nil {
-			return false, err
-		}
-		return false, status.Error(codes.Unavailable, "panel did not acknowledge node stream")
-	}
-	handshake.Stop()
+	defer stream.Close()
 
 	session := nodegrpc.NewSession(stream, handler)
+	defer session.Close()
+	client := nodegrpc.NewV1Client(session)
+	done := make(chan error, 1)
+	go func() { done <- session.Run() }()
+	if err := fetchPanelConfig(ctx, client, configPath); err != nil {
+		return false, fmt.Errorf("load panel configuration: %w", err)
+	}
 	current.Store(session)
 	defer current.Store(nil)
 	ipTicks := time.NewTicker(5 * time.Minute)
 	defer ipTicks.Stop()
-	go reportPublicIPChanges(ctx, nodeID, nodegrpc.NewV1Client(session), DetectPublicIPs, ipTicks.C)
-	return true, session.Run()
+	go reportPublicIPChanges(ctx, credentials.nodeID, client, DetectPublicIPs, ipTicks.C)
+	return true, <-done
+}
+
+func fetchPanelConfig(ctx context.Context, client nodegrpc.V1Client, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	config, err := client.GetNodeConfig(ctx, &emptypb.Empty{})
+	if err != nil {
+		return err
+	}
+	return storePanelConfig(path, config)
 }

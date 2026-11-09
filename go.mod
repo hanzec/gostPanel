@@ -3,6 +3,7 @@ module yagp
 go 1.27.3
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/ebitengine/purego v0.11.3
 	github.com/gin-gonic/gin v1.12.0
 	github.com/glebarez/sqlite v1.11.0

@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"yagp/pkg/nodegrpc"
 )
 
 func TestServerStartupAndSignalShutdown(t *testing.T) {
@@ -31,11 +33,17 @@ func TestServerStartupAndSignalShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer listener.Close()
+	reports, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reports.Close()
 	address := listener.Addr().String()
-	_ = listener.Close()
+	reportAddress := reports.Addr().String()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
-	config := fmt.Sprintf("server:\n  port: %q\n  mode: release\ndatabase:\n  type: sqlite\n  path: %q\nlog:\n  level: info\n  output: stdout\n", address, filepath.Join(dir, "panel.db"))
+	config := fmt.Sprintf("host: 127.0.0.1\nserver:\n  port: %q\n  mode: release\ndatabase:\n  type: sqlite\n  path: %q\nreport:\n  listen: %q\nlog:\n  level: info\n  output: stdout\n", address, filepath.Join(dir, "panel.db"), reportAddress)
 	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -48,9 +56,12 @@ func TestServerStartupAndSignalShutdown(t *testing.T) {
 		args = append(args, "-test.gocoverdir="+coverage.Value.String())
 	}
 	child := exec.CommandContext(ctx, os.Args[0], args...)
-	child.Env = append(os.Environ(), "YAGP_TEST_SERVER_CONFIG="+path, "YAGP_DATABASE_TYPE=sqlite", "YAGP_DATABASE_DSN=")
+	child.Dir = dir
+	child.Env = append(os.Environ(), "YAGP_TEST_SERVER_CONFIG="+path, "YAGP_HOST=127.0.0.1", "YAGP_DATABASE_TYPE=sqlite", "YAGP_DATABASE_DSN=")
 	var output bytes.Buffer
 	child.Stdout, child.Stderr = &output, &output
+	_ = listener.Close()
+	_ = reports.Close()
 	if err := child.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +96,18 @@ func TestServerStartupAndSignalShutdown(t *testing.T) {
 			t.Fatal("server did not become ready before the deadline")
 		case <-time.After(25 * time.Millisecond):
 		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+reportAddress+nodegrpc.SessionPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("node session without credentials = HTTP %d", res.StatusCode)
 	}
 	// HTTP can become ready while the background services are still starting.
 	// Retry the signal until the server has installed its shutdown handler.

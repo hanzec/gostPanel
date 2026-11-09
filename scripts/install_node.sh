@@ -11,6 +11,7 @@ usage() {
     cat <<'EOF'
 用法:
   install_node.sh --host HOST --token TOKEN
+  install_node.sh reenroll --node-id ID --host HOST --token TOKEN
   install_node.sh upgrade --node-id ID
   install_node.sh uninstall --node-id ID
 EOF
@@ -18,7 +19,7 @@ EOF
 
 action=install
 case "${1:-}" in
-    upgrade|uninstall) action=$1; shift ;;
+    reenroll|upgrade|uninstall) action=$1; shift ;;
 esac
 [[ "${1:-}" != "--help" ]] || { usage; exit 0; }
 [[ $EUID -eq 0 ]] || die "请使用 root 用户运行此脚本"
@@ -29,9 +30,9 @@ token=
 while (($#)); do
     [[ $# -ge 2 ]] || die "缺少参数值: $1"
     case "$action:$1" in
-        upgrade:--node-id|uninstall:--node-id) node_id=$2 ;;
-        install:--host) panel_host=$2 ;;
-        install:--token) token=$2 ;;
+        reenroll:--node-id|upgrade:--node-id|uninstall:--node-id) node_id=$2 ;;
+        install:--host|reenroll:--host) panel_host=$2 ;;
+        install:--token|reenroll:--token) token=$2 ;;
         *) usage; die "未知参数: $1" ;;
     esac
     shift 2
@@ -79,11 +80,16 @@ if [[ "$action" == uninstall ]]; then
     exit 0
 fi
 
-if [[ "$action" == upgrade ]]; then
-    [[ "$manager" == systemd ]] || die "在线升级功能需要 systemd 节点"
+if [[ "$action" == upgrade || "$action" == reenroll ]]; then
     [[ -f "$base_path/node.yaml" && -x "$base_path/yagp-daemon" ]] || die "未找到已安装的节点 $node_id"
-    [[ $(systemctl show --property=LoadState --value "$bridge_unit.service") == loaded ]] || die "未找到服务 $bridge_unit.service"
-else
+    if [[ "$manager" == systemd ]]; then
+        [[ $(systemctl show --property=LoadState --value "$bridge_unit.service") == loaded ]] || die "未找到服务 $bridge_unit.service"
+    else
+        [[ "$action" == reenroll ]] || die "在线升级功能需要 systemd 节点"
+        [[ -x "/etc/init.d/$bridge_unit" ]] || die "未找到服务 $bridge_unit"
+    fi
+fi
+if [[ "$action" == install || "$action" == reenroll ]]; then
     [[ -n "$panel_host" && -n "$token" ]] || { usage; exit 1; }
 fi
 
@@ -103,8 +109,19 @@ fi
 mkdir -p -- "$state_dir"
 tmp_dir=$(mktemp -d -- "$state_dir/.install.XXXXXXXX")
 stage="$tmp_dir/node"
+restore_bridge=false
+bridge_service() {
+    if [[ "$manager" == systemd ]]; then
+        systemctl "$1" "$bridge_unit.service"
+    else
+        rc-service "$bridge_unit" "$1"
+    fi
+}
 cleanup() {
     local result=$?
+    if (( result != 0 )) && [[ "$restore_bridge" == true ]] && ! bridge_service start; then
+        printf '原守护进程启动失败，请检查 %s\n' "$bridge_unit" >&2
+    fi
     if (( result != 0 )) && [[ "$action" == install && -n "$node_id" ]]; then
         printf '节点已完成注册，token 已失效\n' >&2
         if [[ -d "$stage" ]]; then
@@ -143,6 +160,33 @@ if [[ "$action" == upgrade ]]; then
         die "升级失败，请查看日志: journalctl -u $upgrade_unit"
     fi
     printf '节点 %s 的 yagp-daemon 已就绪，可在面板管理后续升级。\n' "$node_id"
+    exit 0
+fi
+
+if [[ "$action" == reenroll ]]; then
+    candidate="$tmp_dir/yagp-daemon"
+    install -m 0700 -- "$bridge_bin" "$candidate"
+    if [[ "$manager" == systemd ]]; then
+        if systemctl is-active --quiet "$bridge_unit.service"; then restore_bridge=true; fi
+    elif rc-service "$bridge_unit" status >/dev/null 2>&1; then
+        restore_bridge=true
+    fi
+    # A running daemon may still be writing refreshed credentials for the old registration.
+    bridge_service stop || die "无法停止节点守护服务 $bridge_unit"
+    if ! registered_id=$(printf '%s' "$token" | "$candidate" enroll --host "$panel_host" --existing "$base_path/node.yaml"); then
+        die "节点未完成重新注册。若 token 已失效，请在面板生成新的 token 后重试。"
+    fi
+    unset token
+    [[ "$registered_id" == "$node_id" ]] || die "yagp-daemon 返回了不同的节点 ID"
+    mv -fT -- "$candidate" "$base_path/yagp-daemon" || die "节点已重新注册，但未能替换守护进程"
+    restore_bridge=false
+    if ! bridge_service start; then
+        if [[ "$manager" == systemd ]]; then
+            die "节点已重新注册。服务启动失败，请查看日志: journalctl -u $bridge_unit"
+        fi
+        die "节点已重新注册。服务启动失败，请检查 $bridge_unit"
+    fi
+    printf '节点 %s 已重新注册，面板地址 %s\n' "$node_id" "$panel_host"
     exit 0
 fi
 
@@ -228,4 +272,4 @@ else
     done
 fi
 
-printf '节点 %s 已启动，上报地址 %s\n' "$node_id" "$panel_address"
+printf '节点 %s 已启动，面板地址 %s\n' "$node_id" "$panel_host"

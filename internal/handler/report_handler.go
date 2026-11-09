@@ -11,13 +11,11 @@ import (
 
 	"yagp/internal/model"
 	"yagp/internal/service"
-	"yagp/pkg/gost"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -31,6 +29,7 @@ type ReportHandler struct {
 	db           *gorm.DB
 	traffic      *service.ObserverService
 	nodes        *service.NodeService
+	nodeTokens   *service.NodeCredentialService
 	behindProxy  bool
 	reportLimits reportRateLimits
 }
@@ -41,84 +40,35 @@ func NewReportHandler(db *gorm.DB, behindProxy bool) *ReportHandler {
 	}
 }
 
-func (h *ReportHandler) RegisterNode(ctx context.Context, request *nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, error) {
-	id, err := nodegrpc.ParseRegistrationTokenID(request.GetToken())
-	if err != nil {
-		return nil, status.Error(codes.Unauthenticated, "invalid or expired registration token")
-	}
-	ipv4, ipv6, err := h.registrationIPs(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	if ipv4 == "" && ipv6 == "" {
-		return nil, status.Error(codes.FailedPrecondition, "could not detect a node IP address")
-	}
-	node, err := h.nodes.Register(ctx, uint(id), request.GetToken(), ipv4, ipv6)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, status.Error(codes.Unauthenticated, "invalid or expired registration token")
-	}
-	if err != nil {
-		logger.Errorf("注册节点 %d 失败: %v", id, err)
-		return nil, status.Error(codes.Internal, "could not register node")
-	}
-	gost.DisconnectNode(node.ID)
-	return &nodegrpc.RegisterNodeReply{NodeId: uint64(node.ID), Username: node.Username, Password: node.Password}, nil
-}
-
-func (h *ReportHandler) Connect(stream nodegrpc.V1_ConnectServer) error {
-	node, err := h.authenticateConnect(stream.Context())
-	if err != nil {
-		return err
-	}
-	methods := nodegrpc.NewDispatcher(&streamReports{ReportHandler: h, id: uint64(node.ID)},
-		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName, nodegrpc.V1_GetNftTemplate_FullMethodName)
-	session := nodegrpc.NewSession(stream, func(ctx context.Context, method string, payload []byte) ([]byte, error) {
+func (h *ReportHandler) newNodeSession(stream nodegrpc.Stream, reports *streamReports) *nodegrpc.Session {
+	methods := nodegrpc.NewDispatcher(reports,
+		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName, nodegrpc.V1_GetNodeConfig_FullMethodName)
+	return nodegrpc.NewSession(stream, func(ctx context.Context, method string, payload []byte) ([]byte, error) {
 		switch method {
 		case nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName:
-			if !h.reportLimits.allow(node.ID, method) {
+			if !h.reportLimits.allow(uint(reports.id), method) {
 				return nil, status.Error(codes.ResourceExhausted, "node report rate limit exceeded")
 			}
 		}
 		return methods(ctx, method, payload)
 	})
-	defer session.Close()
-	unregister := gost.RegisterNodeStream(node.ID, node.Username, node.Password, session)
-	defer unregister()
-	if err := stream.SendHeader(metadata.Pairs(nodegrpc.ReadyMetadata, "1")); err != nil {
-		return err
-	}
-	return session.Run()
-}
-
-func (h *ReportHandler) authenticateConnect(ctx context.Context) (*model.GostNode, error) {
-	ids := metadata.ValueFromIncomingContext(ctx, nodegrpc.NodeIDMetadata)
-	if len(ids) != 1 {
-		return nil, status.Error(codes.Unauthenticated, "missing node identity")
-	}
-	id, err := strconv.ParseUint(ids[0], 10, 64)
-	if err != nil || id == 0 {
-		return nil, status.Error(codes.Unauthenticated, "invalid node identity")
-	}
-	// Keep the authentication deadline separate from the established stream's lifetime.
-	authCtx, cancel := context.WithTimeout(ctx, connectAuthTimeout)
-	defer cancel()
-	return h.authenticateNode(authCtx, id)
 }
 
 type streamReports struct {
 	*ReportHandler
-	id uint64
+	id   uint64
+	node *model.GostNode
 }
 
-func (h *streamReports) nodeForRequest(ctx context.Context, id uint64) (*model.GostNode, error) {
+func (h *streamReports) nodeForRequest(id uint64) (*model.GostNode, error) {
 	if id != h.id {
 		return nil, status.Error(codes.Unauthenticated, "invalid node identity")
 	}
-	return h.authenticateNode(ctx, id)
+	return h.node, nil
 }
 
 func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.NodeIPsRequest) (*emptypb.Empty, error) {
-	node, err := h.nodeForRequest(ctx, request.GetNodeId())
+	node, err := h.nodeForRequest(request.GetNodeId())
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +138,7 @@ func isNodeIP(ip netip.Addr) bool {
 }
 
 func (h *streamReports) Report(ctx context.Context, request *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {
-	node, err := h.nodeForRequest(ctx, request.GetNodeId())
+	node, err := h.nodeForRequest(request.GetNodeId())
 	if err != nil {
 		return nil, err
 	}
@@ -205,23 +155,6 @@ func (h *streamReports) Report(ctx context.Context, request *nodegrpc.ReportRequ
 		return nil, status.Error(codes.Internal, "could not record traffic")
 	}
 	return &observer.ObserveReply{Ok: true}, nil
-}
-
-func (h *ReportHandler) authenticateNode(ctx context.Context, id uint64) (*model.GostNode, error) {
-	var node model.GostNode
-	err := h.db.WithContext(ctx).First(&node, id).Error
-	if contextErr := ctx.Err(); contextErr != nil {
-		return nil, status.FromContextError(contextErr).Err()
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) ||
-		(err == nil && (node.Username == "" || node.Password == "" || !nodegrpc.MatchCredentials(ctx, node.Username, node.Password))) {
-		return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
-	}
-	if err != nil {
-		logger.Errorf("查询上报节点失败: %v", err)
-		return nil, status.Error(codes.Internal, "could not look up node")
-	}
-	return &node, nil
 }
 
 func trafficSamples(observation *observer.ObserveRequest) ([]service.TrafficSample, error) {

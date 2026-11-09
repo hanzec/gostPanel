@@ -129,6 +129,16 @@ func TestUpgradeStagingRejectsUnusableExecutable(t *testing.T) {
 	if err := installUpgrade(ctx, cfg, dir, "gost", "v3.3.3", doNotDownload); err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("directory executable returned %v", err)
 	}
+	target := filepath.Join(dir, "gost")
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nprintf 'unexpected version\\n'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installUpgrade(ctx, cfg, dir, "gost", "v3.3.3", doNotDownload); err == nil || !strings.Contains(err.Error(), "unexpected Gost version output") {
+		t.Fatalf("installed executable with invalid version output returned %v", err)
+	}
 }
 
 func TestWaitForGostRequiresAuthenticatedReadyResponse(t *testing.T) {
@@ -197,6 +207,12 @@ func TestWaitForDaemonUsesUpgradeAndRollbackProbes(t *testing.T) {
 	defer stop()
 	if err := waitForDaemon(wrongVersion, cfg, "0.1.98-abc1234"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("readiness accepted a different version: %v", err)
+	}
+	cfg.ObserverListen = "127.0.0.1:0"
+	closedPort, stop := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer stop()
+	if err := waitForDaemon(closedPort, cfg, ""); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("rollback readiness accepted a closed port: %v", err)
 	}
 	cfg.ObserverListen = "192.0.2.1:1234"
 	if err := waitForDaemon(ctx, cfg, expectedDaemonUpgradeVersion); err == nil {

@@ -3,6 +3,7 @@ package nodegrpc
 import (
 	"context"
 	"encoding/pem"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestParsePanelHost(t *testing.T) {
@@ -37,27 +38,29 @@ func TestParsePanelHost(t *testing.T) {
 	}
 }
 
-type panelRouteFixture struct{ UnimplementedV1Server }
-
-func (panelRouteFixture) RegisterNode(context.Context, *RegisterNodeRequest) (*RegisterNodeReply, error) {
-	return &RegisterNodeReply{NodeId: 42}, nil
-}
-
-func TestPanelClientSendsExpectedRPCPath(t *testing.T) {
-	rpcServer := grpc.NewServer()
-	defer rpcServer.Stop()
-	RegisterPanelServer(rpcServer, panelRouteFixture{})
-	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor != 2 || r.URL.Path != "/api/grpc/RegisterNode" {
-			t.Errorf("unexpected %s request for %q", r.Proto, r.URL.Path)
+func TestPanelClientSendsProtobufToFixedHTTPSPath(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != RegisterPath || r.URL.RawQuery != "" || r.Header.Get("Content-Type") != ProtobufContentType {
+			t.Errorf("unexpected request: %s %q %q", r.Method, r.URL, r.Header.Get("Content-Type"))
 			http.NotFound(w, r)
 			return
 		}
-		rpcServer.ServeHTTP(w, r)
+		data, err := io.ReadAll(r.Body)
+		var request RegisterNodeRequest
+		if err != nil || proto.Unmarshal(data, &request) != nil || request.GetToken() != "fixture" ||
+			request.GetIpv4() != "203.0.113.42" || request.GetIpv6() != "2001:db8::42" {
+			t.Errorf("invalid Protobuf request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		response, _ := proto.Marshal(&RegisterNodeReply{
+			NodeId: 42, Username: "node-42", Password: "local-gost-password",
+			Credentials: &NodeCredentials{AccessToken: "issued-access", RefreshToken: "issued-refresh", AccessExpiresAt: 100, RefreshExpiresAt: 200},
+		})
+		w.Header().Set("Content-Type", ProtobufContentType)
+		_, _ = w.Write(response)
 	}))
-	server.EnableHTTP2 = true
-	server.StartTLS()
-	defer server.Close()
+	t.Cleanup(server.Close)
 	panel, err := ParsePanelHost("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
@@ -67,26 +70,32 @@ func TestPanelClientSendsExpectedRPCPath(t *testing.T) {
 	if err := os.WriteFile(caFile, ca, 0600); err != nil {
 		t.Fatal(err)
 	}
-	transport, err := panel.ClientTLS(caFile, "")
+	tlsConfig, err := panel.TLSConfig(caFile, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn, err := panel.NewClientConn(grpc.WithTransportCredentials(transport), grpc.WithContextDialer(
-		func(ctx context.Context, target string) (net.Conn, error) {
+	transport := &http.Transport{
+		TLSClientConfig: tlsConfig,
+		DialContext: func(ctx context.Context, _, target string) (net.Conn, error) {
 			if target != "127.0.0.1:443" {
 				t.Errorf("dial target = %q, want 127.0.0.1:443", target)
 			}
 			return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
 		},
-	))
-	if err != nil {
-		t.Fatal(err)
 	}
-	defer conn.Close()
+	t.Cleanup(transport.CloseIdleConnections)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	response, err := NewV1Client(conn).RegisterNode(ctx, &RegisterNodeRequest{})
-	if err != nil || response.GetNodeId() != 42 {
-		t.Fatalf("registration via fixed TLS endpoint = %v, %v", response, err)
+	var response RegisterNodeReply
+	err = PostProtobuf(ctx, &http.Client{Transport: transport}, panel.HTTPURL(RegisterPath), &RegisterNodeRequest{
+		Token: "fixture", Ipv4: "203.0.113.42", Ipv6: "2001:db8::42",
+	}, &response)
+	if err != nil || response.GetNodeId() != 42 || response.GetUsername() != "node-42" || response.GetPassword() != "local-gost-password" {
+		t.Fatalf("registration via fixed TLS endpoint = %v, %v", &response, err)
+	}
+	credentials := response.GetCredentials()
+	if credentials.GetAccessToken() != "issued-access" || credentials.GetRefreshToken() != "issued-refresh" ||
+		credentials.GetAccessExpiresAt() != 100 || credentials.GetRefreshExpiresAt() != 200 {
+		t.Fatal("registration did not return the expected credential pair")
 	}
 }

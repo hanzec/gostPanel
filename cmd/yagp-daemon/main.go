@@ -13,7 +13,6 @@ import (
 	"yagp/internal/buildinfo"
 	"yagp/internal/nodebridge"
 
-	"google.golang.org/grpc"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,7 +37,7 @@ func run(ctx context.Context, args []string) error {
 		case "ensure-gost":
 			return ensureGost(ctx, parseConfigFlag(args[0], args[1:]))
 		case "nft-template":
-			return printNftTemplate(ctx, parseConfigFlag(args[0], args[1:]))
+			return printNftTemplate(parseConfigFlag(args[0], args[1:]))
 		case "upgrade-component":
 			return upgradeComponent(ctx, args[1:])
 		case "--upgrade-installed":
@@ -55,12 +54,12 @@ func run(ctx context.Context, args []string) error {
 	return nodebridge.Run(ctx, config)
 }
 
-func printNftTemplate(ctx context.Context, configFile string, dialOptions ...grpc.DialOption) error {
-	config, err := readConfig(configFile)
+func printNftTemplate(configFile string) error {
+	_, err := readConfig(configFile)
 	if err != nil {
 		return err
 	}
-	template, err := nodebridge.GetNftTemplate(ctx, config, dialOptions...)
+	template, err := nodebridge.ReadNftTemplate(configFile)
 	if err != nil {
 		return err
 	}

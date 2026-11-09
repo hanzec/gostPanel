@@ -3,12 +3,12 @@ package nodegrpc
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -19,32 +19,32 @@ type sessionPanelFixture struct {
 	connected chan *Session
 }
 
-type rawSessionFixture struct {
-	UnimplementedV1Server
-	serve func(V1_ConnectServer) error
-}
-
-func (f rawSessionFixture) Connect(stream V1_ConnectServer) error { return f.serve(stream) }
-
-func openRawSession(t *testing.T, ctx context.Context, serve func(V1_ConnectServer) error, opts ...grpc.ServerOption) V1_ConnectClient {
+func openRawSession(t *testing.T, ctx context.Context, serve func(*WebSocketStream) error) *WebSocketStream {
 	t.Helper()
-	server := grpc.NewServer(opts...)
-	RegisterV1Server(server, rawSessionFixture{serve: serve})
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+SessionPath, func(w http.ResponseWriter, r *http.Request) {
+		stream, err := AcceptSession(w, r)
+		if err != nil {
+			return
+		}
+		defer stream.Close()
+		_ = serve(stream)
+	})
+	server := httptest.NewTLSServer(mux)
+	t.Cleanup(server.Close)
+	host, err := ParsePanelHost("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
-	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	client := server.Client()
+	client.Transport.(*http.Transport).DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
+	}
+	stream, err := host.DialSession(ctx, client, 1, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	stream, err := NewV1Client(conn).Connect(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() { _ = stream.Close() })
 	return stream
 }
 
@@ -53,14 +53,17 @@ func TestSessionRejectsMalformedFramesAndHonorsRemoteTimeout(t *testing.T) {
 	defer cancel()
 	panel := &sessionPanelFixture{}
 	dispatch := NewDispatcher(panel, V1_UpdateNodeIPs_FullMethodName)
-	stream := openRawSession(t, ctx, func(stream V1_ConnectServer) error {
-		return NewSession(stream, func(ctx context.Context, method string, payload []byte) ([]byte, error) {
+	finished := make(chan error, 1)
+	stream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
+		err := NewSession(stream, func(ctx context.Context, method string, payload []byte) ([]byte, error) {
 			if method == V1_Execute_FullMethodName {
 				<-ctx.Done()
 				return nil, ctx.Err()
 			}
 			return dispatch(ctx, method, payload)
 		}).Run()
+		finished <- err
+		return err
 	})
 	for _, test := range []struct {
 		frame *StreamFrame
@@ -80,8 +83,13 @@ func TestSessionRejectsMalformedFramesAndHonorsRemoteTimeout(t *testing.T) {
 	if err := stream.Send(&StreamFrame{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := stream.Recv(); status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("missing frame ID ended stream with %v", err)
+	select {
+	case err := <-finished:
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("missing frame ID ended stream with %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("missing frame ID did not close the session")
 	}
 }
 
@@ -90,7 +98,7 @@ func TestSessionRejectsOverloadWithoutBlockingReplies(t *testing.T) {
 	defer cancel()
 	active := make(chan struct{}, sessionCapacity)
 	connected := make(chan *Session, 1)
-	stream := openRawSession(t, ctx, func(stream V1_ConnectServer) error {
+	stream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
 		session := NewSession(stream, func(ctx context.Context, _ string, _ []byte) ([]byte, error) {
 			active <- struct{}{}
 			<-ctx.Done()
@@ -138,15 +146,15 @@ func TestSessionSkipsCanceledCallWhileWaitingForWriter(t *testing.T) {
 	defer cancel()
 	connected := make(chan *Session, 1)
 	start := make(chan struct{})
-	stream := openRawSession(t, ctx, func(stream V1_ConnectServer) error {
+	stream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
 		session := NewSession(stream, nil)
 		defer session.Close()
 		connected <- session
 		select {
 		case <-start:
 			return session.Run()
-		case <-stream.Context().Done():
-			return stream.Context().Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	})
 	var session *Session
@@ -197,7 +205,7 @@ func TestSessionSkipsCanceledCallWhileWaitingForWriter(t *testing.T) {
 	}
 }
 
-func (f *sessionPanelFixture) Connect(stream V1_ConnectServer) error {
+func (f *sessionPanelFixture) serve(stream *WebSocketStream) error {
 	session := NewSession(stream, NewDispatcher(f, V1_UpdateNodeIPs_FullMethodName))
 	f.connected <- session
 	return session.Run()
@@ -237,31 +245,7 @@ func TestBidirectionalSessionCorrelatesCallsAndReleasesPendingOnDisconnect(t *te
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	panel := &sessionPanelFixture{connected: make(chan *Session, 1)}
-	server := grpc.NewServer()
-	RegisterPanelServer(server, panel)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() { _ = server.Serve(listener) }()
-	defer server.Stop()
-	host, err := ParsePanelHost("127.0.0.1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, err := host.NewClientConn(grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(
-		func(ctx context.Context, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
-		},
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	stream, err := NewV1Client(conn).Connect(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	stream := openRawSession(t, ctx, panel.serve)
 	node := &sessionNodeFixture{started: make(chan struct{}, 1), release: make(chan struct{})}
 	nodeSession := NewSession(stream, NewDispatcher(node, V1_Execute_FullMethodName))
 	go func() { _ = nodeSession.Run() }()
@@ -271,7 +255,7 @@ func TestBidirectionalSessionCorrelatesCallsAndReleasesPendingOnDisconnect(t *te
 	select {
 	case panelSession = <-panel.connected:
 	case <-ctx.Done():
-		t.Fatalf("panel did not accept Connect: %v", ctx.Err())
+		t.Fatalf("panel did not accept the WebSocket session: %v", ctx.Err())
 	}
 	defer panelSession.Close()
 	panelCalls := NewV1Client(nodeSession)
@@ -291,13 +275,13 @@ func TestBidirectionalSessionCorrelatesCallsAndReleasesPendingOnDisconnect(t *te
 		t.Fatal("slow command did not reach the node")
 	}
 
-	if _, err = panelCalls.UpdateNodeIPs(ctx, &NodeIPsRequest{Ipv4: "192.0.2.42"}); err != nil {
+	if _, err := panelCalls.UpdateNodeIPs(ctx, &NodeIPsRequest{Ipv4: "192.0.2.42"}); err != nil {
 		t.Fatalf("IP update while executing command: %v", err)
 	}
-	if _, err = panelCalls.UpdateNodeIPs(ctx, &NodeIPsRequest{}); status.Code(err) != codes.InvalidArgument {
+	if _, err := panelCalls.UpdateNodeIPs(ctx, &NodeIPsRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("invalid IP update: %v", err)
 	}
-	if _, err = panelCalls.GetNftConfig(ctx, &emptypb.Empty{}); status.Code(err) != codes.Unimplemented {
+	if _, err := panelCalls.GetNftConfig(ctx, &emptypb.Empty{}); status.Code(err) != codes.Unimplemented {
 		t.Fatalf("method outside allowlist: %v", err)
 	}
 	fast, err := nodeCalls.Execute(ctx, &CommandRequest{Path: "/fast"})

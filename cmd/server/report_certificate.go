@@ -94,24 +94,28 @@ func generateReportCertificate(host string) error {
 }
 
 func persistReportCertificate(bundle []byte) error {
-	dir := filepath.Dir(reportTLSBundle)
+	return persistReportSecret(reportTLSBundle, bundle)
+}
+
+func persistReportSecret(path string, secret []byte) error {
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(dir, ".report-tls-*")
+	file, err := os.CreateTemp(dir, ".report-secret-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(file.Name())
-	_, err = file.Write(bundle)
+	_, err = file.Write(secret)
 	if err == nil {
 		err = file.Sync()
 	}
 	if err = errors.Join(err, file.Close()); err != nil {
 		return err
 	}
-	// Publish the complete pair without replacing a certificate another instance has already installed.
-	err = os.Link(file.Name(), reportTLSBundle)
+	// Publish the complete file without replacing an identity another instance has installed.
+	err = os.Link(file.Name(), path)
 	if errors.Is(err, os.ErrExist) {
 		return nil
 	}

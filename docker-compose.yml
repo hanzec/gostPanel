@@ -42,36 +42,41 @@ services:
       traefik.http.routers.yagp-favicon.tls: "true"
       traefik.http.routers.yagp-favicon.priority: "20"
       traefik.http.routers.yagp-favicon.service: yagp
-      # Keep registration limits separate from the persistent stream.
-      traefik.http.routers.yagp-grpc-register.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/grpc/RegisterNode`)"
-      traefik.http.routers.yagp-grpc-register.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
-      traefik.http.routers.yagp-grpc-register.tls: "true"
-      traefik.http.routers.yagp-grpc-register.priority: "50"
-      traefik.http.routers.yagp-grpc-register.service: yagp-grpc
-      traefik.http.routers.yagp-grpc-register.middlewares: yagp-grpc-register-limit
-      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.average: "6"
-      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.period: 1m
-      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.burst: "5"
+      # Node routes authenticate on the report listener and bypass Authentik.
+      traefik.http.routers.yagp-node-register.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/node/v2/register`)"
+      traefik.http.routers.yagp-node-register.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-node-register.tls: "true"
+      traefik.http.routers.yagp-node-register.priority: "50"
+      traefik.http.routers.yagp-node-register.service: yagp-node
+      traefik.http.routers.yagp-node-register.middlewares: yagp-node-register-limit
+      traefik.http.middlewares.yagp-node-register-limit.ratelimit.average: "6"
+      traefik.http.middlewares.yagp-node-register-limit.ratelimit.period: 1m
+      traefik.http.middlewares.yagp-node-register-limit.ratelimit.burst: "5"
       # Traefik replaces X-Real-IP from untrusted peers before this middleware runs.
-      traefik.http.middlewares.yagp-grpc-register-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
-      # Count each new Connect request once. An open stream does not consume more tokens.
-      traefik.http.routers.yagp-grpc-connect.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/grpc/Connect`)"
-      traefik.http.routers.yagp-grpc-connect.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
-      traefik.http.routers.yagp-grpc-connect.tls: "true"
-      traefik.http.routers.yagp-grpc-connect.priority: "50"
-      traefik.http.routers.yagp-grpc-connect.service: yagp-grpc
-      traefik.http.routers.yagp-grpc-connect.middlewares: yagp-grpc-connect-limit
-      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.average: ${YAGP_CONNECT_RATE_PER_MINUTE:-60}
-      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.period: 1m
-      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.burst: ${YAGP_CONNECT_RATE_BURST:-30}
-      traefik.http.middlewares.yagp-grpc-connect-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
-      traefik.http.routers.yagp-grpc.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/grpc/GetNftTemplate`)"
-      traefik.http.routers.yagp-grpc.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
-      traefik.http.routers.yagp-grpc.tls: "true"
-      traefik.http.routers.yagp-grpc.priority: "50"
-      traefik.http.routers.yagp-grpc.service: yagp-grpc
-      traefik.http.services.yagp-grpc.loadbalancer.server.port: "39101"
-      traefik.http.services.yagp-grpc.loadbalancer.server.scheme: h2c
+      traefik.http.middlewares.yagp-node-register-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
+      traefik.http.routers.yagp-node-refresh.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/node/v2/refresh`)"
+      traefik.http.routers.yagp-node-refresh.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-node-refresh.tls: "true"
+      traefik.http.routers.yagp-node-refresh.priority: "50"
+      traefik.http.routers.yagp-node-refresh.service: yagp-node
+      traefik.http.routers.yagp-node-refresh.middlewares: yagp-node-refresh-limit
+      traefik.http.middlewares.yagp-node-refresh-limit.ratelimit.average: ${YAGP_REFRESH_RATE_PER_MINUTE:-60}
+      traefik.http.middlewares.yagp-node-refresh-limit.ratelimit.period: 1m
+      traefik.http.middlewares.yagp-node-refresh-limit.ratelimit.burst: ${YAGP_REFRESH_RATE_BURST:-30}
+      traefik.http.middlewares.yagp-node-refresh-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
+      # Count the WebSocket handshake once, regardless of session length.
+      traefik.http.routers.yagp-node-session.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`GET`) && Path(`/api/node/v2/session`)"
+      traefik.http.routers.yagp-node-session.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-node-session.tls: "true"
+      traefik.http.routers.yagp-node-session.priority: "50"
+      traefik.http.routers.yagp-node-session.service: yagp-node
+      traefik.http.routers.yagp-node-session.middlewares: yagp-node-session-limit
+      traefik.http.middlewares.yagp-node-session-limit.ratelimit.average: ${YAGP_CONNECT_RATE_PER_MINUTE:-60}
+      traefik.http.middlewares.yagp-node-session-limit.ratelimit.period: 1m
+      traefik.http.middlewares.yagp-node-session-limit.ratelimit.burst: ${YAGP_CONNECT_RATE_BURST:-30}
+      traefik.http.middlewares.yagp-node-session-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
+      traefik.http.services.yagp-node.loadbalancer.server.port: "39101"
+      traefik.http.services.yagp-node.loadbalancer.server.scheme: http
       # Route login and callback requests directly to the outpost to avoid an auth loop.
       traefik.http.routers.yagp-outpost.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && PathPrefix(`/outpost.goauthentik.io/`)"
       traefik.http.routers.yagp-outpost.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}

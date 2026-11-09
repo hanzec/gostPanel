@@ -49,7 +49,7 @@ func controlFixture(t *testing.T) (*Client, chan<- controlCall) {
 		}
 	})
 	config := &Config{NodeID: 1, Username: "gost-test", Password: "fixture-password"}
-	t.Cleanup(RegisterNodeStream(config.NodeID, config.Username, config.Password, session))
+	t.Cleanup(RegisterNodeStream(config.NodeID, 1, config.Username, config.Password, session))
 	t.Cleanup(func() {
 		if len(pending) != 0 {
 			t.Errorf("%d expected node calls were not made", len(pending))
@@ -253,12 +253,12 @@ func TestGostTypedControlCalls(t *testing.T) {
 func TestNodeStreamReplacementKeepsTheCurrentConnection(t *testing.T) {
 	const id = 42
 	previous := streamtest.Open(t, nil)
-	removePrevious := RegisterNodeStream(id, "node", "previous", previous)
+	removePrevious := RegisterNodeStream(id, 1, "node", "previous", previous)
 	defer removePrevious()
 	current := streamtest.Open(t, func(context.Context, string, []byte) ([]byte, error) {
 		return proto.Marshal(&nodegrpc.CommandReply{StatusCode: http.StatusOK})
 	})
-	defer RegisterNodeStream(id, "node", "current", current)()
+	defer RegisterNodeStream(id, 1, "node", "current", current)()
 	select {
 	case <-previous.Done():
 	default:
@@ -275,5 +275,28 @@ func TestNodeStreamReplacementKeepsTheCurrentConnection(t *testing.T) {
 	DisconnectNode(id)
 	if err := client.HealthCheck(); status.Code(err) != codes.Unavailable {
 		t.Fatalf("disconnected node: %v", err)
+	}
+}
+
+func TestNodeStreamRejectsDelayedOlderEnrollment(t *testing.T) {
+	const id = 43
+	// Both generations have the same local Gost credentials after re-enrollment.
+	current := streamtest.Open(t, func(context.Context, string, []byte) ([]byte, error) {
+		return proto.Marshal(&nodegrpc.CommandReply{StatusCode: http.StatusOK})
+	})
+	unregister := RegisterNodeStream(id, 2, "node", "password", current)
+	if unregister == nil {
+		t.Fatal("current enrollment was rejected")
+	}
+	defer unregister()
+
+	delayed := streamtest.Open(t, nil)
+	if remove := RegisterNodeStream(id, 1, "node", "password", delayed); remove != nil {
+		remove()
+		t.Fatal("delayed handshake replaced the newer enrollment")
+	}
+	client := NewClient(&Config{NodeID: id, Username: "node", Password: "password"})
+	if err := client.HealthCheck(); err != nil {
+		t.Fatalf("newer enrollment did not retain its usable connection: %v", err)
 	}
 }
