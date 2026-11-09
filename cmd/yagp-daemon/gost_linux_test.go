@@ -1,15 +1,14 @@
 package main
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,27 +17,33 @@ import (
 	"yagp/internal/buildinfo"
 )
 
-func gostTestArchive(t *testing.T, name string) []byte {
+type gostReleaseFixture struct {
+	http.RoundTripper
+}
+
+func (f gostReleaseFixture) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Host != "api.github.com" {
+		return f.RoundTripper.RoundTrip(req)
+	}
+	if req.URL.Path != "/repos/go-gost/gost/releases/latest" {
+		return nil, fmt.Errorf("unexpected release lookup: %s", req.URL)
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"tag_name":"v3.3.3"}`)),
+	}, nil
+}
+
+func useGostReleaseFixture(t *testing.T) {
 	t.Helper()
-	var data bytes.Buffer
-	compressed := gzip.NewWriter(&data)
-	tarball := tar.NewWriter(compressed)
-	if err := tarball.WriteHeader(&tar.Header{Name: name, Size: 6, Mode: 0700}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tarball.Write([]byte("binary")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tarball.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := compressed.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return data.Bytes()
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	http.DefaultTransport = gostReleaseFixture{original}
 }
 
 func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
+	useGostReleaseFixture(t)
+	wantPath := "/https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz"
 	for _, test := range []struct {
 		name string
 		code int
@@ -52,7 +57,7 @@ func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				if req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "gost_"+gostVersion+"_linux_") {
+				if req.Method != http.MethodGet || req.URL.Path != wantPath {
 					t.Errorf("unexpected release request: %s %s", req.Method, req.URL.Path)
 				}
 				w.WriteHeader(test.code)
@@ -86,6 +91,7 @@ func TestEnsureGostBootstrapsMissingBinaryAndService(t *testing.T) {
 	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
 		t.Skip("set YAGP_TEST_UPGRADE=1 in a disposable Linux container")
 	}
+	useGostReleaseFixture(t)
 	archive := gostTestArchive(t, "gost")
 	var available atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

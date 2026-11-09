@@ -17,9 +17,8 @@ import (
 	"time"
 
 	"yagp/internal/nodebridge"
+	"yagp/pkg/upgrade"
 )
-
-const gostVersion = "3.2.6"
 
 func prepareGost(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("prepare-gost", flag.ExitOnError)
@@ -28,7 +27,7 @@ func prepareGost(ctx context.Context, args []string) error {
 	if *output == "" || flags.NArg() != 0 {
 		return errors.New("prepare-gost requires --output")
 	}
-	return downloadGost(ctx, *output)
+	return downloadGost(ctx, *output, true)
 }
 
 func ensureGost(ctx context.Context, configFile string) error {
@@ -49,7 +48,7 @@ func ensureGost(ctx context.Context, configFile string) error {
 	}
 	gostBinary := filepath.Join(basePath, "gost")
 	if _, err = os.Stat(gostBinary); errors.Is(err, os.ErrNotExist) {
-		if err = downloadGost(ctx, gostBinary); err != nil {
+		if err = downloadGost(ctx, gostBinary, false); err != nil {
 			return fmt.Errorf("install Gost binary: %w", err)
 		}
 	} else if err != nil {
@@ -106,14 +105,23 @@ func systemctl(ctx context.Context, args ...string) error {
 	return nil
 }
 
-func downloadGost(ctx context.Context, path string) error {
+func downloadGost(ctx context.Context, path string, showProgress bool) error {
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		return errors.New("Gost installation supports Linux amd64 and arm64")
 	}
+	if showProgress {
+		fmt.Fprintln(os.Stderr, "Checking the latest stable Gost release")
+	}
+	url, err := gostReleaseURL(ctx)
+	if err != nil {
+		return err
+	}
+	if showProgress {
+		return downloadGostWithCurl(ctx, url, path)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	url := fmt.Sprintf("%shttps://github.com/go-gost/gost/releases/download/v%s/gost_%s_linux_%s.tar.gz",
-		os.Getenv("GH_PROXY"), gostVersion, gostVersion, runtime.GOARCH)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -124,11 +132,55 @@ func downloadGost(ctx context.Context, path string) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("download Gost: %s", res.Status)
+		return fmt.Errorf("download Gost from %s: %s", url, res.Status)
 	}
-	compressed, err := gzip.NewReader(res.Body)
+	return extractGost(path, res.Body)
+}
+
+func gostReleaseURL(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	url, err := upgrade.NewClient().LatestGostArchiveURL(ctx, runtime.GOARCH)
+	if err != nil {
+		return "", fmt.Errorf("look up latest stable Gost release: %w", err)
+	}
+	return os.Getenv("GH_PROXY") + url, nil
+}
+
+func downloadGostWithCurl(ctx context.Context, url, path string) error {
+	dir, err := os.MkdirTemp(filepath.Dir(path), ".gost-download-*")
 	if err != nil {
 		return err
+	}
+	defer os.RemoveAll(dir)
+	archivePath := filepath.Join(dir, "gost.tar.gz")
+	fmt.Fprintf(os.Stderr, "Downloading Gost: %s\n", url)
+	cmd := exec.CommandContext(ctx, "curl", "-fSL", "--retry", "2", "--connect-timeout", "10", "--max-time", "60",
+		"--write-out", "%{http_code}", "--output", archivePath, "--", url)
+	cmd.Stderr = os.Stderr
+	status, err := cmd.Output()
+	if err != nil {
+		if len(status) > 0 {
+			return fmt.Errorf("download Gost: HTTP %s: %w", status, err)
+		}
+		return fmt.Errorf("download Gost: %w", err)
+	}
+	if string(status) != "200" {
+		return fmt.Errorf("download Gost: unexpected HTTP %s", status)
+	}
+	fmt.Fprintln(os.Stderr, "Gost download completed (HTTP 200); extracting archive")
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return extractGost(path, file)
+}
+
+func extractGost(path string, source io.Reader) error {
+	compressed, err := gzip.NewReader(source)
+	if err != nil {
+		return fmt.Errorf("open Gost archive: %w", err)
 	}
 	defer compressed.Close()
 	archive := tar.NewReader(compressed)
@@ -138,7 +190,7 @@ func downloadGost(ctx context.Context, path string) error {
 			return errors.New("Gost archive has no executable")
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("read Gost archive: %w", err)
 		}
 		if filepath.Clean(header.Name) == "gost" && header.Typeflag == tar.TypeReg && header.Size > 0 {
 			return installGostBinary(path, archive)

@@ -56,6 +56,7 @@ func TestLatestReleaseValidatesGitHubResponse(t *testing.T) {
 		{name: "stable daemon", component: "daemon", wantPath: daemonPath, body: `{"tag_name":"0.1.100-abcdef1"}`, wantVersion: "0.1.100-abcdef1", status: 200},
 		{name: "draft", component: "gost", wantPath: gostPath, body: `{"tag_name":"v3.3.3","draft":true}`, wantError: "invalid stable release tag", status: 200},
 		{name: "prerelease", component: "gost", wantPath: gostPath, body: `{"tag_name":"v3.3.3","prerelease":true}`, wantError: "invalid stable release tag", status: 200},
+		{name: "nightly", component: "gost", wantPath: gostPath, body: `{"tag_name":"v3.3.4-nightly.20261102"}`, wantError: "invalid stable release tag", status: 200},
 		{name: "malformed tag", component: "daemon", wantPath: daemonPath, body: `{"tag_name":"0.1.100"}`, wantError: "invalid stable release tag", status: 200},
 		{name: "oversized version number", component: "gost", wantPath: gostPath, body: `{"tag_name":"v3.3.18446744073709551616"}`, wantError: "invalid stable release tag", status: 200},
 		{name: "invalid JSON", component: "gost", wantPath: gostPath, body: "{", wantError: "unexpected EOF", status: 200},
@@ -84,6 +85,22 @@ func TestLatestReleaseValidatesGitHubResponse(t *testing.T) {
 				t.Fatalf("latest release = %q, %v, want %q", version, err, test.wantVersion)
 			}
 		})
+	}
+}
+
+func TestLatestGostArchiveURLUsesReleaseTagAndArchitecture(t *testing.T) {
+	client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
+		if req.Host != "api.github.com" || req.URL.Path != "/repos/go-gost/gost/releases/latest" {
+			t.Errorf("unexpected release lookup: %s%s", req.Host, req.URL.Path)
+			http.NotFound(w, req)
+			return
+		}
+		_, _ = io.WriteString(w, `{"tag_name":"v3.3.3"}`)
+	})
+	got, err := client.LatestGostArchiveURL(t.Context(), "arm64")
+	const want = "https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_arm64.tar.gz"
+	if err != nil || got != want {
+		t.Fatalf("latest Gost archive = %q, %v, want %q", got, err, want)
 	}
 }
 

@@ -1,6 +1,7 @@
 import { flushPromises } from '@vue/test-utils'
 import { ElSelect } from 'element-plus'
 import { nextTick } from 'vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Nodes from '@/views/Nodes.vue'
 import * as api from '@/api/node'
@@ -8,7 +9,7 @@ import { getPublicSystemConfig } from '@/api/system'
 import { button, click, deferred, dialog, mockNodeMessages, mountNodeComponent, response } from './node-test-support.js'
 
 vi.mock('@/api/node', () => ({
-  getNodeList: vi.fn(), createNode: vi.fn(), updateNode: vi.fn(), deleteNode: vi.fn(),
+  getNode: vi.fn(), getNodeList: vi.fn(), createNode: vi.fn(), updateNode: vi.fn(), deleteNode: vi.fn(),
   issueNodeRegistrationToken: vi.fn(), getNodeConfig: vi.fn(),
   getGostService: vi.fn(), getGostLogs: vi.fn(), restartGostService: vi.fn(),
   getNodeNftConfig: vi.fn(), applyNodeNftConfig: vi.fn(),
@@ -30,13 +31,17 @@ const editForm = (view, title) => dialog(view, title).get('form.el-form')
 const quotaInput = '[placeholder="例如 100.5"]'
 let wrapper
 let messages
+let router
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetAllMocks()
   messages = mockNodeMessages()
   api.getNodeList.mockResolvedValue(list([primary]))
+  api.getNode.mockResolvedValue(response(primary))
   getPublicSystemConfig.mockResolvedValue(response({ host: 'panel.example.com' }))
   api.issueNodeRegistrationToken.mockImplementation(async () => token())
+  router = createRouter({ history: createMemoryHistory(), routes: [{ name: 'Nodes', path: '/nodes', component: Nodes }] })
+  await router.push('/nodes')
 })
 
 afterEach(() => {
@@ -49,11 +54,49 @@ afterEach(() => {
 })
 
 function open() {
-  wrapper = mountNodeComponent(Nodes)
+  wrapper = mountNodeComponent(Nodes, {}, [router])
   return wrapper
 }
 
+async function openDetail(view) {
+  await view.get('tbody tr').trigger('click')
+  await flushPromises()
+}
+
 describe('node inventory', () => {
+  it('opens a node from any row cell and returns to the filtered list', async () => {
+    const view = open()
+    await flushPromises()
+    await view.get('#node-keyword').setValue(primary.name)
+    await view.get('form[aria-label="筛选节点"]').trigger('submit')
+    await flushPromises()
+    expect(view.text()).not.toContain('更多')
+    expect(view.get('#node-link-7').attributes('href')).toBe('/nodes?node=7')
+    await view.get('tbody tr td:nth-child(2)').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query.node).toBe('7')
+    expect(api.getNode).toHaveBeenCalledWith(primary.id)
+    expect(view.get('h1').text()).toBe(primary.name)
+    expect(view.get('progress').element.max).toBe(primary.traffic_limit_bytes)
+    expect(view.get('progress').element.value).toBe(primary.traffic_quota_used_bytes)
+    expect(view.find('tbody').exists()).toBe(false)
+    await view.get('.node-detail-back').trigger('click')
+    await flushPromises()
+    expect(view.get('#node-keyword').element.value).toBe(primary.name)
+    expect(document.activeElement).toBe(view.get('#node-link-7').element)
+  })
+
+  it('loads a direct detail link and can retry a failed read', async () => {
+    api.getNode.mockRejectedValueOnce(new Error('network'))
+    await router.push('/nodes?node=7')
+    const view = open()
+    await flushPromises()
+    expect(view.get('[role="alert"]').text()).toContain('无法读取节点详情')
+    expect(api.getNodeList).not.toHaveBeenCalled()
+    await click(view, '重新加载')
+    expect(view.get('h1').text()).toBe(primary.name)
+  })
+
   it('loads, filters, clears an empty search and recovers from a request error', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const pending = deferred()
@@ -136,6 +179,7 @@ describe('node inventory', () => {
     const view = open()
     await flushPromises()
     await click(view, '配置')
+    expect(router.currentRoute.value.query.node).toBeUndefined()
     const config = dialog(view, '节点配置 · 边缘节点')
     expect(config.text()).toContain('正在读取节点配置')
     pending.reject(new Error('node offline'))
@@ -199,6 +243,7 @@ describe('node registration and quota settings', () => {
     getPublicSystemConfig.mockRejectedValue(new Error('not configured'))
     const view = open()
     await flushPromises()
+    await openDetail(view)
     await click(view, '编辑节点')
     expect(editForm(view, '编辑节点').get(quotaInput).element.value).toBe('1.0000000009')
     await click(dialog(view, '编辑节点'), '保存更改')
@@ -257,15 +302,16 @@ describe('node registration and quota settings', () => {
     expect(command).toContain("--token 'one'\"'\"'two'")
     await click(install, '复制安装命令')
     expect(writeText).toHaveBeenCalledWith(command)
-    expect(install.get('[role="status"]').text()).toBe('安装命令已复制')
+    expect(messages.success).toHaveBeenCalledExactlyOnceWith('安装命令已复制')
     await click(install, '复制安装命令')
     expect(execCommand).toHaveBeenCalledWith('copy')
-    expect(install.get('[role="status"]').text()).toBe('安装命令已复制')
+    expect(messages.success).toHaveBeenNthCalledWith(2, '安装命令已复制')
+    expect(install.text()).not.toContain('安装命令已复制')
     delete window.navigator.clipboard
     await click(install, '复制安装命令')
     expect(field.selectionStart).toBe(0)
     expect(field.selectionEnd).toBe(command.length)
-    expect(install.get('[role="status"]').text()).toContain('已选中安装命令')
+    expect(messages.warning).toHaveBeenCalledExactlyOnceWith('已选中安装命令，请使用系统复制功能。')
     await vi.advanceTimersByTimeAsync(1000)
     expect(install.text()).toContain('令牌已过期')
     expect(install.find('textarea').exists()).toBe(false)
@@ -307,6 +353,7 @@ describe('node registration and quota settings', () => {
     api.updateNode.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(response(primary))
     const view = open()
     await flushPromises()
+    await openDetail(view)
     await click(view, '编辑节点')
     const edit = dialog(view, '编辑节点')
     const form = editForm(view, '编辑节点')
@@ -321,6 +368,8 @@ describe('node registration and quota settings', () => {
     await click(edit, '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: '更名节点', remark: primary.remark })
     expect(view.find('[aria-label="编辑节点"]').exists()).toBe(false)
+    await view.get('.node-detail-back').trigger('click')
+    await flushPromises()
     await click(view, '添加节点')
     await click(dialog(view, '添加节点'), '取消')
     expect(view.find('[aria-label="添加节点"]').exists()).toBe(false)
@@ -335,6 +384,7 @@ describe('node actions', () => {
     api.getNodeUpgradeStatus.mockResolvedValue(response({ available: false }))
     const view = open()
     await flushPromises()
+    await openDetail(view)
     for (const [action, request] of [['Gost 服务', api.getGostService], ['版本与升级', api.getNodeUpgradeStatus], ['nft 配置', api.getNodeNftConfig]]) {
       await click(view, action)
       await vi.dynamicImportSettled()
@@ -352,6 +402,7 @@ describe('node actions', () => {
     api.deleteNode.mockRejectedValueOnce(failure).mockResolvedValueOnce(response({}))
     const view = open()
     await flushPromises()
+    await openDetail(view)
     messages.confirm.mockRejectedValueOnce('cancel')
     await click(view, '删除节点')
     expect(api.deleteNode).not.toHaveBeenCalled()

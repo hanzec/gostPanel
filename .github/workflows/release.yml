@@ -85,7 +85,7 @@ jobs:
             --workdir /src \
             -e GOTOOLCHAIN=local -e YAGP_TEST_NFT=1 -e YAGP_TEST_UPGRADE=1 \
             "golang:${toolchain#go}-alpine" sh -ec '
-              apk add --no-cache git nftables
+              apk add --no-cache curl git nftables
               mkdir -p /run/systemd/system
               go test -count=1 -coverprofile=/coverage/go-coverage.out ./...
             '

@@ -36,7 +36,7 @@ describe('panel API contracts', () => {
     ['dashboard', getDashboardStats, 'get', '/dashboard/stats'],
     ['audit log', () => getLogList(filters), 'get', '/logs', { params: filters }],
     ['node list', () => node.getNodeList(filters), 'get', '/nodes', { params: filters }],
-    ['node details', () => node.getNode(42), 'get', '/nodes/42'],
+    ['node details', () => node.getNode(42), 'get', '/nodes/42', silent],
     ['create node', () => node.createNode(body), 'post', '/nodes', { data: body }],
     ['update node', () => node.updateNode(42, body), 'put', '/nodes/42', { data: body }],
     ['delete node', () => node.deleteNode(42), 'delete', '/nodes/42'],
