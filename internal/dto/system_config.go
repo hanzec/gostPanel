@@ -5,6 +5,7 @@ package dto
 // SystemConfigResp 系统配置响应
 type SystemConfigResp struct {
 	Email  EmailConfigResp  `json:"email"`
+	Bark   BarkConfig       `json:"bark"`
 	Config PanelSettingResp `json:"config"`
 	Log    LogConfigResp    `json:"log"`
 	Backup BackupConfigResp `json:"backup"`
@@ -23,6 +24,11 @@ type EmailConfigResp struct {
 	Username  string `json:"username"`
 	Password  string `json:"password"`
 	FromEmail string `json:"fromEmail"`
+}
+
+type BarkConfig struct {
+	ServerURL string `json:"serverUrl"`
+	DeviceKey string `json:"deviceKey"`
 }
 
 type PanelSettingResp struct {
@@ -45,6 +51,7 @@ type BackupConfigResp struct {
 // UpdateSystemConfigReq 更新系统配置请求
 type UpdateSystemConfigReq struct {
 	Email  EmailConfigReq  `json:"email"`
+	Bark   *BarkConfig     `json:"bark"`
 	Config PanelSettingReq `json:"config"`
 	Log    LogConfigReq    `json:"log"`
 	Backup BackupConfigReq `json:"backup"`

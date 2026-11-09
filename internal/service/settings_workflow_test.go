@@ -71,6 +71,41 @@ func TestSystemSettingsRoundTripAndPublicProjection(t *testing.T) {
 	}
 }
 
+func TestBarkSettingsRejectInvalidAndFailedUpdates(t *testing.T) {
+	db := newServiceTestDB(t)
+	settings := NewSystemConfigService(repository.NewSystemConfigRepository(db))
+	req := dto.UpdateSystemConfigReq{
+		Bark:   &dto.BarkConfig{ServerURL: " https://bark.example.test/notify ", DeviceKey: " test-key "},
+		Config: dto.PanelSettingReq{SiteTitle: "Existing panel"},
+	}
+	requireServiceError(t, settings.UpdateConfig(&req), nil)
+	before, err := settings.GetConfig()
+	requireServiceError(t, err, nil)
+	if want := (dto.BarkConfig{ServerURL: "https://bark.example.test/notify", DeviceKey: "test-key"}); before.Bark != want {
+		t.Fatalf("Bark settings were not normalized: %+v", before.Bark)
+	}
+
+	req.Bark = &dto.BarkConfig{ServerURL: "https://bark.example.test/other"}
+	req.Config.SiteTitle = "Rejected panel"
+	requireServiceError(t, settings.UpdateConfig(&req), bizerrors.ErrBarkConfigIncomplete)
+	after, err := settings.GetConfig()
+	requireServiceError(t, err, nil)
+	if *after != *before {
+		t.Fatal("invalid Bark settings changed the saved configuration")
+	}
+
+	requireServiceError(t, db.Exec(`CREATE TRIGGER reject_bark_settings
+		BEFORE UPDATE ON system_configs
+		BEGIN SELECT RAISE(ABORT, 'settings write failed'); END`).Error, nil)
+	req.Bark = &dto.BarkConfig{}
+	requireServiceError(t, settings.UpdateConfig(&req), bizerrors.ErrOperationFailed)
+	after, err = settings.GetConfig()
+	requireServiceError(t, err, nil)
+	if *after != *before {
+		t.Fatal("failed Bark write changed the saved configuration")
+	}
+}
+
 func TestBackupCreatesReadableSnapshotAndAppliesRetention(t *testing.T) {
 	t.Chdir(t.TempDir())
 	db := newServiceTestDB(t)

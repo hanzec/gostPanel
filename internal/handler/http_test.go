@@ -149,6 +149,7 @@ func (f *handlerHTTPFixture) registerSettings() {
 	f.engine.GET("/system/public-config", sys.GetPublicConfig)
 	f.engine.PUT("/system/config", sys.UpdateConfig)
 	f.engine.POST("/system/email/test", sys.TestEmail)
+	f.engine.POST("/system/bark/test", sys.TestBark)
 	f.engine.POST("/system/backup", sys.Backup)
 	allowlist := NewGostAllowlistHandler(service.NewGostAllowlistService(f.db))
 	f.engine.GET("/system/gost-allowlist", allowlist.Get)

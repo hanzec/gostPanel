@@ -20,6 +20,10 @@ type SystemConfig struct {
 	SMTPPassword string `gorm:"size:255" json:"smtp_password"`
 	SMTPFrom     string `gorm:"size:255" json:"smtp_from"` // 发件人邮箱
 
+	// Bark 推送配置
+	BarkServerURL string `gorm:"size:2048" json:"bark_server_url"`
+	BarkDeviceKey string `gorm:"size:255" json:"-"`
+
 	// 日志策略
 	LogRetentionDays int    `gorm:"default:7" json:"log_retention_days"`
 	LogLevel         string `gorm:"size:20;default:info" json:"log_level"`

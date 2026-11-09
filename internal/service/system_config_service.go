@@ -3,6 +3,7 @@ package service
 import (
 	"yagp/internal/config"
 	"yagp/internal/dto"
+	"yagp/internal/errors"
 	"yagp/internal/repository"
 )
 
@@ -30,6 +31,10 @@ func (s *SystemConfigService) GetConfig() (*dto.SystemConfigResp, error) {
 			Username:  config.SMTPUsername,
 			Password:  config.SMTPPassword,
 			FromEmail: config.SMTPFrom,
+		},
+		Bark: dto.BarkConfig{
+			ServerURL: config.BarkServerURL,
+			DeviceKey: config.BarkDeviceKey,
 		},
 		Config: dto.PanelSettingResp{
 			SiteTitle: config.SiteTitle,
@@ -67,6 +72,14 @@ func (s *SystemConfigService) GetPublicConfig() (*dto.PublicSystemConfigResp, er
 
 // UpdateConfig 更新配置
 func (s *SystemConfigService) UpdateConfig(req *dto.UpdateSystemConfigReq) error {
+	var bark dto.BarkConfig
+	if req.Bark != nil {
+		bark = *req.Bark
+		if _, err := normalizeBarkConfig(&bark, true); err != nil {
+			return err
+		}
+	}
+
 	config, err := s.repo.Get()
 	if err != nil {
 		return err
@@ -92,5 +105,13 @@ func (s *SystemConfigService) UpdateConfig(req *dto.UpdateSystemConfigReq) error
 	config.AutoBackup = req.Backup.AutoBackup
 	config.BackupRetentionCount = req.Backup.RetentionCount
 
-	return s.repo.Update(config)
+	if req.Bark == nil {
+		return s.repo.Update(config, "BarkServerURL", "BarkDeviceKey")
+	}
+	config.BarkServerURL = bark.ServerURL
+	config.BarkDeviceKey = bark.DeviceKey
+	if err := s.repo.Update(config); err != nil {
+		return errors.ErrOperationFailed
+	}
+	return nil
 }

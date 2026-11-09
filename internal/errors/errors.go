@@ -170,6 +170,11 @@ var (
 	ErrObserverCreateFailed = New(10414, "创建流量监控失败", http.StatusInternalServerError)
 	// ErrExtractHostFailed 提取主机IP失败
 	ErrExtractHostFailed = New(10415, "无法从API地址提取主机IP", http.StatusInternalServerError)
+
+	ErrBarkConfigIncomplete = New(10417, "请同时填写 Bark 服务器地址和设备密钥", http.StatusBadRequest)
+	ErrBarkServerURLInvalid = New(10418, "请输入有效的 Bark 服务器地址，使用 HTTP 或 HTTPS 且不含账号、查询参数或片段", http.StatusBadRequest)
+	ErrBarkDeviceKeyInvalid = New(10419, "Bark 设备密钥过长", http.StatusBadRequest)
+	ErrBarkPushFailed       = New(10420, "Bark 测试推送失败，请检查服务器地址、设备密钥和面板网络连接", http.StatusBadGateway)
 )
 
 // ==================== 隧道相关补全 (102xx) ====================
