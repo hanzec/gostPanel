@@ -5,6 +5,7 @@ import (
 	"yagp/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // SystemConfigRepository 系统配置仓库
@@ -42,8 +43,9 @@ func (r *SystemConfigRepository) Get() (*model.SystemConfig, error) {
 }
 
 // Update 更新系统配置
-func (r *SystemConfigRepository) Update(config *model.SystemConfig) error {
+func (r *SystemConfigRepository) Update(config *model.SystemConfig, omitFields ...string) error {
 	// 确保 ID 为 1
 	config.ID = 1
-	return r.db.Save(config).Error
+	// 保存语句包含通知凭据，不记录 SQL 参数。
+	return r.db.Session(&gorm.Session{Logger: logger.Discard}).Omit(omitFields...).Save(config).Error
 }

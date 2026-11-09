@@ -40,6 +40,10 @@ export function sendTestEmail(data) {
     })
 }
 
+export function sendTestBark(data) {
+    return request.post('/system/bark/test', data, { silentError: true })
+}
+
 export function backupSystem() {
     return request({
         url: '/system/backup',

@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page settings-page">
-    <PageHeader eyebrow="CONFIGURATION" title="系统设置" description="管理面板品牌、SMTP 邮件、数据库备份和 Gost 配置。">
+    <PageHeader eyebrow="CONFIGURATION" title="系统设置" description="管理面板品牌、通知渠道、数据库备份和 Gost 配置。">
       <template #actions>
         <el-button v-if="!activeTab.startsWith('gost-')" type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
           保存设置
@@ -44,9 +44,9 @@
               </el-form>
             </el-tab-pane>
 
-            <el-tab-pane name="email" label="SMTP 邮件">
+            <el-tab-pane name="email" label="通知管理">
               <header class="settings-section-heading">
-                <h2>邮件连接</h2>
+                <h2>SMTP 邮件</h2>
                 <p>填写邮件服务器和发件人信息，发送测试邮件验证连接。</p>
               </header>
               <el-form :model="emailForm" label-position="top" :disabled="saving" @submit.prevent="saveSettings">
@@ -71,6 +71,47 @@
               <div class="settings-section-actions">
                 <el-button :icon="Message" :disabled="saving" @click="openTestEmail">发送测试邮件</el-button>
               </div>
+
+              <section class="settings-notification-channel" aria-labelledby="settings-bark-heading">
+                <header class="settings-section-heading">
+                  <h2 id="settings-bark-heading">Bark 推送</h2>
+                  <p>使用 Bark App 中的服务器地址和设备密钥，支持自建服务器。</p>
+                </header>
+                <el-form :model="barkForm" label-position="top" :disabled="saving || testBarkSending" @submit.prevent="saveSettings">
+                  <div class="settings-fields settings-bark-fields">
+                    <el-form-item label="Bark 服务器地址" prop="serverUrl" :error="barkErrors.serverUrl">
+                      <el-input
+                        v-model.trim="barkForm.serverUrl"
+                        inputmode="url"
+                        placeholder="https://api.day.app"
+                        :aria-invalid="Boolean(barkErrors.serverUrl)"
+                        @input="clearBarkError('serverUrl')"
+                        @blur="checkBarkServerUrl"
+                      />
+                    </el-form-item>
+                    <el-form-item label="Bark 设备密钥" prop="deviceKey" :error="barkErrors.deviceKey">
+                      <el-input
+                        v-model.trim="barkForm.deviceKey"
+                        :type="barkDeviceKeyVisible ? 'text' : 'password'"
+                        autocomplete="new-password"
+                        :aria-invalid="Boolean(barkErrors.deviceKey)"
+                        @input="clearBarkError('deviceKey')"
+                      >
+                        <template #append>
+                          <el-button
+                            :aria-label="barkDeviceKeyVisible ? '隐藏 Bark 设备密钥' : '显示 Bark 设备密钥'"
+                            @click="barkDeviceKeyVisible = !barkDeviceKeyVisible"
+                          >{{ barkDeviceKeyVisible ? '隐藏' : '显示' }}</el-button>
+                        </template>
+                      </el-input>
+                    </el-form-item>
+                  </div>
+                </el-form>
+                <div class="settings-section-actions">
+                  <el-button :icon="Bell" :disabled="saving" :loading="testBarkSending" @click="testBark">发送测试推送</el-button>
+                  <p v-if="testBarkError" class="settings-inline-error" role="alert">{{ testBarkError }}</p>
+                </div>
+              </section>
             </el-tab-pane>
 
             <el-tab-pane name="backup" label="数据库备份">
@@ -165,11 +206,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Coin, Connection, InfoFilled, Lock, Message, Monitor } from '@element-plus/icons-vue'
+import { Bell, Coin, Connection, InfoFilled, Lock, Message, Monitor } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
-import { backupSystem, getSystemConfig, sendTestEmail, updateSystemConfig } from '@/api/system'
+import { backupSystem, getSystemConfig, sendTestBark, sendTestEmail, updateSystemConfig } from '@/api/system'
 import GostAllowlistSettings from '@/components/GostAllowlistSettings.vue'
 import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -187,10 +228,15 @@ const testEmailVisible = ref(false)
 const testEmailSending = ref(false)
 const testEmailError = ref(false)
 const testEmailFormRef = ref()
+const barkDeviceKeyVisible = ref(false)
+const testBarkSending = ref(false)
+const testBarkError = ref('')
 const ready = computed(() => !loading.value && !loadError.value)
 
 const configForm = reactive({ siteTitle: '', logoUrl: '', copyright: '' })
 const emailForm = reactive({ host: '', port: undefined, username: '', password: '', fromEmail: '' })
+const barkForm = reactive({ serverUrl: '', deviceKey: '' })
+const barkErrors = reactive({ serverUrl: '', deviceKey: '' })
 const backupForm = reactive({ autoBackup: false, retentionCount: 7 })
 const testEmailForm = reactive({ toEmail: '' })
 const testEmailRules = {
@@ -204,9 +250,9 @@ let savedLogSettings
 const context = computed(() => {
   if (activeTab.value === 'email') {
     return {
-      icon: Message, label: 'MAIL', title: '连接验证',
-      description: '测试邮件使用当前输入的连接参数。验证成功后，选择「保存设置」以应用修改。',
-      factLabel: '发件人', factValue: emailForm.fromEmail || '未配置'
+      icon: Bell, label: 'NOTIFICATIONS', title: '连接验证',
+      description: '测试邮件和推送使用当前输入的连接参数。选择「保存设置」以应用修改。',
+      factLabel: '通知渠道', factValue: 'SMTP 邮件、Bark 推送'
     }
   }
   if (activeTab.value === 'backup') {
@@ -244,6 +290,7 @@ async function loadSettings() {
     const { data } = await getSystemConfig()
     Object.assign(configForm, data.config)
     Object.assign(emailForm, data.email, { port: data.email.port || undefined })
+    Object.assign(barkForm, data.bark)
     Object.assign(backupForm, { autoBackup: data.backup.autoBackup, retentionCount: data.backup.retentionCount })
     savedLogSettings = data.log
     backupSupported.value = data.backup.supported
@@ -261,6 +308,10 @@ async function saveSettings() {
     ElMessage.warning('请填写备份保留份数')
     return
   }
+  if (!validateBarkConfig()) {
+    activeTab.value = 'email'
+    return
+  }
 
   saving.value = true
   saveError.value = false
@@ -268,6 +319,7 @@ async function saveSettings() {
     await updateSystemConfig({
       config: { ...configForm },
       email: { ...emailForm, port: emailForm.port ?? 0 },
+      bark: { ...barkForm },
       log: savedLogSettings,
       backup: { ...backupForm }
     })
@@ -302,6 +354,55 @@ async function confirmTestEmail() {
     testEmailError.value = true
   } finally {
     testEmailSending.value = false
+  }
+}
+
+function clearBarkError(field) {
+  barkErrors[field] = ''
+  testBarkError.value = ''
+}
+
+function checkBarkServerUrl() {
+  const { serverUrl } = barkForm
+  if (!serverUrl) return
+  if (new TextEncoder().encode(serverUrl).length > 2048) {
+    barkErrors.serverUrl = 'Bark 服务器地址过长（最多 2048 字节）'
+    return
+  }
+  barkErrors.serverUrl = isBarkServerUrl(serverUrl) ? '' : '请输入不含账号信息、查询参数和片段的 HTTP(S) 地址'
+}
+
+function isBarkServerUrl(value) {
+  if (!/^https?:\/\/[^/@]+(?:\/|$)/i.test(value) || /[\s\\?#]/.test(value)) return false
+  try {
+    return Boolean(new URL(value).hostname)
+  } catch {
+    return false
+  }
+}
+
+function validateBarkConfig(required = false) {
+  const configured = required || barkForm.serverUrl || barkForm.deviceKey
+  barkErrors.serverUrl = configured && !barkForm.serverUrl ? '请输入 Bark 服务器地址' : ''
+  barkErrors.deviceKey = configured && !barkForm.deviceKey ? '请输入 Bark 设备密钥' : ''
+  checkBarkServerUrl()
+  if (new TextEncoder().encode(barkForm.deviceKey).length > 255) {
+    barkErrors.deviceKey = 'Bark 设备密钥过长（最多 255 字节）'
+  }
+  return !barkErrors.serverUrl && !barkErrors.deviceKey
+}
+
+async function testBark() {
+  if (saving.value || testBarkSending.value || !validateBarkConfig(true)) return
+  testBarkSending.value = true
+  testBarkError.value = ''
+  try {
+    await sendTestBark({ ...barkForm })
+    ElMessage.success('Bark 测试推送已发送')
+  } catch (error) {
+    testBarkError.value = error.response?.data?.message || '发送失败，请核对 Bark 服务器地址和设备密钥。'
+  } finally {
+    testBarkSending.value = false
   }
 }
 
@@ -350,9 +451,12 @@ onMounted(loadSettings)
 .settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
 .settings-full-field { grid-column: 1 / -1; }
 .settings-fields :deep(.el-input-number) { width: 100%; }
+.settings-bark-fields :deep(.el-form-item__error) { position: static; }
 .backup-fields :deep(.el-form-item__content) { align-items: flex-start; flex-direction: column; }
 .settings-field-hint { color: var(--ops-muted); line-height: 1.5; }
 .settings-section-actions { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--ops-border); }
+.settings-section-actions .settings-inline-error { margin-top: 12px; }
+.settings-notification-channel { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--ops-border); }
 
 .settings-context { padding: 20px; }
 
@@ -415,6 +519,7 @@ onMounted(loadSettings)
 @media (max-width: 600px) {
   .settings-fields { grid-template-columns: minmax(0, 1fr); }
   .settings-fields :deep(.el-input__wrapper) { min-height: 44px; }
+  .settings-notification-channel .el-button { min-height: 44px; }
   .settings-workspace { padding-inline: 16px; }
   .settings-tabs :deep(.el-tabs__item) { padding-inline: 8px; }
   .settings-context { padding: 16px; }

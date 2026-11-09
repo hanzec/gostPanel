@@ -18,6 +18,7 @@ vi.mock('@/api/system', () => ({
   backupSystem: vi.fn(),
   getSystemConfig: vi.fn(),
   getPublicSystemConfig: vi.fn(),
+  sendTestBark: vi.fn(),
   sendTestEmail: vi.fn(),
   updateSystemConfig: vi.fn(),
   getGostAllowlist: vi.fn(),
@@ -136,6 +137,7 @@ describe('System settings', () => {
     expect(api.updateSystemConfig).toHaveBeenCalledExactlyOnceWith({
       config: { ...settings.config, siteTitle: 'Updated Console', logoUrl: 'https://example.test/new.svg' },
       email: settings.email,
+      bark: { serverUrl: '', deviceKey: '' },
       log: settings.log,
       backup: { autoBackup: true, retentionCount: 8 }
     })
@@ -183,8 +185,8 @@ describe('System settings', () => {
     api.getSystemConfig.mockResolvedValue({ data: { ...settings, email: { ...settings.email, host: '', port: 0, fromEmail: '' } } })
     const wrapper = mountPage(System)
     await flushPromises()
-    await selectTab(wrapper, 'SMTP 邮件')
-    expect(wrapper.get('aside').text()).toContain('未配置')
+    await selectTab(wrapper, '通知管理')
+    expect(wrapper.get('aside').text()).toContain('SMTP 邮件、Bark 推送')
     await button(wrapper, '发送测试邮件').trigger('click')
     expect(ElMessage.warning).toHaveBeenCalledWith('请先填写 SMTP 服务器、端口和发件人邮箱')
 
@@ -232,6 +234,62 @@ describe('System settings', () => {
     await button(wrapper, '取消').trigger('click')
     await flushPromises()
     expect(wrapper.find('#settings-test-email').exists() && wrapper.get('#settings-test-email').isVisible()).toBe(false)
+  })
+
+  it('loads, tests, saves and clears Bark notification settings', async () => {
+    const savedBark = { serverUrl: 'https://api.day.app', deviceKey: 'saved-device-key' }
+    api.getSystemConfig.mockResolvedValue({ data: { ...settings, bark: savedBark } })
+    const wrapper = mountPage(System)
+    await flushPromises()
+    await selectTab(wrapper, '通知管理')
+
+    const serverUrl = field(wrapper, 'Bark 服务器地址')
+    const deviceKey = field(wrapper, 'Bark 设备密钥')
+    const testButton = button(wrapper, '发送测试推送')
+    expect(serverUrl.element.value).toBe(savedBark.serverUrl)
+    expect(deviceKey.element.value).toBe(savedBark.deviceKey)
+    expect(deviceKey.attributes('type')).toBe('password')
+    await wrapper.get('button[aria-label="显示 Bark 设备密钥"]').trigger('click')
+    expect(deviceKey.attributes('type')).toBe('text')
+    await wrapper.get('button[aria-label="隐藏 Bark 设备密钥"]').trigger('click')
+    expect(deviceKey.attributes('type')).toBe('password')
+
+    await serverUrl.setValue('https://bark.example.test?')
+    await serverUrl.trigger('blur')
+    expect(serverUrl.attributes('aria-invalid')).toBe('true')
+    await testButton.trigger('click')
+    expect(api.sendTestBark).not.toHaveBeenCalled()
+
+    await serverUrl.setValue('  http://bark.local:8080/notifications  ')
+    await deviceKey.setValue('')
+    await button(wrapper, '保存设置').trigger('click')
+    await vi.waitFor(() => expect(wrapper.text()).toContain('请输入 Bark 设备密钥'))
+    expect(api.updateSystemConfig).not.toHaveBeenCalled()
+
+    await deviceKey.setValue('  current-device-key  ')
+    const sending = deferred()
+    api.sendTestBark.mockReturnValueOnce(sending.promise).mockResolvedValue({ data: {} })
+    await testButton.trigger('click')
+    await testButton.trigger('click')
+    const bark = { serverUrl: 'http://bark.local:8080/notifications', deviceKey: 'current-device-key' }
+    expect(api.sendTestBark).toHaveBeenCalledExactlyOnceWith(bark)
+    expect(api.updateSystemConfig).not.toHaveBeenCalled()
+    sending.reject({ response: { data: { message: 'Bark 服务器拒绝推送' } } })
+    await flushPromises()
+    expect(wrapper.findAll('[role="alert"]').map((alert) => alert.text())).toContain('Bark 服务器拒绝推送')
+    await testButton.trigger('click')
+    await flushPromises()
+    expect(ElMessage.success).toHaveBeenCalledWith('Bark 测试推送已发送')
+    await vi.waitFor(() => expect(wrapper.find('[role="alert"]').exists()).toBe(false))
+
+    await button(wrapper, '保存设置').trigger('click')
+    await flushPromises()
+    expect(api.updateSystemConfig).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ bark, email: settings.email }))
+    await serverUrl.setValue('')
+    await deviceKey.setValue('')
+    await button(wrapper, '保存设置').trigger('click')
+    await flushPromises()
+    expect(api.updateSystemConfig).toHaveBeenLastCalledWith(expect.objectContaining({ bark: { serverUrl: '', deviceKey: '' } }))
   })
 
   it('asks for confirmation before backing up and allows retry after failure', async () => {

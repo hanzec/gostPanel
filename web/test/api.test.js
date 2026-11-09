@@ -69,6 +69,7 @@ describe('panel API contracts', () => {
     ['public settings', system.getPublicSystemConfig, 'get', '/system/public-config'],
     ['update settings', () => system.updateSystemConfig(body), 'put', '/system/config', { data: body }],
     ['test email', () => system.sendTestEmail(body), 'post', '/system/email/test', { data: body }],
+    ['test Bark', () => system.sendTestBark(body), 'post', '/system/bark/test', { ...silent, data: body }],
     ['backup', system.backupSystem, 'post', '/system/backup'],
     ['allowlist', system.getGostAllowlist, 'get', '/system/gost-allowlist'],
     ['update allowlist', () => system.updateGostAllowlist([42]), 'put', '/system/gost-allowlist', { data: { node_ids: [42] } }],

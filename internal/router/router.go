@@ -134,6 +134,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.GET("/system/gost-ruleset", gostRulesetHandler.Get)
 		authRoutes.PUT("/system/gost-ruleset", gostRulesetHandler.Update)
 		authRoutes.POST("/system/email/test", systemConfigHandler.TestEmail)
+		authRoutes.POST("/system/bark/test", systemConfigHandler.TestBark)
 		authRoutes.POST("/system/backup", systemConfigHandler.Backup)
 	}
 

@@ -32,6 +32,7 @@ func (h *SystemConfigHandler) GetConfig(c *gin.Context) {
 	}
 
 	config.Backup.Supported = h.backupService.Supported()
+	c.Header("Cache-Control", "private, no-store")
 	response.Success(c, config)
 }
 
@@ -79,6 +80,22 @@ func (h *SystemConfigHandler) TestEmail(c *gin.Context) {
 	response.SuccessWithMessage(c, "邮件发送成功", nil)
 }
 
+// TestBark 发送测试推送
+func (h *SystemConfigHandler) TestBark(c *gin.Context) {
+	var req dto.BarkConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "")
+		return
+	}
+
+	if err := h.systemConfigService.SendTestBark(c.Request.Context(), req); err != nil {
+		response.HandleError(c, err)
+		return
+	}
+
+	response.SuccessWithMessage(c, "Bark 测试推送发送成功", nil)
+}
+
 // Backup 立即备份
 func (h *SystemConfigHandler) Backup(c *gin.Context) {
 	if err := h.backupService.CreateBackup(); err != nil {
@@ -102,6 +119,10 @@ type systemConfigUpdateInput struct {
 		Password  *string `json:"password" binding:"required"`
 		FromEmail *string `json:"fromEmail" binding:"required"`
 	} `json:"email" binding:"required"`
+	Bark *struct {
+		ServerURL *string `json:"serverUrl" binding:"required"`
+		DeviceKey *string `json:"deviceKey" binding:"required"`
+	} `json:"bark"`
 	Config *struct {
 		SiteTitle *string `json:"siteTitle" binding:"required"`
 		LogoURL   *string `json:"logoUrl" binding:"required"`
@@ -118,7 +139,7 @@ type systemConfigUpdateInput struct {
 }
 
 func (input systemConfigUpdateInput) configRequest() dto.UpdateSystemConfigReq {
-	return dto.UpdateSystemConfigReq{
+	req := dto.UpdateSystemConfigReq{
 		Email: dto.EmailConfigReq{
 			Host:      *input.Email.Host,
 			Port:      *input.Email.Port,
@@ -140,4 +161,11 @@ func (input systemConfigUpdateInput) configRequest() dto.UpdateSystemConfigReq {
 			RetentionCount: *input.Backup.RetentionCount,
 		},
 	}
+	if input.Bark != nil {
+		req.Bark = &dto.BarkConfig{
+			ServerURL: *input.Bark.ServerURL,
+			DeviceKey: *input.Bark.DeviceKey,
+		}
+	}
+	return req
 }
