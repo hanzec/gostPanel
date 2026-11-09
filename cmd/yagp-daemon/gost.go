@@ -112,10 +112,25 @@ func downloadGost(ctx context.Context, path string, showProgress bool) error {
 	if showProgress {
 		fmt.Fprintln(os.Stderr, "Checking the latest stable Gost release")
 	}
-	url, err := gostReleaseURL(ctx)
+	client := upgrade.NewClient()
+	url, err := gostReleaseURL(ctx, client)
 	if err != nil {
 		return err
 	}
+	sources := client.AssetURLs(ctx, url)
+	for i, source := range sources {
+		err = downloadGostArchive(ctx, source, path, showProgress)
+		if err == nil {
+			return nil
+		}
+		if i+1 < len(sources) {
+			fmt.Fprintf(os.Stderr, "gh-fast download failed: %v; retrying GitHub directly\n", err)
+		}
+	}
+	return err
+}
+
+func downloadGostArchive(ctx context.Context, url, path string, showProgress bool) error {
 	if showProgress {
 		return downloadGostWithCurl(ctx, url, path)
 	}
@@ -137,14 +152,20 @@ func downloadGost(ctx context.Context, path string, showProgress bool) error {
 	return extractGost(path, res.Body)
 }
 
-func gostReleaseURL(ctx context.Context) (string, error) {
+func gostReleaseURL(ctx context.Context, client *upgrade.Client) (string, error) {
+	if tag := os.Getenv("YAGP_GOST_VERSION"); tag != "" {
+		if !upgrade.ValidateTag("gost", tag) {
+			return "", errors.New("YAGP_GOST_VERSION must be a stable Gost tag")
+		}
+		return upgrade.GostArchiveURL(tag, runtime.GOARCH), nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	url, err := upgrade.NewClient().LatestGostArchiveURL(ctx, runtime.GOARCH)
+	url, err := client.LatestGostArchiveURL(ctx, runtime.GOARCH)
 	if err != nil {
-		return "", fmt.Errorf("look up latest stable Gost release: %w", err)
+		return "", fmt.Errorf("look up latest stable Gost release (set YAGP_GOST_VERSION to a stable tag if the GitHub API is unreachable): %w", err)
 	}
-	return os.Getenv("GH_PROXY") + url, nil
+	return url, nil
 }
 
 func downloadGostWithCurl(ctx context.Context, url, path string) error {

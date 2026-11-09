@@ -19,7 +19,7 @@ vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
 
 const GIB = 1024 ** 3
 const primary = {
-  id: 7, name: '边缘节点', remark: '入口', status: 'online', username: 'node-7',
+  id: 7, name: '边缘节点', remark: '入口', status: 'online', username: 'node-7', region: 'HK',
   address: '2001:db8::7', ipv4: '192.0.2.7', ipv6: '2001:db8::7', last_check_at: '2026-11-08T02:00:00Z',
   total_bytes: 1536, input_bytes: 512, output_bytes: 1024,
   traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily', traffic_quota_state: 'blocked', traffic_quota_used_bytes: GIB
@@ -77,6 +77,7 @@ describe('node inventory', () => {
     expect(router.currentRoute.value.query.node).toBe('7')
     expect(api.getNode).toHaveBeenCalledWith(primary.id)
     expect(view.get('h1').text()).toBe(primary.name)
+    expect(view.text()).toContain('中国香港')
     expect(view.get('progress').element.max).toBe(primary.traffic_limit_bytes)
     expect(view.get('progress').element.value).toBe(primary.traffic_quota_used_bytes)
     expect(view.find('tbody').exists()).toBe(false)

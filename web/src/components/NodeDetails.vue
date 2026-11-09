@@ -5,6 +5,7 @@
         <h1>{{ node.name }}</h1>
         <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">{{ nodeStates[node.status]?.label || '未知' }}</span>
         <span class="detail-chip ops-mono">#{{ node.id }}</span>
+        <span v-if="node.region" class="detail-chip"><el-icon aria-hidden="true"><Location /></el-icon>{{ formatRegion(node.region) }}</span>
       </div>
       <p v-if="node.remark" class="ops-muted">{{ node.remark }}</p>
     </div>
@@ -100,8 +101,8 @@
 
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, Connection, CopyDocument, Delete, Download, Edit, Lock, Monitor, PieChart, Setting, Warning } from '@element-plus/icons-vue'
-import { formatBytes, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
+import { ArrowRight, Connection, CopyDocument, Delete, Download, Edit, Location, Lock, Monitor, PieChart, Setting, Warning } from '@element-plus/icons-vue'
+import { formatBytes, formatRegion, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 
 const props = defineProps({ node: { type: Object, required: true } })
 defineEmits(['action'])
@@ -140,6 +141,8 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .detail-title h1 { font-size: clamp(25px, 3vw, 36px); line-height: 1.2; overflow-wrap: anywhere; }
 .detail-chip {
   display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 7px;
   border: 1px solid var(--ops-border-strong);
   border-radius: 5px;

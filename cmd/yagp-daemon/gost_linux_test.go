@@ -17,32 +17,9 @@ import (
 	"yagp/internal/buildinfo"
 )
 
-type gostReleaseFixture struct {
-	http.RoundTripper
-}
-
-func (f gostReleaseFixture) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Host != "api.github.com" {
-		return f.RoundTripper.RoundTrip(req)
-	}
-	if req.URL.Path != "/repos/go-gost/gost/releases/latest" {
-		return nil, fmt.Errorf("unexpected release lookup: %s", req.URL)
-	}
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(strings.NewReader(`{"tag_name":"v3.3.3"}`)),
-	}, nil
-}
-
-func useGostReleaseFixture(t *testing.T) {
-	t.Helper()
-	original := http.DefaultTransport
-	t.Cleanup(func() { http.DefaultTransport = original })
-	http.DefaultTransport = gostReleaseFixture{original}
-}
+const gostFixtureReleasePath = "/https://api.github.com/repos/go-gost/gost/releases/latest"
 
 func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
-	useGostReleaseFixture(t)
 	wantPath := "/https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz"
 	for _, test := range []struct {
 		name string
@@ -57,6 +34,10 @@ func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path == gostFixtureReleasePath {
+					_, _ = io.WriteString(w, `{"tag_name":"v3.3.3"}`)
+					return
+				}
 				if req.Method != http.MethodGet || req.URL.Path != wantPath {
 					t.Errorf("unexpected release request: %s %s", req.Method, req.URL.Path)
 				}
@@ -91,10 +72,13 @@ func TestEnsureGostBootstrapsMissingBinaryAndService(t *testing.T) {
 	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
 		t.Skip("set YAGP_TEST_UPGRADE=1 in a disposable Linux container")
 	}
-	useGostReleaseFixture(t)
 	archive := gostTestArchive(t, "gost")
 	var available atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == gostFixtureReleasePath {
+			_, _ = io.WriteString(w, `{"tag_name":"v3.3.3"}`)
+			return
+		}
 		if r.URL.Path == "/api/config" {
 			if user, pass, ok := r.BasicAuth(); !ok || user != "fixture" || pass != "secret" {
 				w.WriteHeader(http.StatusUnauthorized)
