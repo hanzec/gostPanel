@@ -169,6 +169,7 @@ func TestRuleSyncClearsQuotaEvenWhenGostConfigIsUnavailable(t *testing.T) {
 	}{
 		{"applied quota", codes.OK, 1793548800, 100},
 		{"quota never applied on older daemon", codes.Unimplemented, model.TrafficQuotaWindowUnset, 0},
+		{"quota clear temporarily unavailable", codes.Unavailable, 1793548800, 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := newTrafficQuotaTestDB(t)
@@ -195,8 +196,13 @@ func TestRuleSyncClearsQuotaEvenWhenGostConfigIsUnavailable(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if saved.TrafficQuotaState != "" || saved.TrafficQuotaUsedBytes != 0 || saved.TrafficQuotaWindowStart != model.TrafficQuotaWindowUnset {
-				t.Errorf("quota after clearing = %q, %d bytes, window %d", saved.TrafficQuotaState, saved.TrafficQuotaUsedBytes, saved.TrafficQuotaWindowStart)
+			wantState, wantUsed, wantWindow := "", uint64(0), int64(model.TrafficQuotaWindowUnset)
+			if tc.quotaCode == codes.Unavailable {
+				wantState, wantUsed, wantWindow = model.TrafficQuotaPending, tc.used, tc.window
+			}
+			if saved.TrafficQuotaState != wantState || saved.TrafficQuotaUsedBytes != wantUsed || saved.TrafficQuotaWindowStart != wantWindow {
+				t.Errorf("quota after clearing = %q, %d bytes, window %d, want %q, %d, %d",
+					saved.TrafficQuotaState, saved.TrafficQuotaUsedBytes, saved.TrafficQuotaWindowStart, wantState, wantUsed, wantWindow)
 			}
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
@@ -270,4 +276,62 @@ func (s *trafficQuotaAdminTestNode) Execute(_ context.Context, req *nodegrpc.Com
 	response := s.commands[0]
 	s.commands = s.commands[1:]
 	return &nodegrpc.CommandReply{StatusCode: int32(response.code), Body: []byte(response.body)}, nil
+}
+
+func TestRuleSyncRecoversWhenConfigAndQuotaCommandsFail(t *testing.T) {
+	db := newServiceTestDB(t)
+	remote := &trafficQuotaAdminTestNode{t: t}
+	node := startServiceTestNode(t, remote)
+	node.TrafficLimitBytes = 100
+	node.TrafficQuotaState = model.TrafficQuotaPending
+	rule := model.GostRule{Name: "edge", Type: model.RuleTypeForward, NodeID: &node.ID, ServiceID: "rule-9", Status: model.RuleStatusStopped}
+	saveServiceFixtures(t, db, &node, &rule)
+	remote.check = func(req *nodegrpc.TrafficQuotaRequest) {
+		if req.GetLimitBytes() != 100 || !slices.Equal(req.GetTcpPorts(), []uint32{5010}) {
+			t.Errorf("unexpected quota update: %v", req)
+		}
+	}
+	remote.used = 33
+
+	service := NewRuleSyncService(db)
+	const config = `{"services":[{"name":"rule-9","addr":":5010","handler":{"type":"forward"},"listener":{"type":"tcp"},"status":{"state":"running"}}]}`
+	for _, tc := range []struct {
+		name            string
+		admin           trafficQuotaAdminCommand
+		quotaErr        error
+		wantCalls       int
+		wantQuota       string
+		wantRule        model.RuleStatus
+		tunnelReadFails bool
+	}{
+		{"Gost config temporarily unavailable", trafficQuotaAdminCommand{"GET /config", http.StatusServiceUnavailable, ""}, nil, 0, model.TrafficQuotaPending, model.RuleStatusStopped, false},
+		{"quota command temporarily unavailable", trafficQuotaAdminCommand{"GET /config", http.StatusOK, config}, status.Error(codes.Unavailable, "node temporarily unavailable"), 1, model.TrafficQuotaPending, model.RuleStatusRunning, false},
+		{"node commands recover", trafficQuotaAdminCommand{"GET /config", http.StatusOK, config}, nil, 2, model.TrafficQuotaActive, model.RuleStatusRunning, false},
+		{"rule sync continues without tunnel storage", trafficQuotaAdminCommand{"GET /config", http.StatusOK, config}, nil, 3, model.TrafficQuotaActive, model.RuleStatusRunning, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.tunnelReadFails {
+				requireServiceError(t, db.Model(&rule).Update("status", model.RuleStatusStopped).Error, nil)
+				requireServiceError(t, db.Migrator().DropTable(&model.GostTunnel{}), nil)
+			}
+			remote.mu.Lock()
+			remote.commands = []trafficQuotaAdminCommand{tc.admin}
+			remote.quotaErr = tc.quotaErr
+			remote.mu.Unlock()
+			service.syncNodeRules(node, model.GostAllowlist{}, nil)
+			requireServiceError(t, db.First(&node, node.ID).Error, nil)
+			requireServiceError(t, db.First(&rule, rule.ID).Error, nil)
+			if node.TrafficQuotaState != tc.wantQuota || rule.Status != tc.wantRule {
+				t.Fatalf("sync stored quota state %q and rule state %q, want %q and %q", node.TrafficQuotaState, rule.Status, tc.wantQuota, tc.wantRule)
+			}
+			if tc.wantQuota == model.TrafficQuotaActive && node.TrafficQuotaUsedBytes != 33 {
+				t.Fatalf("sync saved %d quota bytes, want 33", node.TrafficQuotaUsedBytes)
+			}
+			remote.mu.Lock()
+			defer remote.mu.Unlock()
+			if len(remote.commands) != 0 || remote.calls != tc.wantCalls {
+				t.Fatalf("remaining commands = %v, quota calls = %d, want %d", remote.commands, remote.calls, tc.wantCalls)
+			}
+		})
+	}
 }

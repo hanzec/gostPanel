@@ -23,6 +23,7 @@ const (
 	ProtobufContentType = "application/x-protobuf"
 	webSocketProtocol   = "yagp.node.v2"
 	webSocketHeartbeat  = 30 * time.Second
+	webSocketPongWait   = 10 * time.Second
 )
 
 type HTTPStatusError struct {
@@ -95,7 +96,7 @@ func (h PanelHost) DialSession(ctx context.Context, client *http.Client, nodeID 
 		return nil, errors.New("panel did not negotiate the node protocol")
 	}
 	stream := newWebSocketStream(ctx, conn)
-	go stream.heartbeat()
+	go stream.heartbeat(webSocketHeartbeat, webSocketPongWait)
 	return stream, nil
 }
 
@@ -155,15 +156,15 @@ func (s *WebSocketStream) Recv() (*StreamFrame, error) {
 	return &frame, nil
 }
 
-func (s *WebSocketStream) heartbeat() {
-	ticker := time.NewTicker(webSocketHeartbeat)
+func (s *WebSocketStream) heartbeat(interval, pongWait time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+			ctx, cancel := context.WithTimeout(s.ctx, pongWait)
 			err := s.conn.Ping(ctx)
 			cancel()
 			if err != nil {

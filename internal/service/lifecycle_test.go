@@ -258,6 +258,34 @@ func TestTunnelStartRollsBackRelayAfterChainFailure(t *testing.T) {
 	}
 }
 
+func TestTunnelStartRollsBackRelayUntilExitReportsAnAddress(t *testing.T) {
+	db := newServiceTestDB(t)
+	entryRemote, exitRemote := &lifecycleNode{t: t}, &lifecycleNode{t: t}
+	entry, exit := startServiceTestNode(t, entryRemote), startServiceTestNode(t, exitRemote)
+	exit.Name, exit.Address = "exit", ""
+	saveServiceFixtures(t, db, &entry, &exit)
+	service := NewTunnelService(db)
+	tunnel, err := service.Create(&dto.CreateTunnelReq{
+		Name: "relay", EntryNodeID: entry.ID, ExitNodeID: exit.ID, Protocol: "tcp", RelayPort: 8443,
+	}, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, nil)
+	requireServiceError(t, service.Start(tunnel.ID, testAdmin, testIP, testAgent), bizerrors.ErrExtractHostFailed)
+	stored, err := service.GetByID(tunnel.ID)
+	requireServiceError(t, err, nil)
+	if stored.Status != model.TunnelStatusError || exitRemote.service(relayServiceName(tunnel.ID)).Name != "" ||
+		entryRemote.chain(tunnelChainName(tunnel.ID)).Name != "" {
+		t.Fatal("missing exit address left live tunnel resources")
+	}
+	requireServiceError(t, NewNodeService(db, "").UpdateIPs(t.Context(), &exit, "192.0.2.85", ""), nil)
+	requireServiceError(t, service.Start(tunnel.ID, testAdmin, testIP, testAgent), nil)
+	stored, err = service.GetByID(tunnel.ID)
+	requireServiceError(t, err, nil)
+	addr, ok := entryRemote.chain(tunnelChainName(tunnel.ID)).TunnelRelayAddress()
+	if stored.Status != model.TunnelStatusRunning || !ok || addr != "192.0.2.85:8443" {
+		t.Fatalf("retry after IP report = status %s, relay address %q", stored.Status, addr)
+	}
+}
+
 func newServiceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	if err := logger.Init(&logger.Config{Level: "error"}); err != nil {

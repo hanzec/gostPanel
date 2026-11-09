@@ -88,6 +88,10 @@ func registerNode(ctx context.Context, host, token, stateDir, output, existing s
 		Ipv4:  ipv4, Ipv6: ipv6,
 	}
 	if err = nodegrpc.PostProtobuf(rpcCtx, client, panelHost.HTTPURL(nodegrpc.RegisterPath), request, reply); err != nil {
+		var response *nodegrpc.HTTPStatusError
+		if ipv4 == "" && ipv6 == "" && errors.As(err, &response) && response.StatusCode == http.StatusBadRequest {
+			return 0, fmt.Errorf("register with panel: could not detect a node IP address: %w", err)
+		}
 		return 0, fmt.Errorf("register with panel: %w", err)
 	}
 	if reply.GetNodeId() != expectedID || reply.GetUsername() == "" || strings.Contains(reply.GetUsername(), ":") ||

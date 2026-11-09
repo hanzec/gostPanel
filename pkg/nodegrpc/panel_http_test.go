@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,36 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"google.golang.org/protobuf/proto"
 )
+
+func TestPanelRefreshSendsCredentialsInProtobufBody(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != RefreshPath || r.URL.RawQuery != "" || r.Method != http.MethodPost || r.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected refresh request: %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		payload, err := io.ReadAll(r.Body)
+		var request RefreshNodeRequest
+		if err != nil || proto.Unmarshal(payload, &request) != nil || request.GetNodeId() != 42 ||
+			request.GetRefreshToken() != "prior-secret" || request.GetRequestId() != "same-request" {
+			t.Error("refresh request did not preserve the node, credential, and retry ID")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		data, _ := proto.Marshal(&NodeCredentials{AccessToken: "next-access", RefreshToken: "next-refresh"})
+		w.Header().Set("Content-Type", ProtobufContentType)
+		_, _ = w.Write(data)
+	}))
+	t.Cleanup(server.Close)
+	var reply NodeCredentials
+	if err := PostProtobuf(t.Context(), server.Client(), server.URL+RefreshPath, &RefreshNodeRequest{
+		NodeId: 42, RefreshToken: "prior-secret", RequestId: "same-request",
+	}, &reply); err != nil || reply.GetAccessToken() != "next-access" || reply.GetRefreshToken() != "next-refresh" {
+		t.Fatalf("refresh response was not decoded: %v", err)
+	}
+}
 
 func TestPostProtobufRejectsInvalidResponses(t *testing.T) {
 	mux := http.NewServeMux()
@@ -101,6 +131,70 @@ func TestWebSocketRejectsNonProtobufFrames(t *testing.T) {
 			})
 			if _, err := stream.Recv(); err == nil || !strings.Contains(err.Error(), test.message) {
 				t.Fatalf("received malformed message: %v", err)
+			}
+		})
+	}
+}
+
+func TestWebSocketHeartbeatRequiresPong(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		respond bool
+	}{
+		{"idle peer responds", true},
+		{"unresponsive peer is disconnected", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pings := make(chan struct{}, 2)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+					Subprotocols: []string{webSocketProtocol},
+					OnPingReceived: func(context.Context, []byte) bool {
+						select {
+						case pings <- struct{}{}:
+						default:
+						}
+						return test.respond
+					},
+				})
+				if err == nil {
+					defer conn.CloseNow()
+					_, _, _ = conn.Read(r.Context())
+				}
+			}))
+			t.Cleanup(server.Close)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			conn, _, err := websocket.Dial(ctx, server.URL, &websocket.DialOptions{
+				HTTPClient: server.Client(), Subprotocols: []string{webSocketProtocol},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream := newWebSocketStream(ctx, conn)
+			defer stream.Close()
+			go func() { _, _ = stream.Recv() }()
+			go stream.heartbeat(10*time.Millisecond, 200*time.Millisecond)
+			select {
+			case <-pings:
+			case <-ctx.Done():
+				t.Fatal("idle node did not ping the panel")
+			}
+			if test.respond {
+				select {
+				case <-pings:
+				case <-stream.Context().Done():
+					t.Fatal("idle connection did not survive the first heartbeat")
+				}
+				return
+			}
+			select {
+			case <-stream.Context().Done():
+				if ctx.Err() != nil {
+					t.Fatal("connection stayed open without a pong")
+				}
+			case <-ctx.Done():
+				t.Fatal("timed out waiting for the unresponsive socket to close")
 			}
 		})
 	}

@@ -29,9 +29,12 @@ func (h *ReportHandler) SessionHTTP(w http.ResponseWriter, r *http.Request) {
 	defer stream.Close()
 	reports := &streamReports{ReportHandler: h, id: uint64(node.ID), node: node}
 	session := h.newNodeSession(stream, reports)
-	unregister := gost.RegisterNodeStream(node.ID, node.Username, node.Password, session)
-	defer unregister()
 	defer session.Close()
+	unregister := gost.RegisterNodeStream(node.ID, node.SessionGeneration, node.Username, node.Password, session)
+	if unregister == nil {
+		return
+	}
+	defer unregister()
 
 	// A revoke can commit between authenticating the upgrade and publishing the session.
 	ctx, cancel := context.WithTimeout(stream.Context(), connectAuthTimeout)

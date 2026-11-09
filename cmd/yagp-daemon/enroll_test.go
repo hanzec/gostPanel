@@ -163,8 +163,13 @@ func TestReenrollPreservesExistingGostFilesAndAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(nodeDir, "node.yaml")
+	var mismatched atomic.Bool
 	ca, dial := testPanel(t, func(*nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, int) {
-		return enrolledNode(), http.StatusOK
+		reply := enrolledNode()
+		if mismatched.Load() {
+			reply.Password = "other-local-secret"
+		}
+		return reply, http.StatusOK
 	})
 	t.Setenv("YAGP_PANEL_CA_FILE", "")
 	files := map[string]string{
@@ -203,6 +208,21 @@ func TestReenrollPreservesExistingGostFilesAndAddresses(t *testing.T) {
 	}
 	if info, err := os.Stat(filepath.Join(nodeDir, nodebridge.PanelCredentialsFile)); err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("re-enrollment did not write private credentials: %v, %v", info, err)
+	}
+	if _, err = registerNode(t.Context(), enrollmentTestHost, "42."+secret, stateDir, "", configPath+".missing", detect, dial); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("re-enrollment without its configuration: %v", err)
+	}
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatched.Store(true)
+	if _, err = registerNode(t.Context(), enrollmentTestHost, "42."+secret, stateDir, "", configPath, detect, dial); err == nil ||
+		!strings.Contains(err.Error(), "local Gost credentials do not match") {
+		t.Fatalf("re-enrollment with different Gost credentials: %v", err)
+	}
+	if after, err := os.ReadFile(configPath); err != nil || string(after) != string(before) {
+		t.Fatalf("re-enrollment replaced local configuration despite the mismatch: %v", err)
 	}
 }
 
@@ -268,5 +288,24 @@ func TestPanelCASelection(t *testing.T) {
 	token := "42." + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	if _, err := registerNode(context.Background(), enrollmentTestHost, token, dir, t.TempDir(), "", nil); err == nil || !strings.Contains(err.Error(), "load panel CA") {
 		t.Fatalf("invalid local CA = %v", err)
+	}
+}
+
+func TestRegisterNodeReportsFailedIPDetection(t *testing.T) {
+	ca, dial := testPanel(t, func(*nodegrpc.RegisterNodeRequest) (*nodegrpc.RegisterNodeReply, int) {
+		return nil, http.StatusBadRequest
+	})
+	t.Setenv("YAGP_PANEL_CA_FILE", ca)
+	token := "42." + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	for _, ipv4 := range []string{"", "192.0.2.15"} {
+		detect := func(context.Context) (string, string) { return ipv4, "" }
+		_, err := registerNode(t.Context(), enrollmentTestHost, token, t.TempDir(), t.TempDir(), "", detect, dial)
+		var response *nodegrpc.HTTPStatusError
+		if !errors.As(err, &response) || response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("register error = %v, want HTTP 400", err)
+		}
+		if strings.Contains(err.Error(), "could not detect a node IP address") != (ipv4 == "") {
+			t.Fatalf("detected IPv4 %q, register error = %v", ipv4, err)
+		}
 	}
 }

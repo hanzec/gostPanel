@@ -97,6 +97,7 @@ func TestServerDatabaseConfigurationErrors(t *testing.T) {
 		{"mysql", "", "info", "需要配置"},
 		{"mysql", "user@tcp(localhost:3306)/", "warn", "未指定数据库名"},
 		{"mysql", "not a mysql dsn", "warn", "连接串无效"},
+		{"mysql", "user@tcp(127.0.0.1:0)/panel?timeout=100ms", "warn", "dial tcp"},
 	} {
 		cfg := &config.Config{Database: config.DatabaseConfig{Type: test.name, DSN: test.dsn}, Log: config.LogConfig{Level: test.level}}
 		if _, err := initDatabase(cfg); err == nil || !strings.Contains(err.Error(), test.want) {
@@ -330,12 +331,25 @@ func TestServerCLIHandlesVersionAndInvalidConfig(t *testing.T) {
 	flag.CommandLine.SetOutput(io.Discard)
 	os.Args = []string{"yagp", "--version"}
 	main()
-	flag.CommandLine = flag.NewFlagSet("yagp", flag.ContinueOnError)
-	os.Args = []string{"yagp", "-c", filepath.Join(t.TempDir(), "missing.yaml")}
-	defer func() {
-		if failure, ok := recover().(string); !ok || !strings.Contains(failure, "加载配置失败") {
-			t.Errorf("expected a configuration panic, got %v", failure)
-		}
-	}()
-	main()
+	dir := t.TempDir()
+	invalidLog := filepath.Join(dir, "invalid-log.yaml")
+	if err := os.WriteFile(invalidLog, []byte("log:\n  level: invalid\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range []struct{ path, want string }{
+		{filepath.Join(dir, "missing.yaml"), "加载配置失败"},
+		{invalidLog, "初始化日志失败"},
+	} {
+		t.Run(filepath.Base(fixture.path), func(t *testing.T) {
+			flag.CommandLine = flag.NewFlagSet("yagp", flag.ContinueOnError)
+			os.Args = []string{"yagp", "-c", fixture.path}
+			defer func() {
+				failure := recover()
+				if message, ok := failure.(string); !ok || !strings.Contains(message, fixture.want) {
+					t.Errorf("startup panic = %v, want %q", failure, fixture.want)
+				}
+			}()
+			main()
+		})
+	}
 }

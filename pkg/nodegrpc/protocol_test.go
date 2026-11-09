@@ -118,4 +118,29 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 	if err := session.Invoke(ctx, "/unsupported", empty, empty); status.Code(err) != codes.Unimplemented {
 		t.Fatalf("unsupported operation returned %v", err)
 	}
+
+	// Run the same operations through the server-side dispatcher. A valid payload
+	// reaches the typed method, while a malformed payload is rejected before it.
+	methods := make([]string, 0, len(calls))
+	for _, call := range calls {
+		methods = append(methods, call.method)
+	}
+	defaultStream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
+		return NewSession(stream, NewDispatcher(UnimplementedV1Server{}, methods...)).Run()
+	})
+	defaults := NewSession(defaultStream, nil)
+	t.Cleanup(defaults.Close)
+	go func() { _ = defaults.Run() }()
+	malformed := new(StreamFrame)
+	malformed.ProtoReflect().SetUnknown([]byte{0x80})
+	for _, call := range calls {
+		t.Run("dispatch"+call.method, func(t *testing.T) {
+			if _, err := call.call(ctx, NewV1Client(defaults)); status.Code(err) != codes.Unimplemented {
+				t.Fatalf("typed handler returned %v", err)
+			}
+			if err := defaults.Invoke(ctx, call.method, malformed, empty); status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("malformed request returned %v", err)
+			}
+		})
+	}
 }

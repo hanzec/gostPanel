@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"yagp/internal/model"
 	"yagp/internal/repository"
@@ -106,6 +107,62 @@ func TestRuleSyncRetargetsRunningTunnel(t *testing.T) {
 	}
 }
 
+func TestRuleSyncDoesNotOverlapCommandsForOneNode(t *testing.T) {
+	db := newServiceTestDB(t)
+	remote := &blockingConfigNode{started: make(chan struct{}), release: make(chan struct{})}
+	node := startServiceTestNode(t, remote)
+	saveServiceFixtures(t, db, &node)
+	service := NewRuleSyncService(db)
+	release := sync.OnceFunc(func() { close(remote.release) })
+	defer release()
+
+	done := make(chan struct{})
+	go func() {
+		service.syncNodeRules(node, model.GostAllowlist{}, nil)
+		close(done)
+	}()
+	select {
+	case <-remote.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first reconciliation did not request node configuration")
+	}
+	service.syncNodeRules(node, model.GostAllowlist{}, nil)
+	if calls := remote.calls.Load(); calls != 1 {
+		t.Fatalf("overlapping reconciliation sent %d config requests", calls)
+	}
+	release()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first reconciliation did not finish")
+	}
+	service.syncNodeRules(node, model.GostAllowlist{}, nil)
+	if calls := remote.calls.Load(); calls != 2 {
+		t.Fatalf("next reconciliation sent %d config requests in total", calls)
+	}
+}
+
+type blockingConfigNode struct {
+	nodegrpc.UnimplementedV1Server
+	started, release chan struct{}
+	calls            atomic.Int32
+}
+
+func (n *blockingConfigNode) Execute(ctx context.Context, request *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
+	if request.GetMethod() != http.MethodGet || request.GetPath() != "/config" {
+		return nil, status.Error(codes.InvalidArgument, "expected a Gost config request")
+	}
+	if n.calls.Add(1) == 1 {
+		close(n.started)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-n.release:
+		}
+	}
+	return &nodegrpc.CommandReply{StatusCode: http.StatusOK, Body: []byte("{}")}, nil
+}
+
 type tunnelSyncNode struct {
 	nodegrpc.UnimplementedV1Server
 	t       *testing.T
@@ -154,6 +211,6 @@ func startServiceTestNode(t *testing.T, server nodegrpc.V1Server) model.GostNode
 	session := streamtest.Open(t, nodegrpc.NewDispatcher(server,
 		nodegrpc.V1_Execute_FullMethodName, nodegrpc.V1_GetObserverEndpoint_FullMethodName, nodegrpc.V1_SyncTrafficQuota_FullMethodName,
 		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName))
-	t.Cleanup(gost.RegisterNodeStream(node.ID, node.Username, node.Password, session))
+	t.Cleanup(gost.RegisterNodeStream(node.ID, node.SessionGeneration, node.Username, node.Password, session))
 	return node
 }

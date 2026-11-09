@@ -47,12 +47,16 @@ func TestPanelClientSendsProtobufToFixedHTTPSPath(t *testing.T) {
 		}
 		data, err := io.ReadAll(r.Body)
 		var request RegisterNodeRequest
-		if err != nil || proto.Unmarshal(data, &request) != nil || request.GetToken() != "fixture" {
+		if err != nil || proto.Unmarshal(data, &request) != nil || request.GetToken() != "fixture" ||
+			request.GetIpv4() != "203.0.113.42" || request.GetIpv6() != "2001:db8::42" {
 			t.Errorf("invalid Protobuf request: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		response, _ := proto.Marshal(&RegisterNodeReply{NodeId: 42})
+		response, _ := proto.Marshal(&RegisterNodeReply{
+			NodeId: 42, Username: "node-42", Password: "local-gost-password",
+			Credentials: &NodeCredentials{AccessToken: "issued-access", RefreshToken: "issued-refresh", AccessExpiresAt: 100, RefreshExpiresAt: 200},
+		})
 		w.Header().Set("Content-Type", ProtobufContentType)
 		_, _ = w.Write(response)
 	}))
@@ -83,8 +87,15 @@ func TestPanelClientSendsProtobufToFixedHTTPSPath(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	var response RegisterNodeReply
-	err = PostProtobuf(ctx, &http.Client{Transport: transport}, panel.HTTPURL(RegisterPath), &RegisterNodeRequest{Token: "fixture"}, &response)
-	if err != nil || response.GetNodeId() != 42 {
+	err = PostProtobuf(ctx, &http.Client{Transport: transport}, panel.HTTPURL(RegisterPath), &RegisterNodeRequest{
+		Token: "fixture", Ipv4: "203.0.113.42", Ipv6: "2001:db8::42",
+	}, &response)
+	if err != nil || response.GetNodeId() != 42 || response.GetUsername() != "node-42" || response.GetPassword() != "local-gost-password" {
 		t.Fatalf("registration via fixed TLS endpoint = %v, %v", &response, err)
+	}
+	credentials := response.GetCredentials()
+	if credentials.GetAccessToken() != "issued-access" || credentials.GetRefreshToken() != "issued-refresh" ||
+		credentials.GetAccessExpiresAt() != 100 || credentials.GetRefreshExpiresAt() != 200 {
+		t.Fatal("registration did not return the expected credential pair")
 	}
 }

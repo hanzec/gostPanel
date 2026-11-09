@@ -1,6 +1,7 @@
 package nodebridge
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"yagp/pkg/nodegrpc"
@@ -21,6 +23,7 @@ import (
 func TestRefreshRetriesSamePersistedRequestAfterRestart(t *testing.T) {
 	configPath := preparePanelCredentials(t)
 	path := filepath.Join(filepath.Dir(configPath), PanelCredentialsFile)
+	savedPending := path + ".saved"
 	now := time.Now()
 	old := panelCredentials{
 		AccessToken: "expired", RefreshToken: "still-valid",
@@ -30,7 +33,7 @@ func TestRefreshRetriesSamePersistedRequestAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
-	requests := make(chan string, 2)
+	requests := make(chan string, 3)
 	newCredentials := testCredentials(now.Add(15*time.Minute), "rotated")
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request := new(nodegrpc.RefreshNodeRequest)
@@ -46,7 +49,8 @@ func TestRefreshRetriesSamePersistedRequestAfterRestart(t *testing.T) {
 			t.Error("refresh request reached the server before its ID was persisted")
 		}
 		requests <- request.GetRequestId()
-		if calls.Add(1) == 1 {
+		switch calls.Add(1) {
+		case 1:
 			// Commit at the fixture, then close the connection before sending the response.
 			conn, _, err := w.(http.Hijacker).Hijack()
 			if err != nil {
@@ -55,6 +59,16 @@ func TestRefreshRetriesSamePersistedRequestAfterRestart(t *testing.T) {
 			}
 			_ = conn.Close()
 			return
+		case 2:
+			// A write failure must leave the same pending ID usable after recovery.
+			if err := os.Rename(path, savedPending); err != nil {
+				t.Error(err)
+				return
+			}
+			if err := os.Mkdir(path, 0700); err != nil {
+				t.Error(err)
+				return
+			}
 		}
 		writeTestProtobuf(t, w, newCredentials)
 	}))
@@ -82,11 +96,23 @@ func TestRefreshRetriesSamePersistedRequestAfterRestart(t *testing.T) {
 	if delay := manager.nextRefresh(); delay != 0 {
 		t.Fatalf("pending rotation is not retried immediately: %v", delay)
 	}
+	if _, err = manager.accessToken(ctx, 0); err == nil || !strings.Contains(err.Error(), "persist refreshed panel credentials") {
+		t.Fatalf("refresh without writable credential file: %v", err)
+	}
+	if err = os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(savedPending, path); err != nil {
+		t.Fatal(err)
+	}
 	if token, err := manager.accessToken(ctx, 0); err != nil || token != "rotated" {
 		t.Fatalf("retry failed: %v", err)
 	}
-	if calls.Load() != 2 || <-requests != <-requests {
+	if calls.Load() != 3 {
 		t.Fatalf("refresh retry used a different request ID or had an unexpected count: %d", calls.Load())
+	}
+	if first := <-requests; first != <-requests || first != <-requests {
+		t.Fatal("refresh retry used a different request ID")
 	}
 	manager, err = openCredentialManager(cfg, host, client)
 	if err != nil || manager.credentials.RefreshToken != newCredentials.GetRefreshToken() || manager.credentials.PendingRefreshID != "" {
@@ -161,4 +187,84 @@ func TestCredentialRefreshRejectsRevocationAndRequiresPersistence(t *testing.T) 
 	if _, err := manager.accessToken(t.Context(), 0); err == nil || !strings.Contains(err.Error(), "re-enroll the node") {
 		t.Fatalf("revoked refresh token: %v", err)
 	}
+}
+
+type refreshTransport func(*http.Request) (*http.Response, error)
+
+func (f refreshTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestBackgroundRefreshBacksOffAndRecoversFromTemporaryFailures(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		configPath := preparePanelCredentials(t)
+		path := filepath.Join(filepath.Dir(configPath), PanelCredentialsFile)
+		host, err := nodegrpc.ParsePanelHost("127.0.0.1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		credentials, err := parsePanelCredentials(testCredentials(time.Now().Add(refreshLeadTime), "current"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = writePanelCredentials(path, credentials); err != nil {
+			t.Fatal(err)
+		}
+		var requests []string
+		client := &http.Client{Transport: refreshTransport(func(r *http.Request) (*http.Response, error) {
+			defer r.Body.Close()
+			var request nodegrpc.RefreshNodeRequest
+			data, err := io.ReadAll(r.Body)
+			if err != nil || proto.Unmarshal(data, &request) != nil || request.GetRefreshToken() != credentials.RefreshToken {
+				t.Error("background refresh did not use the last saved credential")
+			}
+			requests = append(requests, request.GetRequestId())
+			response := &http.Response{
+				StatusCode: http.StatusServiceUnavailable, Body: http.NoBody,
+				Header: http.Header{"Content-Type": {nodegrpc.ProtobufContentType}},
+			}
+			if len(requests) >= 2 {
+				response.StatusCode = http.StatusOK
+				issued := testCredentials(time.Now().Add(15*time.Minute), "next")
+				if len(requests) == 2 {
+					// A syntactically valid reply with missing credentials must not clear the pending request.
+					issued.RefreshToken = ""
+				}
+				body, err := proto.Marshal(issued)
+				if err != nil {
+					return nil, err
+				}
+				response.Body = io.NopCloser(bytes.NewReader(body))
+			}
+			return response, nil
+		})}
+		cfg := Config{NodeID: 42, ConfigFile: configPath}
+		manager, err := openCredentialManager(cfg, host, client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			maintainCredentials(ctx, manager)
+		}()
+		synctest.Wait()
+		time.Sleep(29 * time.Second)
+		synctest.Wait()
+		if len(requests) != 1 {
+			t.Fatalf("temporary failure retried immediately: %d requests", len(requests))
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if len(requests) != 2 || requests[0] == "" || requests[1] != requests[0] || manager.credentials.PendingRefreshID != requests[0] {
+			t.Fatal("failed refresh did not retain the original request ID")
+		}
+		time.Sleep(30 * time.Second)
+		synctest.Wait()
+		if len(requests) != 3 || requests[2] != requests[0] || manager.credentials.AccessToken != "next" || manager.credentials.PendingRefreshID != "" {
+			t.Fatal("background refresh did not recover using the original request ID")
+		}
+		cancel()
+		<-done
+	})
 }

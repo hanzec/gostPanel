@@ -10,9 +10,10 @@ import (
 )
 
 type nodeStream struct {
-	username string
-	password string
-	session  *nodegrpc.Session
+	generation uint64
+	username   string
+	password   string
+	session    *nodegrpc.Session
 }
 
 var nodeStreams = struct {
@@ -20,14 +21,19 @@ var nodeStreams = struct {
 	byID map[uint]nodeStream
 }{byID: make(map[uint]nodeStream)}
 
-// RegisterNodeStream publishes an authenticated stream and replaces any previous connection.
-func RegisterNodeStream(id uint, username, password string, session *nodegrpc.Session) func() {
+// RegisterNodeStream replaces the previous connection unless it has a newer enrollment.
+// A rejected stream returns nil and remains the caller's responsibility to close.
+func RegisterNodeStream(id uint, generation uint64, username, password string, session *nodegrpc.Session) func() {
 	nodeStreams.Lock()
-	previous := nodeStreams.byID[id].session
-	nodeStreams.byID[id] = nodeStream{username: username, password: password, session: session}
+	previous := nodeStreams.byID[id]
+	if previous.generation > generation {
+		nodeStreams.Unlock()
+		return nil
+	}
+	nodeStreams.byID[id] = nodeStream{generation: generation, username: username, password: password, session: session}
 	nodeStreams.Unlock()
-	if previous != nil {
-		previous.Close()
+	if previous.session != nil {
+		previous.session.Close()
 	}
 	return func() {
 		nodeStreams.Lock()
