@@ -56,6 +56,21 @@ func (h *NodeHandler) IssueRegistrationToken(c *gin.Context) {
 	response.Success(c, token)
 }
 
+func (h *NodeHandler) RevokeCredentials(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "无效的节点 ID")
+		return
+	}
+	if err := h.nodeService.RevokeCredentials(c.Request.Context(), uint(id)); err != nil {
+		response.HandleError(c, err)
+		return
+	}
+	operator := GetRequestContext(c)
+	h.nodeService.RecordOperation(uint(id), "吊销节点通信凭据", operator.Username, operator.ClientIP, operator.UserAgent)
+	response.Success(c, nil)
+}
+
 // Update 更新节点
 func (h *NodeHandler) Update(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)

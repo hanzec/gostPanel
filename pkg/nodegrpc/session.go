@@ -16,7 +16,6 @@ import (
 
 const (
 	NodeIDMetadata = "x-yagp-node-id"
-	ReadyMetadata  = "x-yagp-connected"
 
 	// MaxStreamFrameBytes includes the protobuf envelope around a 4 MiB Gost body.
 	MaxStreamFrameBytes = 5 << 20

@@ -15,8 +15,8 @@ authentik:
 
 report:
   listen: ""
-  # Compose 的 Traefik 回源使用内部端口 :39101。
-  # 直连时设置 direct_tls: true，省略 cert_file 和 key_file 即自动生成证书。
+  # Compose 的 Traefik 通过 HTTP 转发到内部端口 :39101。
+  # HTTPS/WSS 直连时设置 direct_tls: true，省略 cert_file 和 key_file 即自动生成证书。
 
 log:
   level: "info"  # debug, info, warn, error

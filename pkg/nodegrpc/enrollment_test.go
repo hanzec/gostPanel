@@ -3,6 +3,7 @@ package nodegrpc
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -54,40 +55,26 @@ func TestParseRegistrationTokenID(t *testing.T) {
 	}
 }
 
-func TestCredentialAndObserverAuthentication(t *testing.T) {
+func TestObserverAuthentication(t *testing.T) {
 	const username, password = "node-42", "password:with-colon"
-	credentials := PasswordCredentials(username, password)
-	values, err := credentials.GetRequestMetadata(context.Background())
-	if err != nil || !credentials.RequireTransportSecurity() {
-		t.Fatalf("password credential metadata returned %v, %v", values, err)
-	}
-	wantAuthorization := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
-	if values["authorization"] != wantAuthorization {
-		t.Fatal("password credentials did not use the expected Basic authorization format")
-	}
 	token := ObserverToken(username, password)
 	if len(token) != 64 || ObserverToken(username, "wrong") == token {
 		t.Fatal("observer token was not derived from both node credentials")
 	}
 	for _, test := range []struct {
-		name, user, password string
-		authorization, token []string
-		passwordOK, tokenOK  bool
+		name   string
+		tokens []string
+		ok     bool
 	}{
-		{"correct", username, password, []string{wantAuthorization}, []string{token}, true, true},
-		{"absent", username, password, nil, nil, false, false},
-		{"duplicates", username, password, []string{wantAuthorization, wantAuthorization}, []string{token, token}, false, false},
-		{"wrong", username, password, []string{"Bearer wrong"}, []string{"wrong"}, false, false},
-		{"invalid configured user", "bad:user", password, []string{wantAuthorization}, nil, false, false},
-		{"missing configured password", username, "", []string{wantAuthorization}, nil, false, false},
+		{"correct", []string{token}, true},
+		{"absent", nil, false},
+		{"duplicates", []string{token, token}, false},
+		{"wrong", []string{"wrong"}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{"authorization": test.authorization, "token": test.token})
-			if got := MatchCredentials(ctx, test.user, test.password); got != test.passwordOK {
-				t.Errorf("node credentials accepted = %t, want %t", got, test.passwordOK)
-			}
-			if got := MatchObserverToken(ctx, token); got != test.tokenOK {
-				t.Errorf("observer token accepted = %t, want %t", got, test.tokenOK)
+			ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{"token": test.tokens})
+			if got := MatchObserverToken(ctx, token); got != test.ok {
+				t.Errorf("observer token accepted = %t, want %t", got, test.ok)
 			}
 		})
 	}
@@ -99,16 +86,17 @@ func TestClientTLSLoadsExplicitRoots(t *testing.T) {
 	server.Close()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "panel-ca.pem")
-	if _, err := ClientTLS(path); err == nil {
+	panel, _ := ParsePanelHost("127.0.0.1")
+	if _, err := panel.TLSConfig(path, ""); err == nil {
 		t.Fatal("missing explicit CA was accepted")
 	}
 	if err := os.WriteFile(path, cert, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if creds, err := ClientTLS(path); err != nil || creds.Info().SecurityProtocol != "tls" {
+	if creds, err := panel.TLSConfig(path, ""); err != nil || creds.RootCAs == nil {
 		t.Fatalf("client with explicit CA = %v, %v", creds, err)
 	}
-	if creds, err := ClientTLS(""); err != nil || creds.Info().SecurityProtocol != "tls" {
+	if creds, err := panel.TLSConfig("", ""); err != nil || creds.RootCAs != nil {
 		t.Fatalf("client with system roots = %v, %v", creds, err)
 	}
 }
@@ -135,10 +123,10 @@ func TestPinnedTLSRejectsAnUnexpectedPanelIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := panel.ClientTLS("", "invalid-fingerprint"); err == nil {
+			if _, err := panel.TLSConfig("", "invalid-fingerprint"); err == nil {
 				t.Fatal("malformed fingerprint was accepted")
 			}
-			transport, err := panel.ClientTLS("", tt.fingerprint)
+			transport, err := panel.TLSConfig("", tt.fingerprint)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,8 +135,8 @@ func TestPinnedTLSRejectsAnUnexpectedPanelIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer raw.Close()
-			if conn, _, err := transport.ClientHandshake(t.Context(), net.JoinHostPort(tt.host, PanelPort), raw); conn != nil || !tt.wantError(err) {
-				t.Fatalf("pinned TLS handshake = %v, %v", conn, err)
+			if err := tls.Client(raw, transport).HandshakeContext(t.Context()); !tt.wantError(err) {
+				t.Fatalf("pinned TLS handshake = %v", err)
 			}
 		})
 	}

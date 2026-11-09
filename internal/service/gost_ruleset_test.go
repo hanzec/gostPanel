@@ -59,3 +59,59 @@ func TestGostRulesetKeepsLastValidConversion(t *testing.T) {
 		t.Fatalf("refreshed matchers = %+v, %v", stored, err)
 	}
 }
+
+func TestGostRulesetFollowsSecureRedirectAndKeepsRulesOnTruncation(t *testing.T) {
+	var truncate atomic.Bool
+	var forwardedReferrer atomic.Value
+	forwardedReferrer.Store("")
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/subscribe":
+			http.Redirect(w, r, "/payload", http.StatusFound)
+		case "/payload":
+			forwardedReferrer.Store(r.Referer())
+			if truncate.Load() {
+				w.Header().Set("Content-Length", "256")
+			}
+			_, _ = fmt.Fprint(w, "payload:\n  - DOMAIN-SUFFIX,secure.example\n")
+		case "/downgrade":
+			http.Redirect(w, r, "http://"+r.Host+"/payload", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	db := newServiceTestDB(t)
+	service := NewGostRulesetService(db)
+	service.client.Transport = upstream.Client().Transport
+
+	saved, err := service.Update(t.Context(), upstream.URL+"/subscribe?credential=private", nil)
+	requireServiceError(t, err, nil)
+	if !slices.Equal(saved.Matchers, []string{".secure.example"}) || forwardedReferrer.Load().(string) != "" {
+		t.Fatal("secure redirect did not preserve the rules or sent the previous URL as a referrer")
+	}
+	if _, err := service.Update(t.Context(), upstream.URL+"/downgrade", nil); err == nil {
+		t.Fatal("ruleset update accepted a redirect to HTTP")
+	}
+
+	truncate.Store(true)
+	service.refresh(t.Context())
+	current, err := service.Get(t.Context())
+	requireServiceError(t, err, nil)
+	if current.URL != saved.URL || !slices.Equal(current.Matchers, saved.Matchers) || !current.UpdatedAt.Equal(*saved.UpdatedAt) {
+		t.Fatal("a truncated download replaced a working ruleset")
+	}
+	truncate.Store(false)
+	requireServiceError(t, db.Exec(`CREATE TRIGGER fail_ruleset_save BEFORE UPDATE ON gost_rulesets
+		BEGIN SELECT RAISE(ABORT, 'ruleset storage unavailable'); END`).Error, nil)
+	if _, err := service.Update(t.Context(), upstream.URL+"/payload", nil); err == nil {
+		t.Fatal("ruleset update reported success while storage rejected it")
+	}
+	service.refresh(t.Context())
+	current, err = service.Get(t.Context())
+	requireServiceError(t, err, nil)
+	if current.URL != saved.URL || !current.UpdatedAt.Equal(*saved.UpdatedAt) {
+		t.Fatal("a failed write advanced the saved subscription")
+	}
+	service.sync(t.Context(), map[uint]bool{})
+}

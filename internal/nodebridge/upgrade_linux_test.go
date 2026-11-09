@@ -2,8 +2,10 @@ package nodebridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,10 +13,15 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"yagp/internal/buildinfo"
 	"yagp/pkg/nodegrpc"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -190,6 +197,98 @@ esac
 		state, err = control.GetUpgradeStatus(ctx, &emptypb.Empty{})
 		if err != nil || state.GetState() != test.wantState || state.GetTargetVersion() != "v3.3.3" {
 			t.Fatalf("completed worker status = %v, %v", state, err)
+		}
+	}
+}
+
+func TestInstalledDaemonUpgradePreservesEnrollment(t *testing.T) {
+	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
+		t.Skip("set YAGP_TEST_UPGRADE=1 in a disposable Linux container with /run/systemd/system")
+	}
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	writeUpgradeFixture(t, filepath.Join(bin, "systemd-run"), "#!/bin/sh\nexit 0\n")
+	logPath := filepath.Join(bin, "systemctl.log")
+	t.Setenv("YAGP_UPGRADE_TEST_CALLS", logPath)
+	writeUpgradeFixture(t, filepath.Join(bin, "systemctl"), `#!/bin/sh
+printf '%s %s\n' "$1" "$2" >> "$YAGP_UPGRADE_TEST_CALLS"
+`)
+
+	version := buildinfo.Version
+	buildinfo.Version = expectedDaemonUpgradeVersion
+	t.Cleanup(func() { buildinfo.Version = version })
+	listener := listenLocal(t)
+	server := grpc.NewServer()
+	t.Cleanup(server.Stop)
+	ready := health.NewServer()
+	service := daemonHealthService + buildinfo.Version
+	ready.SetServingStatus(service, healthpb.HealthCheckResponse_SERVING)
+	healthpb.RegisterHealthServer(server, ready)
+	go func() { _ = server.Serve(listener) }()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "node.yaml")
+	cfg := Config{NodeID: 42, ConfigFile: configPath, ObserverListen: listener.Addr().String()}
+	files := map[string]string{
+		"node.yaml":          "node_id: 42\n",
+		PanelCredentialsFile: "refresh_token: enrolled\n",
+		"gost.yaml":          "api: {}\n",
+		"nft.json":           `{"nftables":[]}`,
+	}
+	for name, contents := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const oldVersion = "0.1.98-abcdef0"
+	target := filepath.Join(dir, "yagp-daemon")
+	oldBinary := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %s\n", oldVersion)
+	candidate := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %s\n", buildinfo.Version)
+	if err := UpgradeInstalledDaemon(t.Context(), cfg, filepath.Join(dir, "missing", "node.yaml"), strings.NewReader(candidate)); !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "record upgrade start") {
+		t.Fatalf("upgrade could proceed without a writable state directory: %v", err)
+	}
+	writeUpgradeFixture(t, target, oldBinary)
+	requestFailure := errors.New("release network unavailable")
+	func() {
+		transport := http.DefaultTransport
+		http.DefaultTransport = &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, requestFailure
+		}}
+		defer func() { http.DefaultTransport = transport }()
+		if err := RunUpgrade(t.Context(), cfg, configPath, "daemon", buildinfo.Version); !errors.Is(err, requestFailure) {
+			t.Fatalf("release download error = %v", err)
+		}
+	}()
+	if installed, err := executableVersion(t.Context(), target, "daemon"); err != nil || installed != oldVersion {
+		t.Fatalf("release download failure changed installed daemon to %q, %v", installed, err)
+	}
+	if err := UpgradeInstalledDaemon(t.Context(), cfg, configPath, strings.NewReader(candidate)); err != nil {
+		t.Fatal(err)
+	}
+	if installed, err := executableVersion(t.Context(), target, "daemon"); err != nil || installed != buildinfo.Version {
+		t.Fatalf("installed daemon = %q, %v", installed, err)
+	}
+
+	writeUpgradeFixture(t, target, oldBinary)
+	ready.SetServingStatus(service, healthpb.HealthCheckResponse_NOT_SERVING)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	if err := UpgradeInstalledDaemon(ctx, cfg, configPath, strings.NewReader(candidate)); err == nil || !strings.Contains(err.Error(), "previous version was restored") {
+		t.Fatalf("unready daemon upgrade = %v", err)
+	}
+	if installed, err := executableVersion(t.Context(), target, "daemon"); err != nil || installed != oldVersion {
+		t.Fatalf("rollback daemon = %q, %v", installed, err)
+	}
+	state, err := readUpgradeOperation(dir)
+	if err != nil || state.State != "failed" || state.Component != "daemon" || state.Tag != buildinfo.Version {
+		t.Fatalf("rollback operation = %+v, %v", state, err)
+	}
+	if calls, err := os.ReadFile(logPath); err != nil || string(calls) != "restart yagp-daemon-42.service\nrestart yagp-daemon-42.service\nreset-failed yagp-daemon-42.service\nrestart yagp-daemon-42.service\n" {
+		t.Fatalf("daemon service operations = %q, %v", calls, err)
+	}
+	for name, want := range files {
+		if got, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(got) != want {
+			t.Fatalf("daemon upgrade changed %s: %v", name, err)
 		}
 	}
 }

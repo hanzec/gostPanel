@@ -42,21 +42,32 @@ type Config struct {
 }
 
 func Run(ctx context.Context, cfg Config) error {
-	return run(ctx, cfg)
+	return run(ctx, cfg, nil)
 }
 
-func run(ctx context.Context, cfg Config, dialOptions ...grpc.DialOption) error {
+func run(ctx context.Context, cfg Config, dial func(context.Context, string, string) (net.Conn, error)) error {
 	if cfg.NodeID == 0 || cfg.Username == "" || cfg.Password == "" || strings.Contains(cfg.Username, ":") {
 		return errors.New("node ID and credentials are required (username cannot contain a colon)")
 	}
 	if !IsLoopbackAddress(cfg.AdminAddress) || !IsLoopbackAddress(cfg.ObserverListen) {
 		return errors.New("Gost admin and observer addresses must be loopback IP addresses with ports")
 	}
-	panelConn, err := connectPanel(cfg, dialOptions...)
+	host, err := nodegrpc.ParsePanelHost(cfg.Host)
 	if err != nil {
-		return fmt.Errorf("create panel report client: %w", err)
+		return err
 	}
-	defer panelConn.Close()
+	panelClient, err := NewPanelClient(host, cfg.ReportCAFile, cfg.ReportCertSHA256)
+	if err != nil {
+		return fmt.Errorf("configure panel TLS: %w", err)
+	}
+	defer panelClient.CloseIdleConnections()
+	if dial != nil {
+		panelClient.Transport.(*http.Transport).DialContext = dial
+	}
+	credentials, err := openCredentialManager(cfg, host, panelClient)
+	if err != nil {
+		return err
+	}
 
 	observerListener, err := net.Listen("tcp", cfg.ObserverListen)
 	if err != nil {
@@ -105,7 +116,8 @@ func run(ctx context.Context, cfg Config, dialOptions ...grpc.DialOption) error 
 
 	channelCtx, cancelChannel := context.WithCancel(ctx)
 	defer cancelChannel()
-	go maintainPanelChannel(channelCtx, cfg.NodeID, nodegrpc.NewV1Client(panelConn), &current, controlDispatcher(control))
+	go maintainCredentials(channelCtx, credentials)
+	go maintainPanelChannel(channelCtx, credentials, cfg.ConfigFile, &current, controlDispatcher(control))
 
 	serveErrors := make(chan error, 1)
 	go func() { serveErrors <- observation.Serve(observerListener) }()
@@ -115,23 +127,6 @@ func run(ctx context.Context, cfg Config, dialOptions ...grpc.DialOption) error 
 	case err := <-serveErrors:
 		return err
 	}
-}
-
-func connectPanel(cfg Config, dialOptions ...grpc.DialOption) (*grpc.ClientConn, error) {
-	host, err := nodegrpc.ParsePanelHost(cfg.Host)
-	if err != nil {
-		return nil, err
-	}
-	transport, err := host.ClientTLS(cfg.ReportCAFile, cfg.ReportCertSHA256)
-	if err != nil {
-		return nil, fmt.Errorf("configure panel report TLS: %w", err)
-	}
-	return host.NewClientConn(append(dialOptions, grpc.WithTransportCredentials(transport),
-		grpc.WithPerRPCCredentials(nodegrpc.PasswordCredentials(cfg.Username, cfg.Password)),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(nodegrpc.MaxStreamFrameBytes),
-			grpc.MaxCallSendMsgSize(nodegrpc.MaxStreamFrameBytes),
-		))...)
 }
 
 func IsLoopbackAddress(address string) bool {

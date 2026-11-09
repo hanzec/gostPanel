@@ -14,7 +14,6 @@ import (
 	"yagp/pkg/nodegrpc"
 
 	observer "github.com/go-gost/plugin/observer/proto"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -47,7 +46,7 @@ func TestReportStreamAllowsLargeCommandReplyWhileTrafficReportsAreThrottled(t *t
 			w.WriteHeader(http.StatusGatewayTimeout)
 		}
 	})}
-	client := startTestReportServer(t, f.db, grpc.MaxRecvMsgSize(nodegrpc.MaxStreamFrameBytes))
+	client := startTestReportServer(t, f.db)
 	reports := startTestReportStream(t, ctx, client, node, nodegrpc.NewDispatcher(control, nodegrpc.V1_Execute_FullMethodName))
 	commandResult := make(chan error, 1)
 	go func() {

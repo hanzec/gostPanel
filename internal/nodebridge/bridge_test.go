@@ -2,13 +2,11 @@ package nodebridge
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
-	"math/big"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +27,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -64,16 +63,13 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	}))
 	t.Cleanup(admin.Close)
 	recorder := &reportRecorder{
-		username: username, password: password, reports: make(chan *nodegrpc.ReportRequest, 2),
+		reports:  make(chan *nodegrpc.ReportRequest, 2),
 		sessions: make(chan *nodegrpc.Session, 2),
 	}
-	panel := grpc.NewServer()
-	nodegrpc.RegisterPanelServer(panel, recorder)
-	t.Cleanup(panel.Stop)
 	var attempts atomic.Int32
 	limitedAt := make(chan time.Time, 1)
 	proxy := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ProtoMajor != 2 || r.URL.Path != "/api/grpc/Connect" {
+		if r.ProtoMajor != 1 || r.URL.Path != nodegrpc.SessionPath {
 			t.Errorf("unexpected panel request: %s %s", r.Proto, r.URL.Path)
 			http.NotFound(w, r)
 			return
@@ -88,9 +84,8 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 				t.Errorf("reconnect after HTTP 429 waited %v, want at least 2 seconds", delay)
 			}
 		}
-		panel.ServeHTTP(w, r)
+		recorder.ServeHTTP(w, r)
 	}))
-	proxy.EnableHTTP2 = true
 	proxy.StartTLS()
 	t.Cleanup(proxy.Close)
 	panelCertFile := filepath.Join(t.TempDir(), "panel-ca.pem")
@@ -101,13 +96,14 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 	observerListener := listenLocal(t)
 	observerAddress := observerListener.Addr().String()
 	_ = observerListener.Close()
+	configPath := preparePanelCredentials(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- run(ctx, Config{
 			NodeID: 42, Username: username, Password: password, ObserverListen: observerAddress,
 			AdminAddress: strings.TrimPrefix(admin.URL, "http://"), Host: "127.0.0.1",
-			ReportCAFile: panelCertFile,
+			ReportCAFile: panelCertFile, ConfigFile: configPath,
 		}, dialPanelAt(proxy.Listener))
 	}()
 	t.Cleanup(func() {
@@ -157,12 +153,18 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 		if endpoint, err := panelClient.GetObserverEndpoint(timeout, &emptypb.Empty{}); err != nil || endpoint.GetAddress() != observerAddress {
 			t.Fatalf("observer address: %v, %v", endpoint, err)
 		}
-		if _, err := panelClient.RegisterNode(timeout, &nodegrpc.RegisterNodeRequest{}); status.Code(err) != codes.Unimplemented {
-			t.Fatalf("panel registration RPC in reverse direction: %v", err)
+		if _, err := panelClient.GetNodeConfig(timeout, &emptypb.Empty{}); status.Code(err) != codes.Unimplemented {
+			t.Fatalf("node configuration RPC in reverse direction: %v", err)
 		}
-		result, err := localObserver.Observe(withToken, observation)
-		if err != nil || !result.GetOk() {
-			t.Fatalf("observe on connection %d: %v, %v", attempt, result, err)
+		for {
+			result, err := localObserver.Observe(withToken, observation)
+			if err == nil && result.GetOk() {
+				break
+			}
+			if status.Code(err) != codes.Unavailable || timeout.Err() != nil {
+				t.Fatalf("observe on connection %d: %v, %v", attempt, result, err)
+			}
+			time.Sleep(time.Millisecond)
 		}
 		select {
 		case report := <-recorder.reports:
@@ -174,26 +176,32 @@ func TestNodeBridgeControlAndReport(t *testing.T) {
 		}
 		session.Close()
 	}
+	for {
+		if template, err := ReadNftTemplate(configPath); err == nil && template == `{"nftables":[]}` {
+			break
+		}
+		select {
+		case <-timeout.Done():
+			t.Fatal("node configuration was not cached")
+		case <-time.After(time.Millisecond):
+		}
+	}
 }
 
 func TestNodeBridgeReconnectsWithPinnedPanelCertificate(t *testing.T) {
 	const username, password = "node", "test-password"
-	recorder := &reportRecorder{username: username, password: password, sessions: make(chan *nodegrpc.Session, 2)}
-	panel := grpc.NewServer()
-	nodegrpc.RegisterPanelServer(panel, recorder)
-	t.Cleanup(panel.Stop)
-	https := httptest.NewUnstartedServer(panel)
-	https.EnableHTTP2 = true
-	https.StartTLS()
+	recorder := &reportRecorder{sessions: make(chan *nodegrpc.Session, 2)}
+	https := httptest.NewTLSServer(recorder)
 	t.Cleanup(https.Close)
 	digest := sha256.Sum256(https.Certificate().Raw)
+	configPath := preparePanelCredentials(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- run(ctx, Config{
 			NodeID: 42, Username: username, Password: password,
 			AdminAddress: "127.0.0.1:1", ObserverListen: "127.0.0.1:0",
-			Host: "127.0.0.1", ReportCertSHA256: hex.EncodeToString(digest[:]),
+			Host: "127.0.0.1", ReportCertSHA256: hex.EncodeToString(digest[:]), ConfigFile: configPath,
 		}, dialPanelAt(https.Listener))
 	}()
 	t.Cleanup(func() {
@@ -207,37 +215,176 @@ func TestNodeBridgeReconnectsWithPinnedPanelCertificate(t *testing.T) {
 	defer stop()
 	for i := 0; i < 2; i++ {
 		select {
-		case <-recorder.sessions:
+		case session := <-recorder.sessions:
+			session.Close()
 		case <-timeout.Done():
 			t.Fatalf("pinned connection %d did not reach panel: %v", i+1, timeout.Err())
 		}
-		// Drop the TLS connection itself, so the next stream has to verify the certificate again.
-		https.CloseClientConnections()
 	}
 }
+
+func TestNodeBridgeRefreshesWithoutReplacingSession(t *testing.T) {
+	recorder := &reportRecorder{sessions: make(chan *nodegrpc.Session, 2)}
+	refreshed := make(chan struct{}, 1)
+	var sessions atomic.Int32
+	panel := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != nodegrpc.RefreshPath {
+			sessions.Add(1)
+			recorder.ServeHTTP(w, r)
+			return
+		}
+		data, err := io.ReadAll(r.Body)
+		request := new(nodegrpc.RefreshNodeRequest)
+		if err != nil || proto.Unmarshal(data, request) != nil || request.GetRefreshToken() != testAccessToken+"-refresh" {
+			t.Error("online node did not send its refresh credential")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeTestProtobuf(t, w, testCredentials(time.Now().Add(15*time.Minute), "new-access"))
+		refreshed <- struct{}{}
+	}))
+	t.Cleanup(panel.Close)
+	configPath := filepath.Join(t.TempDir(), "node.yaml")
+	data, err := EncodePanelCredentials(testCredentials(time.Now().Add(refreshLeadTime+3*time.Second), testAccessToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialPath := filepath.Join(filepath.Dir(configPath), PanelCredentialsFile)
+	if err = WriteNodeFile(credentialPath, data); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(panel.Certificate().Raw)
+	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, Config{
+			NodeID: 42, Username: "node", Password: "test-password",
+			AdminAddress: "127.0.0.1:1", ObserverListen: "127.0.0.1:0",
+			Host: "127.0.0.1", ReportCertSHA256: hex.EncodeToString(digest[:]), ConfigFile: configPath,
+		}, dialPanelAt(panel.Listener))
+	}()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	var session *nodegrpc.Session
+	select {
+	case session = <-recorder.sessions:
+	case <-ctx.Done():
+		t.Fatal("node failed to connect")
+	}
+	select {
+	case <-refreshed:
+	case <-ctx.Done():
+		t.Fatal("online node did not refresh")
+	}
+	for {
+		stored, err := os.ReadFile(credentialPath)
+		if err == nil && strings.Contains(string(stored), "access_token: new-access") {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("online node did not persist its refreshed credentials")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if _, err := nodegrpc.NewV1Client(session).GetObserverEndpoint(ctx, &emptypb.Empty{}); err != nil || sessions.Load() != 1 {
+		t.Fatalf("credential refresh replaced the original session: %d attempts, %v", sessions.Load(), err)
+	}
+}
+
+func TestNodeBridgeRetriesConfigurationBeforePublishingSession(t *testing.T) {
+	recorder := &reportRecorder{sessions: make(chan *nodegrpc.Session, 2)}
+	recorder.failConfig.Store(true)
+	panel := httptest.NewTLSServer(recorder)
+	t.Cleanup(panel.Close)
+	client := panel.Client()
+	client.Transport.(*http.Transport).DialContext = dialPanelAt(panel.Listener)
+	configPath := preparePanelCredentials(t)
+	host, err := nodegrpc.ParsePanelHost("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := openCredentialManager(Config{NodeID: 42, ConfigFile: configPath}, host, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var current atomic.Pointer[nodegrpc.Session]
+	connected, err := runPanelSession(ctx, credentials, configPath, &current, nil)
+	if connected || status.Code(errors.Unwrap(err)) != codes.Unavailable || current.Load() != nil {
+		t.Fatalf("failed config unexpectedly published the session: %v, %v", connected, err)
+	}
+	if _, err = ReadNftTemplate(configPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed config left a snapshot: %v", err)
+	}
+	go maintainPanelChannel(ctx, credentials, configPath, &current, nil)
+	for current.Load() == nil {
+		select {
+		case <-ctx.Done():
+			t.Fatal("retry never published the session")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if _, err = ReadNftTemplate(configPath); err != nil {
+		t.Fatalf("session published before saving configuration: %v", err)
+	}
+}
+
+const testAccessToken = "access-token"
 
 type reportRecorder struct {
 	nodegrpc.UnimplementedV1Server
-	username, password string
-	reports            chan *nodegrpc.ReportRequest
-	sessions           chan *nodegrpc.Session
+	reports    chan *nodegrpc.ReportRequest
+	sessions   chan *nodegrpc.Session
+	failConfig atomic.Bool
 }
 
-func (s *reportRecorder) Connect(stream nodegrpc.V1_ConnectServer) error {
-	if !nodegrpc.MatchCredentials(stream.Context(), s.username, s.password) {
-		return status.Error(codes.Unauthenticated, "invalid node credentials")
+func (s *reportRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer "+testAccessToken || r.Header.Get(nodegrpc.NodeIDMetadata) != "42" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
 	}
-	ids := metadata.ValueFromIncomingContext(stream.Context(), nodegrpc.NodeIDMetadata)
-	if len(ids) != 1 || ids[0] != "42" {
-		return status.Error(codes.Unauthenticated, "invalid node ID")
+	stream, err := nodegrpc.AcceptSession(w, r)
+	if err != nil {
+		return
 	}
-	if err := stream.SendHeader(metadata.Pairs(nodegrpc.ReadyMetadata, "1")); err != nil {
-		return err
-	}
+	defer stream.Close()
 	session := nodegrpc.NewSession(stream, nodegrpc.NewDispatcher(s,
-		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName))
+		nodegrpc.V1_Report_FullMethodName, nodegrpc.V1_UpdateNodeIPs_FullMethodName, nodegrpc.V1_GetNodeConfig_FullMethodName))
 	s.sessions <- session
-	return session.Run()
+	_ = session.Run()
+}
+
+func (s *reportRecorder) GetNodeConfig(context.Context, *emptypb.Empty) (*nodegrpc.NodeConfig, error) {
+	if s.failConfig.CompareAndSwap(true, false) {
+		return nil, status.Error(codes.Unavailable, "temporary configuration failure")
+	}
+	return &nodegrpc.NodeConfig{NftTemplate: `{"nftables":[]}`, ConfigYaml: []byte("policy: default")}, nil
+}
+
+func preparePanelCredentials(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "node.yaml")
+	data, err := EncodePanelCredentials(testCredentials(time.Now().Add(10*time.Minute), testAccessToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = WriteNodeFile(filepath.Join(filepath.Dir(path), PanelCredentialsFile), data); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func testCredentials(accessExpiry time.Time, access string) *nodegrpc.NodeCredentials {
+	return &nodegrpc.NodeCredentials{
+		AccessToken: access, RefreshToken: access + "-refresh",
+		AccessExpiresAt: accessExpiry.Unix(), RefreshExpiresAt: accessExpiry.Add(time.Hour).Unix(),
+	}
 }
 
 func (s *reportRecorder) Report(_ context.Context, report *nodegrpc.ReportRequest) (*observer.ObserveReply, error) {
@@ -259,39 +406,22 @@ func listenLocal(t *testing.T) net.Listener {
 	return listener
 }
 
-func dialPanelAt(listener net.Listener) grpc.DialOption {
-	return grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "tcp", listener.Addr().String())
-	})
+func dialPanelAt(listener net.Listener) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, listener.Addr().String())
+	}
 }
 
-func testTLSFiles(t *testing.T, certificate x509.Certificate) (string, string, string) {
+func writeTestProtobuf(t *testing.T, w http.ResponseWriter, message proto.Message) {
 	t.Helper()
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	data, err := proto.Marshal(message)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	certificate.SerialNumber = big.NewInt(1)
-	certificate.NotBefore = time.Now().Add(-time.Minute)
-	certificate.NotAfter = time.Now().Add(time.Hour)
-	certificate.BasicConstraintsValid = true
-	certificate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
-	der, err := x509.CreateCertificate(rand.Reader, &certificate, &certificate, publicKey, privateKey)
-	if err != nil {
-		t.Fatal(err)
+	w.Header().Set("Content-Type", nodegrpc.ProtobufContentType)
+	if _, err = w.Write(data); err != nil {
+		t.Error(err)
 	}
-	key, err := x509.MarshalPKCS8PrivateKey(privateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
-	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	if err = os.WriteFile(certFile, certificatePEM, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0600); err != nil {
-		t.Fatal(err)
-	}
-	return certFile, keyFile, string(certificatePEM)
 }

@@ -71,41 +71,54 @@ func (r *NodeRepository) SetRegistrationToken(ctx context.Context, id uint, hash
 	return result.Error
 }
 
-func (r *NodeRepository) ConsumeRegistrationToken(ctx context.Context, node *model.GostNode, hash string) error {
-	// Do not interpolate the newly issued password into GORM's SQL trace.
-	result := r.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Model(&model.GostNode{}).
-		Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
-		Updates(map[string]any{
-			"registration_token_hash": "",
-			"registration_expires_at": nil,
-			"username":                node.Username,
-			"password":                node.Password,
-			"address":                 node.Address,
-			"ipv4":                    node.IPv4,
-			"ipv6":                    node.IPv6,
-		})
-	if result.Error == nil && result.RowsAffected != 1 {
-		return gorm.ErrRecordNotFound
-	}
-	return result.Error
+func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, hash string, credentials model.NodeCredentials) error {
+	// Do not interpolate node secrets or their hashes into GORM's SQL trace.
+	return r.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Transaction(func(tx *gorm.DB) error {
+		// Existing Gost services and observers already use these local credentials.
+		values := nodeCredentialValues(credentials)
+		values["registration_token_hash"] = ""
+		values["registration_expires_at"] = nil
+		values["username"] = gorm.Expr("COALESCE(NULLIF(username, ''), ?)", node.Username)
+		values["password"] = gorm.Expr("COALESCE(NULLIF(password, ''), ?)", node.Password)
+		values["address"] = node.Address
+		values["ipv4"] = node.IPv4
+		values["ipv6"] = node.IPv6
+		values["session_generation"] = gorm.Expr("session_generation + 1")
+		result := tx.Model(&model.GostNode{}).
+			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
+			Updates(values)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.First(node, node.ID).Error
+	})
 }
 
 func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string) error {
+	// The session keeps its authenticated generation, but the addresses can change while it is connected.
+	query := r.DB.WithContext(ctx).Model(&model.GostNode{}).
+		Where("id = ? AND session_generation = ?", node.ID, node.SessionGeneration)
+	var current model.GostNode
+	if err := query.Session(&gorm.Session{}).Select("ipv4", "ipv6").Take(&current).Error; err != nil {
+		return err
+	}
 	updates := make(map[string]any)
-	if ipv6 != "" && ipv6 != node.IPv6 {
+	if ipv6 != "" && ipv6 != current.IPv6 {
 		updates["ipv6"] = ipv6
 		updates["address"] = gorm.Expr("COALESCE(NULLIF(ipv4, ''), ?)", ipv6)
 	}
-	if ipv4 != "" && ipv4 != node.IPv4 {
+	if ipv4 != "" && ipv4 != current.IPv4 {
 		updates["ipv4"] = ipv4
 		updates["address"] = ipv4
 	}
 	if len(updates) == 0 {
 		return nil
 	}
-	// Re-enrollment rotates the password. Don't apply an in-flight report from the previous enrollment.
-	result := r.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Model(&model.GostNode{}).
-		Where("id = ? AND password = ?", node.ID, node.Password).Updates(updates)
+	// Keep the generation predicate on the write if the node re-enrolls concurrently.
+	result := query.Updates(updates)
 	if result.Error == nil && result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
 	}

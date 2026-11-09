@@ -43,8 +43,9 @@ type GostNode struct {
 	IPv4     string     `gorm:"column:ipv4;size:45" json:"ipv4"`
 	IPv6     string     `gorm:"column:ipv6;size:45" json:"ipv6"`
 
-	RegistrationTokenHash string            `gorm:"size:64" json:"-"`
-	RegistrationExpiresAt *time.Time        `json:"-"`
+	RegistrationTokenHash string     `gorm:"size:64" json:"-"`
+	RegistrationExpiresAt *time.Time `json:"-"`
+	NodeCredentials       `gorm:"embedded" json:"-"`
 	UpgradePolicy         NodeUpgradePolicy `gorm:"embedded" json:"-"`
 
 	// 流量统计

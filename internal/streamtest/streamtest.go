@@ -1,55 +1,51 @@
-// Package streamtest opens a real gRPC node stream for tests of panel callers.
+// Package streamtest opens a real WebSocket node session for tests of panel callers.
 package streamtest
 
 import (
 	"context"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"yagp/pkg/nodegrpc"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 )
-
-type panel struct {
-	nodegrpc.UnimplementedV1Server
-	ready chan *nodegrpc.Session
-}
-
-func (p *panel) Connect(stream nodegrpc.V1_ConnectServer) error {
-	session := nodegrpc.NewSession(stream, nil)
-	p.ready <- session
-	return session.Run()
-}
 
 func Open(t *testing.T, handle nodegrpc.StreamHandler) *nodegrpc.Session {
 	t.Helper()
-	listener := bufconn.Listen(1 << 20)
-	server := grpc.NewServer()
-	t.Cleanup(server.Stop)
-	p := &panel{ready: make(chan *nodegrpc.Session, 1)}
-	nodegrpc.RegisterV1Server(server, p)
-	go func() { _ = server.Serve(listener) }()
-	conn, err := grpc.NewClient("passthrough:///test-panel", grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return listener.DialContext(ctx)
-		}))
+	ready := make(chan *nodegrpc.Session, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+nodegrpc.SessionPath, func(w http.ResponseWriter, r *http.Request) {
+		stream, err := nodegrpc.AcceptSession(w, r)
+		if err != nil {
+			return
+		}
+		defer stream.Close()
+		session := nodegrpc.NewSession(stream, nil)
+		ready <- session
+		_ = session.Run()
+	})
+	server := httptest.NewTLSServer(mux)
+	t.Cleanup(server.Close)
+	host, err := nodegrpc.ParsePanelHost("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
-	stream, err := nodegrpc.NewV1Client(conn).Connect(t.Context())
+	client := server.Client()
+	client.Transport.(*http.Transport).DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
+	}
+	stream, err := host.DialSession(t.Context(), client, 1, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = stream.Close() })
 	session := nodegrpc.NewSession(stream, handle)
 	t.Cleanup(session.Close)
 	go func() { _ = session.Run() }()
 	select {
-	case panelSession := <-p.ready:
+	case panelSession := <-ready:
 		return panelSession
 	case <-time.After(5 * time.Second):
 		t.Fatal("panel did not accept the test stream")

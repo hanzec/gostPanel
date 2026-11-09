@@ -6,6 +6,12 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 项目改名、移除推广、管理员认证、数据库与节点通信改造使用了 OpenAI Codex 辅助。
 
+## 分支与合并
+
+- `master` 是本仓库的远端默认分支，也是常规 PR 的合并目标。将改动推送到功能分支，创建 PR 时显式指定 `--base master`。
+- 推送前用 `git remote -v` 和 `git status --short --branch` 核对远端与当前分支。合并前确认 PR 的 `baseRefName` 为 `master`，并核对必需的 CI 检查已通过。
+- 创建或推送 `main`、更改默认分支、使用其他 PR 合并目标，均须用户明确授权。
+
 ## 开发与验证
 
 - `cmd/server` 是面板入口，`cmd/yagp-daemon` 是节点守护程序入口，`internal` 包含 API、业务逻辑和持久化代码。`web` 包含 Vue 前端。

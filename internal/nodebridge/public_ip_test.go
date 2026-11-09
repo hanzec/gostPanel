@@ -2,8 +2,8 @@ package nodebridge
 
 import (
 	"context"
-	"crypto/x509"
-	"net"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -11,42 +11,28 @@ import (
 
 	"yagp/pkg/nodegrpc"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestReportPublicIPChanges(t *testing.T) {
-	cert, key, _ := testTLSFiles(t, x509.Certificate{IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)}})
-	serverTLS, err := credentials.NewServerTLSFromFile(cert, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	listener := listenLocal(t)
-	panel := grpc.NewServer(grpc.Creds(serverTLS))
 	reports := &ipReportRecorder{requests: make(chan *nodegrpc.NodeIPsRequest, 8)}
-	nodegrpc.RegisterPanelServer(panel, reports)
-	go func() { _ = panel.Serve(listener) }()
-	t.Cleanup(panel.Stop)
-	conn, err := connectPanel(Config{
-		Username: "node", Password: "test-password", Host: "127.0.0.1", ReportCAFile: cert,
-	}, dialPanelAt(listener))
+	panel := httptest.NewTLSServer(reports)
+	t.Cleanup(panel.Close)
+	client := panel.Client()
+	client.Transport.(*http.Transport).DialContext = dialPanelAt(panel.Listener)
+	host, err := nodegrpc.ParsePanelHost("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = conn.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	stream, err := nodegrpc.NewV1Client(conn).Connect(metadata.AppendToOutgoingContext(ctx, nodegrpc.NodeIDMetadata, "42"))
+	stream, err := host.DialSession(ctx, client, 42, testAccessToken)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = stream.Header(); err != nil {
-		t.Fatal(err)
-	}
+	defer stream.Close()
 	session := nodegrpc.NewSession(stream, nodegrpc.NewDispatcher(nodegrpc.UnimplementedV1Server{}))
 	go func() { _ = session.Run() }()
 
@@ -98,14 +84,13 @@ type ipReportRecorder struct {
 	calls    atomic.Int32
 }
 
-func (s *ipReportRecorder) Connect(stream nodegrpc.V1_ConnectServer) error {
-	if !nodegrpc.MatchCredentials(stream.Context(), "node", "test-password") {
-		return status.Error(codes.Unauthenticated, "invalid report credentials")
+func (s *ipReportRecorder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	stream, err := nodegrpc.AcceptSession(w, r)
+	if err != nil {
+		return
 	}
-	if err := stream.SendHeader(metadata.Pairs(nodegrpc.ReadyMetadata, "1")); err != nil {
-		return err
-	}
-	return nodegrpc.NewSession(stream, nodegrpc.NewDispatcher(s, nodegrpc.V1_UpdateNodeIPs_FullMethodName)).Run()
+	defer stream.Close()
+	_ = nodegrpc.NewSession(stream, nodegrpc.NewDispatcher(s, nodegrpc.V1_UpdateNodeIPs_FullMethodName)).Run()
 }
 
 func (s *ipReportRecorder) UpdateNodeIPs(_ context.Context, req *nodegrpc.NodeIPsRequest) (*emptypb.Empty, error) {

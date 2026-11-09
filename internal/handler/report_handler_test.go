@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
@@ -17,11 +20,9 @@ import (
 
 	"github.com/glebarez/sqlite"
 	observer "github.com/go-gost/plugin/observer/proto"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"gorm.io/gorm"
 )
 
@@ -65,9 +66,6 @@ func TestReportRecordsTrafficForTheEntryNode(t *testing.T) {
 		Observation: &observer.ObserveRequest{Events: []*observer.Event{
 			trafficEvent(rules[0].ID, 12, 5, 2),
 		}},
-	}
-	if _, err := client.Report(ctx, request); status.Code(err) != codes.Unimplemented {
-		t.Fatalf("report outside the stream = %v", err)
 	}
 	reports := startTestReportStream(t, ctx, client, nodes[0], nil)
 	submit := func(event *observer.Event) {
@@ -121,26 +119,28 @@ func TestReportStreamAuthenticatesOneNodeIdentity(t *testing.T) {
 	defer cancel()
 	id := uint64(node.ID)
 	validID := strconv.FormatUint(id, 10)
-	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
 	for _, ids := range [][]string{nil, {"bad-id"}, {"0"}, {validID, validID}} {
-		md := metadata.MD{nodegrpc.NodeIDMetadata: ids}
-		stream, err := client.Connect(metadata.NewOutgoingContext(ctx, md), auth)
-		if err == nil {
-			_, err = stream.Recv()
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, client.server.URL+nodegrpc.SessionPath, nil)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if status.Code(err) != codes.Unauthenticated {
-			t.Fatalf("Connect with node IDs %v = %v", ids, err)
+		request.Header[http.CanonicalHeaderKey(nodegrpc.NodeIDMetadata)] = ids
+		request.Header.Set("Authorization", "Bearer "+testReportToken(node.ID))
+		reply, err := client.http.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply.Body.Close()
+		if reply.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("session with node IDs %v returned %d", ids, reply.StatusCode)
 		}
 	}
 	reports := startTestReportStream(t, ctx, client, node, nil)
 	if _, err := reports.Report(ctx, &nodegrpc.ReportRequest{NodeId: id + 1}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("traffic report for another node = %v", err)
 	}
-	if _, err := reports.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: id + 1}); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("nft template request for another node = %v", err)
-	}
-	if _, err := reports.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: id}); err != nil {
-		t.Fatalf("valid request after rejected requests = %v", err)
+	if config, err := reports.GetNodeConfig(ctx, &emptypb.Empty{}); err != nil || config.GetNftTemplate() == "" {
+		t.Fatalf("configuration after rejected report = %v, %v", config, err)
 	}
 }
 
@@ -165,15 +165,15 @@ func TestReportStreamAuthenticationTimeoutKeepsEstablishedStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
-	_, authErr := connectTestReportStream(ctx, client, uint64(node.ID), auth)
+	_, authErr := client.host.DialSession(ctx, client.http, uint64(node.ID), testReportToken(node.ID))
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if status.Code(authErr) != codes.DeadlineExceeded || ctx.Err() != nil {
+	var statusErr *nodegrpc.HTTPStatusError
+	if !errors.As(authErr, &statusErr) || statusErr.StatusCode != http.StatusGatewayTimeout || ctx.Err() != nil {
 		t.Fatalf("Connect stalled by the SQL pool = %v, client context = %v", authErr, ctx.Err())
 	}
-	if _, err := reports.GetNftTemplate(ctx, &nodegrpc.NftTemplateRequest{NodeId: uint64(node.ID)}); err != nil {
+	if _, err := reports.GetNodeConfig(ctx, &emptypb.Empty{}); err != nil {
 		t.Fatalf("established stream after authentication timeout = %v", err)
 	}
 }
@@ -185,56 +185,60 @@ func trafficEvent(id uint, input, output, connections uint64) *observer.Event {
 	}
 }
 
-func startTestReportServer(t *testing.T, db *gorm.DB, options ...grpc.ServerOption) nodegrpc.V1Client {
-	t.Helper()
-	fixture := httptest.NewTLSServer(nil)
-	fixture.Close()
-	trust := x509.NewCertPool()
-	trust.AddCert(fixture.Certificate())
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := grpc.NewServer(append(options, grpc.Creds(credentials.NewTLS(fixture.TLS)))...)
-	nodegrpc.RegisterV1Server(server, NewReportHandler(db, false))
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(server.Stop)
-	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{RootCAs: trust})))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return nodegrpc.NewV1Client(conn)
+type testReportServer struct {
+	server *httptest.Server
+	http   *http.Client
+	host   nodegrpc.PanelHost
+	db     *gorm.DB
 }
 
-func connectTestReportStream(ctx context.Context, client nodegrpc.V1Client, id uint64, options ...grpc.CallOption) (nodegrpc.V1_ConnectClient, error) {
-	ctx = metadata.AppendToOutgoingContext(ctx, nodegrpc.NodeIDMetadata, strconv.FormatUint(id, 10))
-	stream, err := client.Connect(ctx, options...)
-	if err != nil {
-		return nil, err
-	}
-	header, err := stream.Header()
-	if err != nil {
-		return nil, err
-	}
-	if len(header.Get(nodegrpc.ReadyMetadata)) != 1 {
-		_, err = stream.Recv()
-		return nil, err
-	}
-	return stream, nil
-}
-
-func startTestReportStream(t *testing.T, ctx context.Context, client nodegrpc.V1Client, node model.GostNode, commands nodegrpc.StreamHandler) nodegrpc.V1Client {
+func startTestReportServer(t *testing.T, db *gorm.DB) testReportServer {
 	t.Helper()
-	ctx, cancel := context.WithCancel(ctx)
-	t.Cleanup(cancel)
-	auth := grpc.PerRPCCredentials(nodegrpc.PasswordCredentials(node.Username, node.Password))
-	stream, err := connectTestReportStream(ctx, client, uint64(node.ID), auth)
+	reports := NewReportHandler(db, false)
+	if err := reports.SetNodeTokenKey(make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET "+nodegrpc.SessionPath, reports.SessionHTTP)
+	server := httptest.NewTLSServer(mux)
+	t.Cleanup(server.Close)
+	transport := server.Client().Transport.(*http.Transport).Clone()
+	transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
+	}
+	t.Cleanup(transport.CloseIdleConnections)
+	host, err := nodegrpc.ParsePanelHost("127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
+	return testReportServer{server, &http.Client{Transport: transport}, host, db}
+}
+
+func testReportToken(id uint) string {
+	data := sha256.Sum256([]byte(strconv.FormatUint(uint64(id), 10)))
+	return base64.RawURLEncoding.EncodeToString(data[:])
+}
+
+func startTestReportStream(t *testing.T, ctx context.Context, client testReportServer, node model.GostNode, commands nodegrpc.StreamHandler) nodegrpc.V1Client {
+	t.Helper()
+	token := testReportToken(node.ID)
+	hash := sha256.Sum256([]byte(token))
+	if err := client.db.Model(&node).Updates(map[string]any{
+		"session_generation": 1, "access_token_hash": hex.EncodeToString(hash[:]), "access_expires_at": time.Now().Add(time.Minute).Unix(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.host.DialSession(ctx, client.http, uint64(node.ID), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stream.Close() })
 	session := nodegrpc.NewSession(stream, commands)
 	t.Cleanup(session.Close)
 	go func() { _ = session.Run() }()
-	return nodegrpc.NewV1Client(session)
+	clientSession := nodegrpc.NewV1Client(session)
+	if _, err := clientSession.GetNodeConfig(ctx, &emptypb.Empty{}); err != nil {
+		t.Fatalf("session was not ready: %v", err)
+	}
+	return clientSession
 }

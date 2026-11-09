@@ -18,22 +18,32 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 
 ### 安装新节点
 
-先在面板配置 [TLS 注册和上报](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写节点名称，打开安装窗口并获取一次性令牌。点击 **复制命令**，在目标 Linux 主机以 root 身份执行。
+先在面板配置 [TLS 注册和上报](#启用节点注册和流量上报)。在 **节点管理 → 添加节点** 填写节点名称，打开安装窗口并获取一次性令牌。在目标 Linux 主机以 root 身份执行下方命令，`RELEASE_TAG` 使用与面板一致的发布标签。
 
-也可用下面的模板，把地址和令牌替换为面板提供的值。令牌有效期为 15 分钟，注册成功后立即失效。重新签发会撤销上一枚未使用的令牌。[节点安装脚本](./scripts/install_node.sh)
+把命令中的地址和令牌替换为面板提供的值。令牌有效期为 15 分钟，注册成功后立即失效。重新签发会撤销上一枚未使用的令牌。[节点安装脚本](./scripts/install_node.sh)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh \
-  | bash -s -- --host 'panel.example.com' --token 'TOKEN_FROM_PANEL'
+version='RELEASE_TAG'
+curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/scripts/install_node.sh" \
+  | YAGP_DAEMON_VERSION="$version" bash -s -- --host 'panel.example.com' --token 'TOKEN_FROM_PANEL'
 ```
 
 ### 升级已安装节点
 
-在使用 systemd 且系统 D-Bus 可用的节点上，以 root 身份执行以下命令，将 `42` 换成面板中的节点 ID。升级只替换 `yagp-daemon`，原配置、凭据和证书可继续使用，无需重新注册。
+从公网 gRPC 迁移到 WebSocket 前，先备份面板数据库和节点配置。更新面板和反向代理后，在节点管理中为已有节点签发新的注册令牌，再在节点主机上以 root 身份执行原地重新注册命令，将 `42` 换成原节点 ID。脚本暂停 `yagp-daemon`，写入新凭据后启动新版守护进程。现有 Gost 服务继续转发，沿用节点 ID 和 nftables 配置。支持 systemd 和 OpenRC。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_node.sh \
-  | bash -s -- upgrade --node-id 42
+version='RELEASE_TAG'
+curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/scripts/install_node.sh" \
+  | YAGP_DAEMON_VERSION="$version" bash -s -- reenroll --node-id 42 --host 'panel.example.com' --token 'TOKEN_FROM_PANEL'
+```
+
+迁移完成后，使用 systemd 且系统 D-Bus 可用的节点可通过 `upgrade` 更新 `yagp-daemon`，沿用原配置、凭据和证书。
+
+```bash
+version='RELEASE_TAG'
+curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/scripts/install_node.sh" \
+  | YAGP_DAEMON_VERSION="$version" bash -s -- upgrade --node-id 42
 ```
 
 ## 🚀 核心特性
@@ -42,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/hanzec/yagp/HEAD/scripts/install_no
 - 🔗 **多跳隧道** - 支持复杂的出口/中转隧道配置（入口 -> 出口 -> 目标）。
 - 📊 **实时延迟** - 每 5 秒自动检测节点与转发链路的 Ping 值。
 - 🛡️ **管理员访问** - 使用 Authentik 正向认证和管理员组，操作日志按管理员用户名记录。
-- 📈 **流量统计与配额** - 节点通过 TLS gRPC 上报流量，可为每个节点单独设置转发流量上限和重置周期。
+- 📈 **流量统计与配额** - 节点通过加密的 WebSocket 上报流量，可为每个节点单独设置转发流量上限和重置周期。
 - 🐳 **快速部署** - 全量支持 Docker 一键运行及 GitHub Action 自动构建。
 
 ## 🛠️ 快速开始
@@ -68,13 +78,13 @@ AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
 docker compose up -d
 ```
 
-镜像支持 Linux amd64 和 arm64。要固定版本，可在 `docker-compose.yml` 中将 `latest` 改为指定标签。
+镜像支持 Linux amd64 和 arm64。部署 `main` 发布的版本时，如果 GitHub 默认分支仍是 `master`，请在 `docker-compose.yml` 中将镜像设为 `ghcr.io/hanzec/yagp:RELEASE_TAG`。`latest` 和面板复制命令使用的 `/HEAD/` 仍跟随默认分支，节点应按上文的固定标签命令安装、重新注册或升级。
 
 Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板容器中的 `/app/config`、`/app/data` 和 `/app/logs`。启动时，初始化服务会在 `config/config.yaml` 缺失时从镜像复制模板。面板以只读方式挂载配置，已有配置会继续使用。
 
 按下文配置 [Authentik 正向认证](#authentik-正向认证) 和 [节点注册与上报](#启用节点注册和流量上报)，保存后执行 `docker compose restart yagp`。从其他目录使用 `-f` 指定 Compose 文件时，将 `PWD` 环境变量设为部署目录。PowerShell 可用 `$env:PWD = (Get-Location).Path`。如果未设置 `PWD`，则使用 Compose 项目目录。
 
-面板网页、API 和节点 gRPC 共用 Traefik 的 HTTPS 域名和 `443` 端口。Compose 不向宿主机发布面板的 `39100` 或 `39101` 端口。
+面板网页、API 和节点 WebSocket 共用 Traefik 的 HTTPS 域名和 `443` 端口。Compose 不向宿主机发布面板的 `39100` 或 `39101` 端口。
 
 **方式 B · Linux 二进制部署**
 
@@ -128,26 +138,15 @@ database:
 
 ### 启用节点注册和流量上报
 
-顶级 `host` 填节点能访问的面板域名或 IP。`report.listen` 是面板进程的 gRPC 监听地址，留空时停用节点上报。安装命令只传 `--host` 和一次性 `--token`，守护进程固定连接 `https://host:443/api/grpc`。Compose 通过 `.env` 中的 `YAGP_HOST` 同时配置面板的 `host` 和 Traefik 的路由域名。
+顶级 `host` 填节点能访问的面板域名或 IP。`report.listen` 是节点接口监听地址，留空时停用节点接入。节点在 `443` 端口通过 HTTPS POST 注册和刷新凭据，通过 `GET /api/node/v2/session` 建立 WebSocket 会话。流量和 IP 上报、配置请求、管理命令及执行结果使用同一条会话。注册、刷新和 WebSocket 消息采用 Protobuf。
 
-**Docker Compose：** Traefik 在 `443` 终止 TLS，通过 HTTP/2（h2c）将 `/api/grpc` 下的节点请求转发到 Docker 网络内的 `39101`。节点主动建立一条双向流，流量和 IP 上报、管理命令和执行结果都走这条流。保持 `39101` 在共享 Docker 网络内，面板记录节点自己探测上报的 IP。[Traefik 的 gRPC 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-grpc-services)
+**Docker Compose：** Traefik 在 `443` 终止 TLS，将 `/api/node/v2/register`、`/api/node/v2/refresh` 和 `/api/node/v2/session` 转发到 Docker 网络内的 HTTP 端口 `39101`。面板按节点凭据验证这三个接口。Compose 通过 `.env` 中的 `YAGP_HOST` 同时配置面板 `host` 和 Traefik 的路由域名。 [Traefik 的 WebSocket 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-websocket-services)
 
-Compose 按真实客户端 IP 分别限制注册和建连请求。`RegisterNode` 平均每分钟 6 次、突发 5 次。`Connect` 默认平均每分钟 60 次、突发 30 次，仅在建立新流时计数。节点断线后会退避重连。多个节点共用出口 IP 时，可在 `.env` 中按需调整 `YAGP_CONNECT_RATE_PER_MINUTE` 和 `YAGP_CONNECT_RATE_BURST`。
+Compose 按真实客户端 IP 对注册、刷新和建连分别限速。注册平均每分钟 6 次、突发 5 次。刷新和建连各默认平均每分钟 60 次、突发 30 次，每次 WebSocket 握手只计一次。多个节点共用出口 IP 时，可以在 `.env` 调整 `YAGP_REFRESH_RATE_PER_MINUTE`、`YAGP_REFRESH_RATE_BURST`、`YAGP_CONNECT_RATE_PER_MINUTE` 和 `YAGP_CONNECT_RATE_BURST`。
 
-Traefik 为直连客户端生成 `X-Real-IP`。如果前面还有反向代理，须让前置代理用实际客户端 IP 覆盖 `X-Real-IP`，并仅将该代理加入 Traefik 入口的 `forwardedHeaders.trustedIPs`，保持 `forwardedHeaders.insecure` 关闭。二进制直连部署需在自己的入口配置注册和建连限速。面板在验证 `Connect` 节点凭据时最多等待 3 秒，认证通过后的双向流不受该超时限制。[Traefik 限速配置](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
+Traefik 为直连客户端生成 `X-Real-IP`。如果前面还有反向代理，须让前置代理用实际客户端 IP 覆盖 `X-Real-IP`，并仅将该代理加入 Traefik 入口的 `forwardedHeaders.trustedIPs`，保持 `forwardedHeaders.insecure` 关闭。二进制直连部署需在自己的入口配置注册、刷新和建连限速。 [Traefik 限速配置](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
 
-已认证的流按节点分别限制两类上报。流量上报平均每秒 100 次、突发 500 次，IP 更新平均每秒 1 次、突发 5 次。节点重连时沿用原配额，超限的上报返回 `ResourceExhausted`。命令和回包不计入上报配额。面板和节点均限制单条 gRPC 消息为 5 MiB，包含流帧的封装开销。
-
-在 Traefik 的静态配置中，将 HTTPS 入口的请求读取和响应写入超时设为 `0s`。读取超时默认是 60 秒，双向流的请求体会持续打开。[Traefik 入口超时配置](https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#configuration-options)
-
-```yaml
-entryPoints:
-  websecure:
-    transport:
-      respondingTimeouts:
-        readTimeout: 0s
-        writeTimeout: 0s
-```
+已认证的会话按节点分别限制两类上报。流量上报平均每秒 100 次、突发 500 次，IP 更新平均每秒 1 次、突发 5 次。节点重连时沿用原配额，超限的上报返回 `ResourceExhausted`。命令和回包不计入上报配额。面板和节点均限制单条 WebSocket 消息为 5 MiB，包含 Protobuf 封装开销。
 
 ```yaml
 host: "panel.example.com"
@@ -155,7 +154,7 @@ report:
   listen: ":39101"
 ```
 
-升级时同步更新面板、`docker-compose.yml` 和守护进程。在每台已有节点的 `/etc/yagp-daemon/<ID>/node.yaml` 中，将原来的 `report_address` 换成 `host: "panel.example.com"`，再按[一键升级步骤](#升级已安装节点)升级。保留原节点 ID 和凭据即可继续使用。从自签证书直连迁移到使用公有 CA 的 Traefik 时，清除节点原有的 `report_ca_file` 和 `report_cert_sha256`。
+**腾讯云 EdgeOne：** 为面板域名开启 HTTP/1.1 WebSocket，使用 HTTPS 回源并开启源站证书校验。将 `/api/node/v2/` 下的请求透传到源站，并保留握手请求中的 `Authorization` 头。将 WebSocket 空闲超时设置为 120 秒，长于节点的 30 秒心跳间隔。先验证一个节点完成注册、建立会话并成功刷新令牌，再迁移其余节点。 [EdgeOne WebSocket 文档](https://cloud.tencent.com/document/product/1552/73071) · [HTTPS 回源](https://cloud.tencent.com/document/product/1552/88876) · [源站证书校验](https://cloud.tencent.com/document/product/1552/125145)
 
 **二进制直连部署：** 设置 `report.direct_tls: true`，监听节点可访问的 `443` 端口。面板首次启动时为顶级 `host` 生成自签证书和私钥，保存在工作目录的 `data/report-tls.pem`，重启时复用。注册令牌包含证书指纹，节点在发送令牌前核验证书，并保存指纹用于后续重连。保留此文件以维持已有节点的信任。使用自备证书时，在 `report` 下同时配置 `cert_file` 和 `key_file`，节点按原有 CA 配置验证证书。
 
@@ -166,7 +165,7 @@ report:
   direct_tls: true
 ```
 
-节点先通过一次性 token 注册，之后用面板发放的节点凭据建立双向流。节点验证面板的 TLS 证书。
+节点验证面板的 TLS 证书后，用访问令牌建立会话。访问令牌有效期为 15 分钟，刷新令牌有效期为 30 天，每次刷新成功后重新计算有效期。节点通过 HTTPS 主动刷新，失败时使用同一请求 ID 重试，面板保留 5 分钟供节点取回同一份刷新结果。已有会话可在令牌轮换期间继续工作。面板在删除节点或重新注册时关闭旧会话。
 
 ---
 
@@ -201,15 +200,15 @@ report:
 
 按 [一键安装步骤](#安装新节点) 添加实例。需要重新生成命令时，可在该实例的 **安装** 窗口点击 **签发注册令牌**。
 
-节点在线后即可创建并启动转发规则。Gost 的本机观察器把累计统计交给桥接进程，桥接进程调用面板的 `Report` RPC。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
+节点在线后即可创建并启动转发规则。Gost 的本机观察器把累计统计交给守护进程，守护进程通过 WebSocket 上报。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
 
-首次注册时，`yagp-daemon` 验证面板 TLS 证书，再通过 `RegisterNode` RPC 提交 token 和探测到的 IP。面板返回节点 ID 和后续通信凭据，节点将其写入 `/etc/yagp-daemon/<ID>/node.yaml`。替换已有节点时，新节点注册成功后使用新凭据。
+首次注册时，`yagp-daemon` 验证面板 TLS 证书，再通过 HTTPS POST 提交一次性注册令牌和探测到的 IP。面板返回节点 ID 和后续通信凭据。守护进程将面板凭据写入 `/etc/yagp-daemon/<ID>/panel-credentials.yaml`，文件权限为 `0600`。替换已有节点时，新节点注册成功后使用新凭据。
 
-参照 Komari，`yagp-daemon` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。两种地址均未获取时，面板使用可信 Traefik 转发的节点 IP，或在直连部署中使用注册连接的来源 IP。转发和隧道优先使用记录到的 IPv4，其次使用 IPv6。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
+参照 Komari，`yagp-daemon` 在注册前通过 ipify 的 HTTPS 接口分别探测公网 IPv4 和 IPv6，并随注册请求上报。探测最多等待 3 秒。直连部署可以在探测失败时使用注册连接的来源 IP。通过反向代理接入时，节点至少需探测到一种地址。转发和隧道优先使用记录到的 IPv4，其次使用 IPv6。[Komari 节点探测](https://github.com/komari-monitor/komari-agent/blob/ddbdbdcdaeb12abc0e68ba5bc2f0a6b914dad3a7/monitoring/unit/ip.go#L14-L152) · [ipify 接口](https://www.ipify.org/#api-usage)
 
 `yagp-daemon` 启动时立即探测一次，随后每 5 分钟探测。节点用现有凭据通过 TLS 上报地址变化，面板自动更新连接地址。某一地址族探测失败时保留其上次记录；上报失败则在下一轮重试。[Komari 上报周期](https://komari-monitor.github.io/komari-document/dev/agent.html)
 
-Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `Connect` 双向流下发配置、读取日志和触发升级，节点执行后沿同一条流返回结果。节点断线后会自动重连，进行中的命令会报告连接错误。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
+Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 WebSocket 会话下发配置、读取日志和触发升级，节点执行后沿同一会话返回结果。节点断线后会自动重连，进行中的命令会报告连接错误。[Gost 管理 API](https://v3.gost.run/en/tutorials/api/overview/) · [Gost 观察器](https://www.gost.run/en/concepts/observer/)
 
 如果面板证书由私有 CA 签发，在运行安装命令前将 CA 证书放在节点的 `/etc/yagp-daemon/panel-ca.pem`，也可通过 `YAGP_PANEL_CA_FILE` 指定路径。安装脚本默认下载最新版 `yagp-daemon-linux-<架构>.tar.gz`，可用 `YAGP_DAEMON_VERSION` 指定发布版本。自行构建时，在 systemd 主机使用 `make build-node-systemd`，在 OpenRC 主机使用 `make build-node`，并通过 `YAGP_DAEMON_BIN=/path/to/yagp-daemon` 指定对应的二进制。
 
@@ -217,7 +216,7 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `C
 
 如果注册后服务启动失败，使用 `journalctl -u yagp-daemon-<ID> -u yagp-gost-<ID>` 查看日志。配置已写入实例目录时，排除故障后执行 `systemctl enable --now yagp-daemon-<ID>`。如果注册已完成但本地配置未写入，请重新签发令牌。
 
-执行 `bash scripts/install_node.sh uninstall --node-id <ID>` 可卸载实例并保留配置。在同一台服务器重新注册同一节点前，先卸载原实例并移走保留的目录。
+执行 `bash scripts/install_node.sh uninstall --node-id <ID>` 可卸载实例并保留配置。给仍在同一台服务器上的节点更换公网凭据时，使用[原地重新注册](#升级已安装节点)。
 
 ### 升级已注册的节点
 
@@ -225,11 +224,7 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `C
 
 在线升级适用于 systemd 节点。面板和节点需要能通过 HTTPS 访问 GitHub。节点校验发布包的 SHA-256，再替换对应的二进制并重启服务。配置、凭据、证书和节点 ID 都会保留。Gost 重启会中断该实例正在转发的连接，新版服务启动检查失败时会尝试恢复旧版。
 
-如果已安装的节点尚不支持在线升级，请先执行 [一键升级命令](#升级已安装节点)。`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 的 systemd 实例，默认使用最新发布包。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 时，请选择与面板对应的版本。
-
-如果节点仍使用改名前的 `yagp-node-<ID>` 服务，迁移时先停止该服务和 `yagp-gost-<ID>`，并取消旧守护服务的开机启动。将 `/etc/yagp-node/<ID>` 移到 `/etc/yagp-daemon/<ID>`，放入新版 `yagp-daemon`。systemd 选用包内的 `yagp-daemon-systemd-linux-<架构>`，OpenRC 选用 `yagp-daemon-linux-<架构>`。更新 `node.yaml` 的 `tls_cert_file` 和 `tls_key_file`，如 `report_ca_file` 指向已移动的文件，也一并更新。原 ID、凭据和证书可继续使用。
-
-将守护服务定义改名为 `yagp-daemon-<ID>`，更新守护服务和 `yagp-gost-<ID>` 的工作目录、程序和配置路径。systemd 下执行 `systemctl daemon-reload`，再用 `systemctl enable --now yagp-daemon-<ID>` 启动新版，由它启动 Gost。OpenRC 下将新服务加入默认运行级别，再依次启动 Gost 和 `yagp-daemon-<ID>`。
+迁移到 WebSocket 后，可使用[一键升级命令](#升级已安装节点)更新已安装的守护进程。`upgrade` 适用于安装在 `/etc/yagp-daemon/<ID>` 的 systemd 实例，默认使用最新发布包。使用 `YAGP_DAEMON_VERSION` 或 `YAGP_DAEMON_BIN` 时，请选择与面板对应的版本。
 
 ### 查看和重启 Gost 服务
 
@@ -251,7 +246,7 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `C
 
 ### 管理节点的 nftables 配置
 
-在装有 `nftables` 的 Linux 节点上，通过 **节点管理 → 更多 → nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。节点也可运行 `/etc/yagp-daemon/<ID>/yagp-daemon nft-template -c /etc/yagp-daemon/<ID>/node.yaml`，经 TLS 从面板获取同一份模板。
+在装有 `nftables` 的 Linux 节点上，通过 **节点管理 → 更多 → nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。守护进程连接后通过 WebSocket 获取配置和模板，并在实例目录中缓存为 `panel-config.pb`。节点可运行 `/etc/yagp-daemon/<ID>/yagp-daemon nft-template -c /etc/yagp-daemon/<ID>/node.yaml` 读取缓存中的模板。
 
 配置使用 `{"nftables":[...]}`，只允许为该节点专用的 `inet yagp_node_<ID>` 表添加链、规则、集合等对象。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除该表。卸载时安装脚本会清理该表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
 
@@ -280,7 +275,7 @@ Gost 的管理 Web API 和流量观察器绑定在节点本机。面板通过 `C
 
 发布包以 `yagp-` 开头。面板支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。节点安装包支持 Linux（amd64、arm64）。[查看 yagp Releases](https://github.com/hanzec/yagp/releases)
 
-面板和节点需要一起更新到支持 `yagp.v1/Connect` 的版本。通过令牌注册过的节点可继续使用原来的节点 ID 和凭据。
+面板与节点守护进程一同更新到支持 WebSocket 会话的版本。迁移时为现有节点[原地重新注册](#升级已安装节点)，沿用原节点 ID。
 
 ### 自动版本号
 

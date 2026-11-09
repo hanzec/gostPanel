@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
+	"github.com/coder/websocket"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -20,14 +20,14 @@ type commandSizeFixture struct {
 func TestSessionRejectsOversizedWireFrame(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	stream := openRawSession(t, ctx, func(stream V1_ConnectServer) error {
+	stream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
 		return NewSession(stream, nil).Run()
-	}, grpc.MaxRecvMsgSize(MaxStreamFrameBytes))
-	if err := stream.Send(&StreamFrame{Id: 1, Payload: make([]byte, MaxStreamFrameBytes)}); err != nil && !errors.Is(err, io.EOF) {
+	})
+	if err := stream.Send(&StreamFrame{Id: 1, Payload: make([]byte, MaxStreamFrameBytes)}); err != nil && !errors.Is(err, io.EOF) && websocket.CloseStatus(err) != websocket.StatusMessageTooBig {
 		t.Fatalf("Send() = %v", err)
 	}
-	if _, err := stream.Recv(); status.Code(err) != codes.ResourceExhausted {
-		t.Fatalf("Recv() = %v, want ResourceExhausted", err)
+	if _, err := stream.Recv(); websocket.CloseStatus(err) != websocket.StatusMessageTooBig {
+		t.Fatalf("Recv() = %v, want WebSocket message too big", err)
 	}
 }
 
@@ -47,7 +47,7 @@ func TestSessionRejectsOversizedCallsWithoutDisconnecting(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	body := make([]byte, MaxStreamFrameBytes+1)
-	stream := openRawSession(t, ctx, func(stream V1_ConnectServer) error {
+	stream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
 		dispatcher := NewDispatcher(commandSizeFixture{body: body}, V1_Execute_FullMethodName)
 		return NewSession(stream, dispatcher).Run()
 	})

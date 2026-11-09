@@ -50,18 +50,19 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 		ID: stale.ID, Username: "edge", Password: "first password",
 		Address: "198.51.100.1", IPv4: "198.51.100.1",
 	}
-	if err := nodes.ConsumeRegistrationToken(ctx, &enrolled, "expired"); !errors.Is(err, gorm.ErrRecordNotFound) {
+	credentials := model.NodeCredentials{AccessTokenHash: "access", RefreshTokenHash: "refresh"}
+	if err := nodes.EnrollNode(ctx, &enrolled, "expired", credentials); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("consuming expired token: %v", err)
 	}
 	mustPersist(t, nodes.SetRegistrationToken(ctx, stale.ID, "first", time.Now().UTC().Add(time.Hour)))
 	mustPersist(t, db.Exec(`CREATE TRIGGER fail_enrollment BEFORE UPDATE OF password ON nodes
 		BEGIN SELECT RAISE(ABORT, 'enrollment storage failure'); END`).Error)
-	if err := nodes.ConsumeRegistrationToken(ctx, &enrolled, "first"); err == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := nodes.EnrollNode(ctx, &enrolled, "first", credentials); err == nil || errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("writing enrollment with broken storage: %v", err)
 	}
 	mustPersist(t, db.Exec("DROP TRIGGER fail_enrollment").Error)
-	mustPersist(t, nodes.ConsumeRegistrationToken(ctx, &enrolled, "first"))
-	if err := nodes.ConsumeRegistrationToken(ctx, &enrolled, "first"); !errors.Is(err, gorm.ErrRecordNotFound) {
+	mustPersist(t, nodes.EnrollNode(ctx, &enrolled, "first", credentials))
+	if err := nodes.EnrollNode(ctx, &enrolled, "first", credentials); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("replaying consumed token: %v", err)
 	}
 	mustPersist(t, nodes.UpdateStatus(stale.ID, model.NodeStatusOnline))
@@ -78,8 +79,11 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 
 	old := *current
 	mustPersist(t, nodes.SetRegistrationToken(ctx, current.ID, "second", time.Now().UTC().Add(time.Hour)))
-	current.Password = "second password"
-	mustPersist(t, nodes.ConsumeRegistrationToken(ctx, current, "second"))
+	credentials.AccessTokenHash = "new access"
+	mustPersist(t, nodes.EnrollNode(ctx, current, "second", credentials))
+	if current.Password != old.Password || current.SessionGeneration != old.SessionGeneration+1 || current.AccessTokenHash != credentials.AccessTokenHash {
+		t.Fatal("enrollment did not advance public credentials while preserving the Gost password")
+	}
 	if err := nodes.UpdateIPs(ctx, &old, "", "2001:db8::99"); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("updating addresses with a superseded enrollment: %v", err)
 	}

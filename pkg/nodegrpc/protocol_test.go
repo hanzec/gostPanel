@@ -2,22 +2,13 @@ package nodegrpc
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
-	"net"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -27,7 +18,7 @@ type protocolExchange struct {
 	method   string
 	request  proto.Message
 	response proto.Message
-	call     func(context.Context, *grpc.ClientConn, ...grpc.CallOption) (proto.Message, error)
+	call     func(context.Context, V1Client) (proto.Message, error)
 }
 
 func exchange[Request, Response proto.Message](
@@ -36,13 +27,12 @@ func exchange[Request, Response proto.Message](
 	request Request,
 	response Response,
 ) protocolExchange {
-	return protocolExchange{method, request, response, func(ctx context.Context, conn *grpc.ClientConn, opts ...grpc.CallOption) (proto.Message, error) {
-		return call(NewV1Client(conn), ctx, request, opts...)
+	return protocolExchange{method, request, response, func(ctx context.Context, client V1Client) (proto.Message, error) {
+		return call(client, ctx, request)
 	}}
 }
 
-func TestV1WireRoundTrip(t *testing.T) {
-	const username, password = "node-42", "fixture-password"
+func TestWebSocketWireRoundTrip(t *testing.T) {
 	if V1_Execute_FullMethodName != "/yagp.v1/Execute" {
 		t.Fatalf("node control path = %s", V1_Execute_FullMethodName)
 	}
@@ -89,11 +79,8 @@ func TestV1WireRoundTrip(t *testing.T) {
 			&NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"},
 			&NodeUpgradeStatus{Supported: true, Component: "gost", TargetVersion: "v3.3.3", State: "queued"}),
 		exchange(V1_Report_FullMethodName, V1Client.Report, forwardedReport, &observer.ObserveReply{Ok: true}),
-		exchange(V1_RegisterNode_FullMethodName, V1Client.RegisterNode,
-			&RegisterNodeRequest{Token: "42.fixture", Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"},
-			&RegisterNodeReply{NodeId: 42, Username: username, Password: password}),
-		exchange(V1_GetNftTemplate_FullMethodName, V1Client.GetNftTemplate,
-			&NftTemplateRequest{NodeId: 42}, config),
+		exchange(V1_GetNodeConfig_FullMethodName, V1Client.GetNodeConfig, empty,
+			&NodeConfig{ConfigYaml: []byte("node_id: 42"), NftTemplate: config.GetConfig()}),
 		exchange(V1_UpdateNodeIPs_FullMethodName, V1Client.UpdateNodeIPs,
 			&NodeIPsRequest{NodeId: 42, Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"}, empty),
 	}
@@ -101,95 +88,59 @@ func TestV1WireRoundTrip(t *testing.T) {
 	for _, call := range calls {
 		byMethod[call.method] = call
 	}
-	https := httptest.NewTLSServer(nil)
-	cert := https.TLS.Certificates[0]
-	roots := x509.NewCertPool()
-	roots.AddCert(https.Certificate())
-	https.Close()
-	control := credentials.NewTLS(&tls.Config{RootCAs: roots, ServerName: "127.0.0.1"})
-	auth := grpc.WithPerRPCCredentials(PasswordCredentials(username, password))
-	active := protocolListener(t, cert, grpc.UnaryInterceptor(func(ctx context.Context, request any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if !MatchCredentials(ctx, username, password) {
-			return nil, status.Error(codes.Unauthenticated, "missing node credentials")
-		}
-		call, ok := byMethod[info.FullMethod]
-		message, messageOK := request.(proto.Message)
-		if !ok || !messageOK || !proto.Equal(message, call.request) {
-			return nil, status.Errorf(codes.InvalidArgument, "unexpected wire request for %s", info.FullMethod)
-		}
-		if len(metadata.ValueFromIncomingContext(ctx, "test-unimplemented")) != 0 {
-			return handler(ctx, request)
-		}
-		return call.response, nil
-	}))
-	implemented := protocolConn(t, active, control, auth)
-	defaults := protocolConn(t, protocolListener(t, cert), control, auth)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	stream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
+		return NewSession(stream, func(_ context.Context, method string, payload []byte) ([]byte, error) {
+			call, ok := byMethod[method]
+			if !ok {
+				return nil, status.Errorf(codes.Unimplemented, "unknown operation: %s", method)
+			}
+			request := call.request.ProtoReflect().New().Interface()
+			if err := proto.Unmarshal(payload, request); err != nil || !proto.Equal(request, call.request) {
+				return nil, status.Errorf(codes.InvalidArgument, "unexpected wire request for %s", method)
+			}
+			return proto.Marshal(call.response)
+		}).Run()
+	})
+	session := NewSession(stream, nil)
+	t.Cleanup(session.Close)
+	go func() { _ = session.Run() }()
+	client := NewV1Client(session)
 	for _, call := range calls {
 		t.Run(call.method, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			reply, err := call.call(ctx, implemented)
+			reply, err := call.call(ctx, client)
 			if err != nil || !proto.Equal(reply, call.response) {
 				t.Fatalf("wire reply = %v, %v, want %v", reply, err, call.response)
 			}
-			if _, err := call.call(ctx, defaults); status.Code(err) != codes.Unimplemented {
-				t.Fatalf("unimplemented endpoint returned %v", err)
+		})
+	}
+	if err := session.Invoke(ctx, "/unsupported", empty, empty); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unsupported operation returned %v", err)
+	}
+
+	// Run the same operations through the server-side dispatcher. A valid payload
+	// reaches the typed method, while a malformed payload is rejected before it.
+	methods := make([]string, 0, len(calls))
+	for _, call := range calls {
+		methods = append(methods, call.method)
+	}
+	defaultStream := openRawSession(t, ctx, func(stream *WebSocketStream) error {
+		return NewSession(stream, NewDispatcher(UnimplementedV1Server{}, methods...)).Run()
+	})
+	defaults := NewSession(defaultStream, nil)
+	t.Cleanup(defaults.Close)
+	go func() { _ = defaults.Run() }()
+	malformed := new(StreamFrame)
+	malformed.ProtoReflect().SetUnknown([]byte{0x80})
+	for _, call := range calls {
+		t.Run("dispatch"+call.method, func(t *testing.T) {
+			if _, err := call.call(ctx, NewV1Client(defaults)); status.Code(err) != codes.Unimplemented {
+				t.Fatalf("typed handler returned %v", err)
 			}
-			viaInterceptor := metadata.AppendToOutgoingContext(ctx, "test-unimplemented", "true")
-			methodName := call.method[strings.LastIndexByte(call.method, '/')+1:]
-			if _, err := call.call(viaInterceptor, implemented); status.Code(err) != codes.Unimplemented ||
-				!strings.Contains(status.Convert(err).Message(), methodName) {
-				t.Fatalf("interceptor delegated to unexpected RPC: %v", err)
-			}
-			if _, err := call.call(ctx, implemented, grpc.ForceCodec(malformedProtocolCodec{})); status.Code(err) != codes.Internal {
-				t.Fatalf("malformed protobuf returned %v", err)
+			if err := defaults.Invoke(ctx, call.method, malformed, empty); status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("malformed request returned %v", err)
 			}
 		})
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	unauthenticated := protocolConn(t, active, control)
-	if _, err := NewV1Client(unauthenticated).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("unauthenticated endpoint returned %v", err)
-	}
-	foreignRoot := credentials.NewTLS(&tls.Config{RootCAs: x509.NewCertPool(), ServerName: "127.0.0.1"})
-	untrusted := protocolConn(t, active, foreignRoot, auth)
-	if _, err := NewV1Client(untrusted).GetObserverEndpoint(ctx, empty); status.Code(err) != codes.Unavailable {
-		t.Fatalf("untrusted certificate returned %v", err)
-	}
-}
-
-func protocolListener(t *testing.T, cert tls.Certificate, options ...grpc.ServerOption) *bufconn.Listener {
-	t.Helper()
-	listener := bufconn.Listen(1 << 20)
-	server := grpc.NewServer(append(options, grpc.Creds(credentials.NewTLS(&tls.Config{
-		Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12,
-	})))...)
-	RegisterV1Server(server, UnimplementedV1Server{})
-	go func() { _ = server.Serve(listener) }()
-	t.Cleanup(func() {
-		server.Stop()
-		_ = listener.Close()
-	})
-	return listener
-}
-
-func protocolConn(t *testing.T, listener *bufconn.Listener, creds credentials.TransportCredentials, options ...grpc.DialOption) *grpc.ClientConn {
-	t.Helper()
-	conn, err := grpc.NewClient("passthrough:///node", append(options,
-		grpc.WithTransportCredentials(creds),
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }))...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn
-}
-
-type malformedProtocolCodec struct{}
-
-func (malformedProtocolCodec) Name() string                { return "proto" }
-func (malformedProtocolCodec) Marshal(any) ([]byte, error) { return []byte{0x80}, nil }
-func (malformedProtocolCodec) Unmarshal([]byte, any) error {
-	return errors.New("unexpected response body")
 }
