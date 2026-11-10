@@ -25,7 +25,6 @@ SERVICE_NAME="gost-panel"
 CONFIG_DIR="/etc/gost-panel"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 REPO=${YAGP_REPO:-hanzec/yagp}
-GH_PROXY=${GH_PROXY:-""}
 
 # Detect Architecture
 ARCH=$(uname -m)
@@ -48,14 +47,26 @@ function check_memory() {
     info "内存检查通过: $total_mem MB"
 }
 
+function download_panel_archive() {
+    local archive=$1 target=$2 url
+    if [[ "$REPO" == hanzec/yagp && -z "${GH_PROXY+x}" ]]; then
+        url="https://release.hanzec-overseas.cn/yagp/latest/$archive"
+        info "正在下载发布包: $url"
+        if curl -fL --connect-timeout 10 --speed-limit 1 --speed-time 20 "$url" -o "$target"; then
+            return 0
+        fi
+    fi
+    url="${GH_PROXY:-}https://github.com/$REPO/releases/latest/download/$archive"
+    info "正在下载发布包: $url"
+    curl -fL "$url" -o "$target"
+}
+
 function install_panel() {
     check_memory
     TEMP_DIR=$(mktemp -d)
     TAR_FILE="$TEMP_DIR/$APP_NAME.tar.gz"
-    DOWNLOAD_URL="${GH_PROXY}https://github.com/$REPO/releases/latest/download/$APP_NAME-$PLATFORM.tar.gz"
-    
-    info "正在下载发布包: $DOWNLOAD_URL"
-    if ! curl -fL "$DOWNLOAD_URL" -o "$TAR_FILE"; then
+
+    if ! download_panel_archive "$APP_NAME-$PLATFORM.tar.gz" "$TAR_FILE"; then
         rm -rf "$TEMP_DIR"
         error "无法下载 $APP_NAME-$PLATFORM.tar.gz，请确认 $REPO 已发布 yagp 安装包。"
     fi

@@ -88,7 +88,7 @@ install_webhook() {
     log '配置完成。部署账号已禁用登录，本次未更新容器。'
     log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
     log '查看部署日志：journalctl -u yagp-depoly.service -f'
-    show_credentials DEPLOY_WEBHOOK panel "$panel_endpoint" "$traefik" "$secret" "$token"
+    show_install_result DEPLOY_WEBHOOK panel "$panel_endpoint" "$traefik" "$secret" "$token"
 }
 
 install_upgrade() {
@@ -134,7 +134,7 @@ EOF
     retire_legacy_upgrade_receiver
     log "Webhook 共用 Traefik 配置：$managed_dir/traefik-panel.yml"
     log '查看工具升级日志：journalctl -u yagp-depoly-upgrade.service -f'
-    show_credentials UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$secret" "$token"
+    show_install_result UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$secret" "$token"
 }
 
 check_systemd() {
@@ -327,8 +327,11 @@ check_distinct_credentials() {
     done
 }
 
-show_credentials() {
-    local prefix=$1 role=$2 endpoint=$3 hostname=${4%%|*} secret=$5 token=$6
+show_install_result() {
+    local prefix=$1 role=$2 endpoint=$3 secret=$5 token=$6
+    local hostname proxy_ip proxy_name
+    IFS='|' read -r hostname _ _ proxy_ip proxy_name <<< "$4"
+    log "Webhook 信任的公网 Traefik 容器为 $proxy_name（$proxy_ip）。"
     printf '%s_URL=https://%s%s\n' "$prefix" "$hostname" "$endpoint"
     if [[ -t 1 ]]; then
         printf '%s_SECRET=%s\n%s_TOKEN=%s\n' "$prefix" "$secret" "$prefix" "$token"
@@ -338,7 +341,7 @@ show_credentials() {
 }
 
 inspect_traefik() {
-    local project_dir=$1 project=$2 proxy_container=$3 settings name value metadata gateway proxy_ip
+    local project_dir=$1 project=$2 proxy_container=$3 settings name value metadata gateway proxy_ip proxy_name
     local hostname='' public_host='' entrypoint='' network='' legacy_entrypoint=''
     local label_entrypoint label_network
     local host_pattern='^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$'
@@ -377,19 +380,20 @@ inspect_traefik() {
         10.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|192.168.*) ;;
         *) fail 'Traefik 的 Docker 网络需要有私网 IPv4 bridge 网关。' ;;
     esac
-    proxy_ip=$(docker_local inspect --type container --format \
-        "{{with index .NetworkSettings.Networks \"$network\"}}{{.IPAddress}}{{end}}" -- "$proxy_container") ||
+    metadata=$(docker_local inspect --type container --format \
+        "{{.Name}}|{{with index .NetworkSettings.Networks \"$network\"}}{{.IPAddress}}{{end}}" -- "$proxy_container") ||
         fail "找不到 Traefik 容器 ${proxy_container}。"
+    IFS='|' read -r proxy_name proxy_ip <<< "$metadata"
+    proxy_name=${proxy_name#/}
     [[ $proxy_ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ && $proxy_ip != "$gateway" ]] ||
-        fail "Traefik 容器 $proxy_container 没有在 $network 上配置 IPv4 地址。"
-    log "Webhook 使用 $project_dir/.env 的域名 ${hostname}，仅信任 Traefik 容器 $proxy_container 的内网地址 ${proxy_ip}。"
-    printf '%s|%s|%s|%s\n' "$hostname" "$entrypoint" "$gateway" "$proxy_ip"
+        fail "Traefik 容器 $proxy_name 没有在 $network 上配置 IPv4 地址。"
+    printf '%s|%s|%s|%s|%s\n' "$hostname" "$entrypoint" "$gateway" "$proxy_ip" "$proxy_name"
 }
 
 write_hook_unit() {
     local traefik=$1 with_upgrade=$2 state_directories=yagp-depoly-panel
-    local hostname entrypoint gateway proxy_ip upgrade_credentials='' upgrade_args=''
-    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$traefik"
+    local gateway proxy_ip upgrade_credentials='' upgrade_args=''
+    IFS='|' read -r _ _ gateway proxy_ip _ <<< "$traefik"
     if [[ $with_upgrade == true ]]; then
         state_directories+=' yagp-depoly-upgrade-hook'
         printf -v upgrade_credentials 'LoadCredential=upgrade-secret:%s/upgrade.secret\nLoadCredential=upgrade-token:%s/upgrade.token' "$managed_dir" "$managed_dir"
@@ -421,8 +425,8 @@ EOF
 }
 
 write_traefik_route() {
-    local hostname entrypoint gateway proxy_ip hook_rule
-    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$1"
+    local hostname entrypoint gateway hook_rule
+    IFS='|' read -r hostname entrypoint gateway _ <<< "$1"
     printf -v hook_rule 'Host(`%s`) && (Path(`/api/deploy`) || PathPrefix(`/api/deploy/`))' "$hostname"
     write_file "$managed_dir/traefik-panel.yml" 0644 <<EOF
 http:

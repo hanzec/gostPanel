@@ -46,6 +46,7 @@ func localReleaseClient(t *testing.T, handler http.HandlerFunc) *Client {
 }
 
 func TestLatestReleaseValidatesGitHubResponse(t *testing.T) {
+	t.Setenv("GH_PROXY", "")
 	const gostPath = "/repos/go-gost/gost/releases/latest"
 	const daemonPath = "/repos/hanzec/yagp/releases/latest"
 	for _, test := range []struct {
@@ -85,6 +86,26 @@ func TestLatestReleaseValidatesGitHubResponse(t *testing.T) {
 				t.Fatalf("latest release = %q, %v, want %q", version, err, test.wantVersion)
 			}
 		})
+	}
+}
+
+func TestLatestYAGPReleasePrefersCache(t *testing.T) {
+	t.Setenv("GH_PROXY", "")
+	if err := os.Unsetenv("GH_PROXY"); err != nil {
+		t.Fatal(err)
+	}
+	const tag = "0.1.100-abcdef1"
+	client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
+		if req.Host != "release.hanzec-overseas.cn" || req.URL.Path != "/yagp/latest" ||
+			req.Header.Get("Accept") != "application/json" || req.Header.Get("Authorization") != "" {
+			t.Errorf("unexpected cache request: %s%s with headers %v", req.Host, req.URL.Path, req.Header)
+			http.NotFound(w, req)
+			return
+		}
+		_, _ = io.WriteString(w, `{"tag":"`+tag+`"}`)
+	})
+	if got, err := client.Latest(t.Context(), "daemon"); err != nil || got != tag {
+		t.Fatalf("latest daemon release = %q, %v", got, err)
 	}
 }
 
@@ -189,6 +210,67 @@ func TestReleaseDownloadSelectsAndVerifiesLinuxAssets(t *testing.T) {
 			}
 			if err != nil || dest.String() != executable {
 				t.Fatalf("download = %q, %v", dest.String(), err)
+			}
+		})
+	}
+}
+
+func TestDaemonDownloadUsesPinnedReleaseCache(t *testing.T) {
+	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
+		t.Skip("daemon archives target Linux amd64 and arm64")
+	}
+	t.Setenv("GH_PROXY", "")
+	if err := os.Unsetenv("GH_PROXY"); err != nil {
+		t.Fatal(err)
+	}
+	const tag = "0.1.100-abcdef1"
+	const payload = "pinned daemon executable"
+	archiveName, binary := releaseNames("daemon", tag, "systemd", runtime.GOARCH)
+	archive := buildReleaseTestArchive(t, binary, payload)
+	metadata := asset{
+		Name: archiveName, Size: int64(len(archive)), Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(archive)),
+		DownloadURL: YAGPReleaseCache + "/releases/download/" + tag + "/" + archiveName,
+	}
+	for _, test := range []struct {
+		name                          string
+		missingDigest, corruptArchive bool
+	}{
+		{name: "verified cache archive"},
+		{name: "missing cache digest", missingDigest: true},
+		{name: "corrupt cache archive", corruptArchive: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
+				switch {
+				case req.Host == "release.hanzec-overseas.cn" && req.URL.Path == "/yagp/releases/tag/"+tag:
+					if req.Header.Get("Accept") != "application/json" {
+						t.Error("pinned cache metadata did not request JSON")
+					}
+					cached := metadata
+					if test.missingDigest {
+						cached.Digest = ""
+					}
+					_ = json.NewEncoder(w).Encode(release{CacheTag: tag, Assets: []asset{cached}})
+				case !test.missingDigest && req.Host == "release.hanzec-overseas.cn" && req.URL.Path == "/yagp/releases/download/"+tag+"/"+archiveName:
+					if test.corruptArchive {
+						_, _ = w.Write(bytes.Repeat([]byte{'x'}, len(archive)))
+						return
+					}
+					_, _ = w.Write(archive)
+				case test.missingDigest && req.Host == "api.github.com" && req.URL.Path == "/repos/hanzec/yagp/releases/tags/"+tag:
+					_ = json.NewEncoder(w).Encode(release{Tag: tag, Assets: []asset{metadata}})
+				case test.missingDigest && req.Host == "get.geojs.io":
+					_, _ = io.WriteString(w, "US\n")
+				case (test.missingDigest || test.corruptArchive) && req.Host == "github.com" && req.URL.Path == "/hanzec/yagp/releases/download/"+tag+"/"+archiveName:
+					_, _ = w.Write(archive)
+				default:
+					t.Errorf("unexpected daemon download request: %s%s", req.Host, req.URL.Path)
+					http.NotFound(w, req)
+				}
+			})
+			var dest bytes.Buffer
+			if err := client.Download(t.Context(), "daemon", tag, "systemd", &dest); err != nil || dest.String() != payload {
+				t.Fatalf("pinned cache download = %q, %v", dest.String(), err)
 			}
 		})
 	}
@@ -364,7 +446,7 @@ func TestReleaseRequestErrors(t *testing.T) {
 		t.Errorf("unexpected HTTP request: %s %s", req.Method, req.URL)
 		http.NotFound(w, req)
 	})
-	if _, err := client.get(t.Context(), "://invalid"); err == nil {
+	if _, err := client.get(t.Context(), "://invalid", ""); err == nil {
 		t.Fatal("invalid release request URL was accepted")
 	}
 	ctx, cancel := context.WithCancel(t.Context())

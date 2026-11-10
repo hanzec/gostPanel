@@ -87,9 +87,13 @@ func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (stri
 }
 
 func (env selfUpgradeEnvironment) install(ctx context.Context, executable, current string) error {
-	tag, err := latestDeployRelease(ctx, env.client)
-	if err != nil {
-		return fmt.Errorf("query latest tool release: %w", err)
+	tag, cacheErr := upgrade.CachedYAGPReleaseTag(ctx, env.client)
+	if cacheErr != nil {
+		var err error
+		tag, err = latestGitHubDeployRelease(ctx, env.client)
+		if err != nil {
+			return fmt.Errorf("query latest tool release: %w", errors.Join(cacheErr, err))
+		}
 	}
 	if !upgrade.IsNewer("daemon", current, tag) {
 		log.Printf("no newer tool release (installed %s, latest %s)", current, tag)
@@ -109,12 +113,11 @@ func (env selfUpgradeEnvironment) install(ctx context.Context, executable, curre
 	name := "yagp-depoly-linux-" + runtime.GOARCH
 	archive := filepath.Join(stage, name+".tar.gz")
 	bundle := filepath.Join(stage, selfUpgradeBundle)
-	baseURL := "https://github.com/" + selfUpgradeRepo + "/releases/download/" + tag + "/"
 	log.Printf("downloading tool release %s", tag)
-	if err := downloadSelfUpgradeFile(ctx, env.client, baseURL+filepath.Base(archive), archive, selfUpgradeMaxTar); err != nil {
+	if err := env.downloadReleaseFile(ctx, tag, archive, selfUpgradeMaxTar, cacheErr == nil); err != nil {
 		return fmt.Errorf("download tool release: %w", err)
 	}
-	if err := downloadSelfUpgradeFile(ctx, env.client, baseURL+selfUpgradeBundle, bundle, selfUpgradeMaxBundle); err != nil {
+	if err := env.downloadReleaseFile(ctx, tag, bundle, selfUpgradeMaxBundle, cacheErr == nil); err != nil {
 		return fmt.Errorf("download tool attestation bundle: %w", err)
 	}
 	if err := verifySelfUpgradeAttestation(ctx, env.gh, stage, archive, bundle); err != nil {
@@ -170,7 +173,7 @@ func selfUpgradeClient() *http.Client {
 	}
 }
 
-func latestDeployRelease(ctx context.Context, client *http.Client) (string, error) {
+func latestGitHubDeployRelease(ctx context.Context, client *http.Client) (string, error) {
 	body, err := getSelfUpgradeFile(ctx, client, "https://api.github.com/repos/"+selfUpgradeRepo+"/releases/latest")
 	if err != nil {
 		return "", err
@@ -201,9 +204,27 @@ func getSelfUpgradeFile(ctx context.Context, client *http.Client, url string) (i
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, fmt.Errorf("GitHub returned %s", resp.Status)
+		return nil, fmt.Errorf("tool release request returned %s", resp.Status)
 	}
 	return resp.Body, nil
+}
+
+func (env selfUpgradeEnvironment) downloadReleaseFile(ctx context.Context, tag, target string, limit int64, useCache bool) error {
+	path := "/releases/download/" + tag + "/" + filepath.Base(target)
+	var cacheErr error
+	if useCache {
+		cacheCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		cacheErr = downloadSelfUpgradeFile(cacheCtx, env.client, upgrade.YAGPReleaseCache+path, target, limit)
+		cancel()
+		if cacheErr == nil {
+			return nil
+		}
+	}
+	err := downloadSelfUpgradeFile(ctx, env.client, "https://github.com/"+selfUpgradeRepo+path, target, limit)
+	if err != nil && cacheErr != nil {
+		return errors.Join(cacheErr, err)
+	}
+	return err
 }
 
 func downloadSelfUpgradeFile(ctx context.Context, client *http.Client, url, target string, limit int64) error {
@@ -221,7 +242,10 @@ func downloadSelfUpgradeFile(ctx context.Context, client *http.Client, url, targ
 	if err == nil && (n == 0 || n > limit) {
 		err = errors.New("tool release file is empty or exceeds its size limit")
 	}
-	return err
+	if err != nil {
+		return errors.Join(err, os.Remove(target))
+	}
+	return nil
 }
 
 func findSelfUpgradeTool(name string) (string, error) {

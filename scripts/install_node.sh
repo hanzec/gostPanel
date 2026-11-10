@@ -130,9 +130,11 @@ esac
 
 repo="${YAGP_REPO:-hanzec/yagp}"
 release_path=latest/download
+cache_path=latest
 node_version="${YAGP_DAEMON_VERSION:-}"
 if [[ -n "$node_version" ]]; then
     release_path="download/$node_version"
+    cache_path="releases/download/$node_version"
 fi
 
 mkdir -p -- "$state_dir"
@@ -170,14 +172,23 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p -- "$tmp_dir/bridge"
 
+download_bridge_archive() {
+    local url=$1
+    shift
+    printf '正在下载 yagp-daemon: %s\n' "$url" >&2
+    curl -fSL --retry 2 --connect-timeout 10 "$@" \
+        --write-out 'HTTP %{http_code}, %{size_download} bytes in %{time_total}s\n' \
+        -o "$tmp_dir/bridge.tar.gz" -- "$url" >&2
+}
+
 bridge_bin="${YAGP_DAEMON_BIN:-}"
 if [[ -z "$bridge_bin" ]]; then
-    bridge_url="${GH_PROXY:-}https://github.com/$repo/releases/$release_path/yagp-daemon-linux-$arch.tar.gz"
-    printf '正在下载 yagp-daemon: %s\n' "$bridge_url" >&2
-    curl -fSL --retry 2 --connect-timeout 10 \
-        --write-out 'HTTP %{http_code}, %{size_download} bytes in %{time_total}s\n' \
-        -o "$tmp_dir/bridge.tar.gz" -- "$bridge_url" >&2 ||
-        die 'yagp-daemon 下载失败，请检查上面的 curl 日志。'
+    bridge_archive="yagp-daemon-linux-$arch.tar.gz"
+    if [[ "$repo" != hanzec/yagp || -n "${GH_PROXY+x}" ]] ||
+        ! download_bridge_archive "https://release.hanzec-overseas.cn/yagp/$cache_path/$bridge_archive" --speed-limit 1 --speed-time 20; then
+        download_bridge_archive "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/$bridge_archive" ||
+            die 'yagp-daemon 下载失败，请检查上面的 curl 日志。'
+    fi
     tar -xzf "$tmp_dir/bridge.tar.gz" -C "$tmp_dir/bridge"
     if [[ "$manager" == systemd ]]; then
         bridge_bin="$tmp_dir/bridge/yagp-daemon-systemd-linux-$arch"
