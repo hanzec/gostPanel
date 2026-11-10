@@ -218,24 +218,8 @@ jobs:
       group: yagp-production
       queue: max
       cancel-in-progress: false
-    env:
-      IMAGE_DIGEST: ${{ needs.docker.outputs.digest }}
     steps:
-      - name: Check deployment eligibility
-        id: eligibility
-        shell: bash
-        run: |
-          set -euo pipefail
-          master_head=$(git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/master)
-          if [[ "${master_head%%$'\t'*}" != "$GITHUB_SHA" ]]; then
-            printf 'Skipping deployment because master has advanced.\n'
-            exit 0
-          fi
-          [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Missing or invalid image digest.' >&2; exit 1; }
-          printf 'deploy=true\n' >> "$GITHUB_OUTPUT"
-
       - name: Notify the deployment webhook
-        if: steps.eligibility.outputs.deploy == 'true'
         shell: bash
         env:
           WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
@@ -245,6 +229,21 @@ jobs:
           WEBHOOK_PATH: /api/deploy/panel
         run: &notify_depoly |
           set -euo pipefail
+          check_panel_head() {
+            if [[ "$WEBHOOK_PATH" == /api/deploy/panel ]]; then
+              local master_head
+              master_head=$(git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/master)
+              if [[ "${master_head%%$'\t'*}" != "$GITHUB_SHA" ]]; then
+                printf 'Skipping deployment because master has advanced.\n'
+                exit 0
+              fi
+            fi
+          }
+
+          check_panel_head
+          if [[ "$WEBHOOK_PATH" == /api/deploy/panel ]]; then
+            [[ "$WEBHOOK_PAYLOAD" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Missing or invalid image digest.' >&2; exit 1; }
+          fi
           : "${WEBHOOK_URL:?Missing webhook URL}"
           : "${WEBHOOK_SECRET:?Missing webhook signing secret}"
           [[ "$WEBHOOK_URL" =~ ^https://[A-Za-z0-9.-]+${WEBHOOK_PATH}$ ]] ||
@@ -252,9 +251,12 @@ jobs:
           [[ "$WEBHOOK_TOKEN" =~ ^[0-9a-f]{64}$ ]] ||
             { echo 'Webhook token must be 64 lowercase hexadecimal characters.' >&2; exit 1; }
           webhook_token=$WEBHOOK_TOKEN
-          unset WEBHOOK_TOKEN
-          timestamp=$(date +%s)
-          signature=$(WEBHOOK_TIMESTAMP="$timestamp" python3 - <<'PY'
+          webhook_secret=$WEBHOOK_SECRET
+          unset WEBHOOK_TOKEN WEBHOOK_SECRET
+
+          for attempt in 1 2 3; do
+            timestamp=$(date +%s)
+            signature=$(WEBHOOK_SECRET="$webhook_secret" WEBHOOK_TIMESTAMP="$timestamp" python3 - <<'PY'
           import hmac
           import os
           import re
@@ -265,23 +267,30 @@ jobs:
           body = os.environ["WEBHOOK_TIMESTAMP"] + "\n" + os.environ["WEBHOOK_PAYLOAD"]
           print("sha256=" + hmac.digest(secret.encode(), body.encode(), "sha256").hex())
           PY
-          )
-          unset WEBHOOK_SECRET
+            )
 
-          status=$(curl -q --proto '=https' --silent --show-error --connect-timeout 10 --max-time 30 \
-            --output /dev/null --write-out '%{http_code}' --request POST \
-            --header @- --data-binary "$WEBHOOK_PAYLOAD" -- "$WEBHOOK_URL" <<EOF
+            response=$(curl -q --proto '=https' --silent --show-error --connect-timeout 10 --max-time 30 \
+              --output /dev/null --write-out '%{http_code} %header{retry-after}' --request POST \
+              --header @- --data-binary "$WEBHOOK_PAYLOAD" -- "$WEBHOOK_URL" <<EOF
           Authorization: Bearer $webhook_token
           X-Yagp-Timestamp: $timestamp
           X-Yagp-Signature: $signature
           Content-Type: text/plain
           EOF
-          )
-          if [[ "$status" != 202 ]]; then
-            printf 'Webhook rejected the request (HTTP %s).\n' "$status" >&2
-            exit 1
-          fi
-          printf 'Request accepted for %s. Check the server journal for the result.\n' "$WEBHOOK_PAYLOAD"
+            )
+            read -r status retry_after <<< "$response"
+            if [[ "$status" == 202 ]]; then
+              printf 'Request accepted for %s. Check the server journal for the result.\n' "$WEBHOOK_PAYLOAD"
+              exit 0
+            fi
+            if [[ "$status" != 429 || "$attempt" == 3 || ! "$retry_after" =~ ^[1-9][0-9]{0,2}$ ]] || (( retry_after > 300 )); then
+              printf 'Webhook rejected the request (HTTP %s after %s attempt(s)).\n' "$status" "$attempt" >&2
+              exit 1
+            fi
+            printf 'Webhook returned HTTP 429. Retrying in %s seconds.\n' "$retry_after"
+            sleep "$retry_after"
+            check_panel_head
+          done
 
   upgrade-depoly:
     name: Upgrade the production deployment tool

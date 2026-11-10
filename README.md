@@ -102,7 +102,7 @@ sudo ./yagp-depoly-linux-amd64 install /opt/yagp-panel traefik
 
 在 GitHub 的 `production` Environment 中限制 `master` 部署，将安装输出的 `DEPLOY_WEBHOOK_SECRET`、`DEPLOY_WEBHOOK_TOKEN` 和 `DEPLOY_WEBHOOK_URL` 配为 Secret。最后将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
 
-两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`。两个入口共用每 IP 每分钟 20 次的限额。未定义的路径、方法和未启用的升级入口返回 `404`，与鉴权失败一起计数。1 分钟内累计 5 次后，两个入口对该 IP 封禁 15 分钟。封禁、限流或冷却期间，有效入口返回 `429`。HTTP `202` 表示已受理，实际部署结果可用 `sudo journalctl -u yagp-depoly.service -f` 查看。
+两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`。两个入口共用每 IP 每分钟 20 次的限额。未定义的路径、方法和未启用的升级入口返回 `404`，与鉴权失败一起计数。1 分钟内累计 5 次后，两个入口对该 IP 封禁 15 分钟。封禁、限流或冷却期间，有效入口返回 `429`。收到 `429` 且 `Retry-After` 为 1 到 300 秒时，GitHub Actions 按指定时间等待，用新的时间戳和签名重试，最多重试两次。面板更新每次发送前都确认该版本仍是 `master` 最新提交。HTTP `202` 表示已受理，实际部署结果可用 `sudo journalctl -u yagp-depoly.service -f` 查看。
 
 #### 通过独立 Webhook 升级部署工具
 
