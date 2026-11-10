@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,6 +24,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"yagp/internal/deployjob"
 )
 
 const (
@@ -40,26 +44,33 @@ const (
 )
 
 var (
-	lowerHex     = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	errReplay    = errors.New("webhook timestamp was already accepted or is older")
-	errQueueFull = errors.New("deployment queue is full")
+	lowerHex  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	errReplay = errors.New("webhook timestamp was already accepted or is older")
 
-	panelProtocol   = hookProtocol{digestLength, validDigest}
+	panelProtocol   = hookProtocol{"compose", digestLength, validDigest}
 	upgradeProtocol = hookProtocol{
-		int64(len("upgrade")), func(value string) bool { return value == "upgrade" },
+		"depoly", int64(len("upgrade")), func(value string) bool { return value == "upgrade" },
 	}
 )
 
 type hookProtocol struct {
+	mode      string
 	bodyLimit int64
 	validate  func(string) bool
 }
 
-func serve(executable string, args []string) error {
-	return serveWebhook(executable, args, (*http.Server).Serve)
+func serve(args []string) error {
+	info, err := os.Stat(deployjob.Executable)
+	if err != nil {
+		return fmt.Errorf("check installed yagp-update: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return errors.New("installed yagp-update must be an executable file")
+	}
+	return serveWebhook(args, (*http.Server).Serve)
 }
 
-func serveWebhook(executable string, args []string, runServer func(*http.Server, net.Listener) error) error {
+func serveWebhook(args []string, runServer func(*http.Server, net.Listener) error) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listen := flags.String("listen", "", "HTTP listen address")
 	secretFile := flags.String("secret-file", "", "path to the panel webhook signing secret file")
@@ -73,7 +84,7 @@ func serveWebhook(executable string, args []string, runServer func(*http.Server,
 		return err
 	}
 	trustedProxy, err := netip.ParseAddr(*proxy)
-	if *listen == "" || !filepath.IsAbs(executable) || *secretFile == "" || *tokenFile == "" ||
+	if *listen == "" || *secretFile == "" || *tokenFile == "" ||
 		!filepath.IsAbs(*stateFile) || err != nil || !trustedProxy.Is4() ||
 		trustedProxy.IsUnspecified() || flags.NArg() != 0 {
 		return fmt.Errorf("set -listen, -secret-file, -token-file, -trusted-proxy (IPv4), and -state-file (absolute path)")
@@ -108,20 +119,12 @@ func serveWebhook(executable string, args []string, runServer func(*http.Server,
 		return fmt.Errorf("notify systemd: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go runDeployments(ctx, panel.queue, "panel", func(value string) error {
-		return hookCommand("panel", executable, value).Run()
-	})
-	if upgrade != nil {
-		go runDeployments(ctx, upgrade.queue, "upgrade", func(value string) error {
-			return hookCommand("upgrade", executable, value).Run()
-		})
-	}
 	server := &http.Server{
 		Handler: deployHandler{
 			panel: panel, upgrade: upgrade, trustedProxy: trustedProxy,
-			limits: &requestLimits{clients: make(map[netip.Addr]*clientLimits)},
+			limits:    &requestLimits{clients: make(map[netip.Addr]*clientLimits)},
+			submit:    submitUpdate,
+			directory: deployjob.Directory,
 		},
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -150,7 +153,7 @@ func loadDeployHook(protocol hookProtocol, secretFile, tokenFile, stateFile stri
 		return nil, fmt.Errorf("load webhook acceptance state: %w", err)
 	}
 	return &deployHook{
-		protocol: protocol, secret: secret, token: token, queue: make(chan string, 1), state: state,
+		protocol: protocol, secret: secret, token: token, state: state,
 	}, nil
 }
 
@@ -182,7 +185,6 @@ func readCredential(path string) ([]byte, error) {
 type deployHook struct {
 	protocol      hookProtocol
 	secret, token []byte
-	queue         chan string
 	state         *hookState
 }
 
@@ -190,12 +192,16 @@ type deployHandler struct {
 	panel, upgrade *deployHook
 	trustedProxy   netip.Addr
 	limits         *requestLimits
+	submit         func(deployjob.Request) error
+	directory      string
 }
 
 func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var hook *deployHook
+	path := r.URL.EscapedPath()
+	statusRequest := r.Method == http.MethodGet && strings.HasPrefix(path, statusPath)
 	if r.Method == http.MethodPost {
-		switch r.URL.EscapedPath() {
+		switch path {
 		case deployPath:
 			hook = h.panel
 		case upgradePath:
@@ -204,7 +210,7 @@ func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ip, ok := h.clientIP(r)
 	now := time.Now()
-	if hook == nil {
+	if hook == nil && !statusRequest {
 		if ok {
 			h.limits.allowRequest(ip, now)
 			h.limits.authFailed(ip, now)
@@ -218,6 +224,10 @@ func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if retry := h.limits.allowRequest(ip, now); retry > 0 {
 		rateLimited(w, retry)
+		return
+	}
+	if statusRequest {
+		h.serveStatus(w, r, ip, now)
 		return
 	}
 	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -241,19 +251,39 @@ func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.rejectAuth(w, ip, now)
 		return
 	}
-	switch retry, err := hook.state.enqueue(hook.queue, value, timestamp, now); {
+	var randomID [16]byte
+	rand.Read(randomID[:])
+	job := deployjob.Request{ID: hex.EncodeToString(randomID[:]), Mode: hook.protocol.mode}
+	if job.Mode == "compose" {
+		job.Digest = value
+	}
+	// Record acceptance first, since a submission timeout can occur after systemd has started the job.
+	retry, err := hook.state.accept(timestamp, now)
+	switch {
 	case retry > 0:
 		rateLimited(w, retry)
-	case err == nil:
-		w.WriteHeader(http.StatusAccepted)
 	case err == errReplay:
 		http.Error(w, errReplay.Error(), http.StatusConflict)
-	case err == errQueueFull:
-		http.Error(w, errQueueFull.Error(), http.StatusServiceUnavailable)
-	default:
+	case err != nil:
 		log.Printf("could not persist webhook acceptance state: %v", err)
 		http.Error(w, "could not record webhook acceptance", http.StatusInternalServerError)
+	default:
+		h.submitJob(w, hook, job)
 	}
+}
+
+func (h deployHandler) submitJob(w http.ResponseWriter, hook *deployHook, job deployjob.Request) {
+	if err := h.submit(job); err != nil {
+		log.Printf("could not submit %s job %s: %v", job.Mode, job.ID, err)
+		http.Error(w, "could not submit update", http.StatusServiceUnavailable)
+		return
+	}
+	log.Printf("submitted %s job %s", job.Mode, job.ID)
+	link := signedStatusURL(hook.secret, job, time.Now().Add(statusLinkLifetime))
+	w.Header().Set("Location", link)
+	writeStatusJSON(w, http.StatusAccepted, struct {
+		StatusURL string `json:"status_url"`
+	}{link})
 }
 
 func validDigest(value string) bool {
@@ -425,7 +455,7 @@ func (l *requestLimits) authFailed(ip netip.Addr, now time.Time) time.Duration {
 	return banDuration
 }
 
-func (s *hookState) enqueue(queue chan<- string, value string, timestamp int64, now time.Time) (time.Duration, error) {
+func (s *hookState) accept(timestamp int64, now time.Time) (time.Duration, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if timestamp <= s.lastAccepted {
@@ -434,17 +464,12 @@ func (s *hookState) enqueue(queue chan<- string, value string, timestamp int64, 
 	if s.nextDeploy.After(now) {
 		return s.nextDeploy.Sub(now), nil
 	}
-	if len(queue) >= cap(queue) {
-		return 0, errQueueFull
-	}
 	nextDeploy := now.Add(deployCooldown)
 	if err := persistAcceptance(s.stateFile, timestamp, nextDeploy); err != nil {
 		return 0, err
 	}
-	// Handlers produce work under this lock. The worker can only free queue slots.
 	s.lastAccepted = timestamp
 	s.nextDeploy = nextDeploy
-	queue <- value
 	return 0, nil
 }
 
@@ -466,33 +491,17 @@ func validSignature(secret []byte, timestamp, header string, body []byte, now ti
 	return seconds, hmac.Equal([]byte(signature), []byte(expected))
 }
 
-func hookCommand(mode, executable, value string) *exec.Cmd {
-	var cmd *exec.Cmd
-	if mode == "upgrade" {
-		cmd = exec.Command("/usr/bin/sudo", "-n", "--", "/usr/bin/systemctl", "--no-block", "start", "yagp-depoly-upgrade.service")
-	} else {
-		cmd = exec.Command("/usr/bin/sudo", "-n", "--", executable, "deploy")
-		cmd.Stdin = strings.NewReader(value + "\n")
-	}
+func updateCommand(ctx context.Context, job deployjob.Request) *exec.Cmd {
+	input, _ := json.Marshal(job)
+	cmd := exec.CommandContext(ctx, "/usr/bin/sudo", "-n", "--", deployjob.Executable, job.Mode)
+	cmd.Stdin = strings.NewReader(string(input) + "\n")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd
 }
 
-func runDeployments(ctx context.Context, queue <-chan string, mode string, execute func(string) error) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case value := <-queue:
-			log.Printf("starting %s webhook task %s", mode, value)
-			if err := execute(value); err != nil {
-				log.Printf("%s webhook task %s failed: %v", mode, value, err)
-			} else if mode == "upgrade" {
-				log.Print("requested yagp-depoly-upgrade.service")
-			} else {
-				log.Printf("deployment completed for %s", value)
-			}
-		}
-	}
+func submitUpdate(job deployjob.Request) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return updateCommand(ctx, job).Run()
 }

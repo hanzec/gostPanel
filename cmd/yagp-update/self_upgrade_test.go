@@ -14,20 +14,15 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"testing/iotest"
 	"time"
+
+	"yagp/pkg/upgrade"
 )
 
 type selfUpgradeRoundTripper func(*http.Request) (*http.Response, error)
 
 func (transport selfUpgradeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return transport(req)
-}
-
-func TestSelfUpgradeRejectsUninstalledTool(t *testing.T) {
-	if err := selfUpgrade("relative-yagp-depoly"); err == nil {
-		t.Fatal("self-upgrade accepted a noninstalled tool")
-	}
 }
 
 func TestSelfUpgradePreflight(t *testing.T) {
@@ -93,33 +88,6 @@ func TestSelfUpgradePreflight(t *testing.T) {
 	}
 }
 
-func TestLatestGitHubDeployRelease(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		body string
-		want string
-	}{
-		{"stable", `{"tag_name":"0.1.132-aabbccd"}`, "0.1.132-aabbccd"},
-		{"draft", `{"tag_name":"0.1.132-aabbccd","draft":true}`, ""},
-		{"prerelease", `{"tag_name":"0.1.132-aabbccd","prerelease":true}`, ""},
-		{"invalid tag", `{"tag_name":"../0.1.132-aabbccd"}`, ""},
-		{"broken JSON", `{"tag_name":`, ""},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &http.Client{Transport: selfUpgradeRoundTripper(func(req *http.Request) (*http.Response, error) {
-				if req.URL.String() != "https://api.github.com/repos/hanzec/yagp/releases/latest" {
-					t.Fatalf("unexpected request %s", req.URL)
-				}
-				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(tt.body))}, nil
-			})}
-			got, err := latestGitHubDeployRelease(context.Background(), client)
-			if got != tt.want || (err != nil) != (tt.want == "") {
-				t.Fatalf("latestGitHubDeployRelease = %q, %v; want %q", got, err, tt.want)
-			}
-		})
-	}
-}
-
 func TestSelfUpgradeNetworkFailure(t *testing.T) {
 	networkErr := errors.New("network unavailable")
 	client := &http.Client{Transport: selfUpgradeRoundTripper(func(*http.Request) (*http.Response, error) {
@@ -131,10 +99,7 @@ func TestSelfUpgradeNetworkFailure(t *testing.T) {
 	if _, err := getSelfUpgradeFile(context.Background(), client, "://malformed"); err == nil {
 		t.Fatal("malformed release URL accepted")
 	}
-	env := selfUpgradeEnvironment{client: client}
-	if err := env.install(context.Background(), "", "0.1.131-aabbccd"); !errors.Is(err, networkErr) {
-		t.Fatalf("release lookup error = %v, want %v", err, networkErr)
-	}
+
 }
 
 func TestDownloadSelfUpgradeFile(t *testing.T) {
@@ -277,7 +242,7 @@ func TestExtractSelfUpgradeBinary(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err = extractSelfUpgradeBinary(archive, name, target)
+			err = extractSelfUpgradeBinaries(archive, map[string]string{name: target})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("extractSelfUpgradeBinary = %v, want error %t", err, tt.wantErr)
 			}
@@ -294,7 +259,7 @@ func TestExtractSelfUpgradeBinary(t *testing.T) {
 func TestExtractMissingOrMalformedTar(t *testing.T) {
 	dir := t.TempDir()
 	archive, target := filepath.Join(dir, "archive"), filepath.Join(dir, "binary")
-	if err := extractSelfUpgradeBinary(archive, "binary", target); !errors.Is(err, os.ErrNotExist) {
+	if err := extractSelfUpgradeBinaries(archive, map[string]string{"binary": target}); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing archive = %v, want file error", err)
 	}
 	file, err := os.Create(archive)
@@ -306,7 +271,7 @@ func TestExtractMissingOrMalformedTar(t *testing.T) {
 	if err := errors.Join(err, writer.Close(), file.Close()); err != nil {
 		t.Fatal(err)
 	}
-	if err := extractSelfUpgradeBinary(archive, "binary", target); !errors.Is(err, tar.ErrHeader) {
+	if err := extractSelfUpgradeBinaries(archive, map[string]string{"binary": target}); !errors.Is(err, tar.ErrHeader) {
 		t.Fatalf("malformed archive = %v, want malformed tar error", err)
 	}
 }
@@ -330,18 +295,18 @@ func TestExtractTruncatedBinary(t *testing.T) {
 	if err := errors.Join(compressed.Close(), file.Close()); err != nil {
 		t.Fatal(err)
 	}
-	if err := extractSelfUpgradeBinary(archive, "binary", filepath.Join(dir, "candidate")); !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err := extractSelfUpgradeBinaries(archive, map[string]string{"binary": filepath.Join(dir, "candidate")}); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("truncated archive = %v, want unexpected EOF", err)
 	}
 }
 
 func TestSelfUpgradeVersionCannotExecuteMissingTool(t *testing.T) {
-	if err := checkSelfUpgradeVersion(context.Background(), filepath.Join(t.TempDir(), "missing"), "0.1.132-aabbccd", nil); err == nil {
+	if err := checkSelfUpgradeVersion(context.Background(), filepath.Join(t.TempDir(), "missing"), "0.1.132-aabbccd", nil, false); err == nil {
 		t.Fatal("version check accepted missing executable")
 	}
 }
 
-func TestReplaceSelfUpgradeBinary(t *testing.T) {
+func TestReplaceSelfUpgradeBinaries(t *testing.T) {
 	for _, tt := range []struct {
 		name            string
 		failRestart     bool
@@ -357,35 +322,41 @@ func TestReplaceSelfUpgradeBinary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			executable := filepath.Join(dir, "yagp-depoly")
-			candidate := filepath.Join(stage, "candidate")
-			previous := filepath.Join(dir, ".yagp-depoly.previous")
-			for path, version := range map[string]string{executable: "old", candidate: "new"} {
-				if err := os.WriteFile(path, []byte(version), 0755); err != nil {
-					t.Fatal(err)
-				}
+			binaries := []binaryReplacement{
+				{target: filepath.Join(dir, "yagp-update"), candidate: filepath.Join(stage, "update")},
+				{target: filepath.Join(dir, "yagp-depoly"), candidate: filepath.Join(stage, "depoly")},
 			}
-			if tt.sameInodeBackup {
-				if err := os.Link(executable, previous); err != nil {
-					t.Fatal(err)
+			for _, binary := range binaries {
+				name := filepath.Base(binary.target)
+				for path, version := range map[string]string{binary.target: "old " + name, binary.candidate: "new " + name} {
+					if err := os.WriteFile(path, []byte(version), 0755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if tt.sameInodeBackup {
+					if err := os.Link(binary.target, binary.previous()); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 
 			calls := 0
 			restartErr := errors.New("readiness failed")
-			err = replaceSelfUpgradeBinary(executable, candidate, func(rollback bool) error {
+			err = replaceSelfUpgradeBinaries(binaries, func(rollback bool) error {
 				calls++
 				if rollback != (calls == 2) {
 					t.Fatalf("restart call %d received rollback=%t", calls, rollback)
 				}
-				want := "new"
-				if calls == 2 {
-					want = "old"
+				for _, binary := range binaries {
+					want := "new " + filepath.Base(binary.target)
+					if rollback {
+						want = "old " + filepath.Base(binary.target)
+					}
+					if live, err := os.ReadFile(binary.target); err != nil || string(live) != want {
+						t.Fatalf("installed tool = %q, %v; want %q", live, err, want)
+					}
 				}
-				if live, err := os.ReadFile(executable); err != nil || string(live) != want {
-					t.Fatalf("running tool = %q, %v; want %q", live, err, want)
-				}
-				if tt.failRestart && calls == 1 {
+				if tt.failRestart && !rollback {
 					return restartErr
 				}
 				return nil
@@ -397,10 +368,39 @@ func TestReplaceSelfUpgradeBinary(t *testing.T) {
 			} else if err != nil || calls != 1 {
 				t.Fatalf("upgrade = %v, restart calls = %d", err, calls)
 			}
-			if backup, err := os.ReadFile(previous); err != nil || string(backup) != "old" {
-				t.Fatalf("backup = %q, %v", backup, err)
+			for _, binary := range binaries {
+				if backup, err := os.ReadFile(binary.previous()); err != nil || string(backup) != "old "+filepath.Base(binary.target) {
+					t.Fatalf("backup = %q, %v", backup, err)
+				}
 			}
 		})
+	}
+}
+
+func TestReplaceSelfUpgradeBinariesRestoresAfterPartialInstall(t *testing.T) {
+	dir := t.TempDir()
+	stage := filepath.Join(dir, "stage")
+	if err := os.Mkdir(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	updater := binaryReplacement{filepath.Join(dir, "yagp-update"), filepath.Join(stage, "new-updater")}
+	receiver := binaryReplacement{filepath.Join(dir, "yagp-depoly"), filepath.Join(stage, "missing-receiver")}
+	for path, content := range map[string]string{updater.target: "old updater", updater.candidate: "new updater", receiver.target: "old receiver"} {
+		if err := os.WriteFile(path, []byte(content), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := replaceSelfUpgradeBinaries([]binaryReplacement{updater, receiver}, func(bool) error {
+		t.Fatal("restarted service after only one binary could be installed")
+		return nil
+	})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("upgrade = %v, want missing candidate error", err)
+	}
+	for path, want := range map[string]string{updater.target: "old updater", receiver.target: "old receiver"} {
+		if data, err := os.ReadFile(path); err != nil || string(data) != want {
+			t.Fatalf("binary %s = %q, %v; want %q", path, data, err, want)
+		}
 	}
 }
 
@@ -441,12 +441,12 @@ func TestSelfUpgradeFileFailures(t *testing.T) {
 			}
 
 			restarts := 0
-			err := replaceSelfUpgradeBinary(executable, candidate, func(rollback bool) error {
+			err := replaceSelfUpgradeBinaries([]binaryReplacement{{executable, candidate}}, func(rollback bool) error {
 				restarts++
 				if !rollback {
 					switch tt.name {
 					case "cannot stage rollback":
-						must(os.Mkdir(filepath.Join(stage, "rollback"), 0700))
+						must(os.Mkdir(filepath.Join(stage, filepath.Base(executable)+".rollback"), 0700))
 					case "cannot restore rollback":
 						must(os.Remove(executable))
 						must(os.Mkdir(executable, 0700))
@@ -469,30 +469,20 @@ func TestSelfUpgradeFileFailures(t *testing.T) {
 
 func TestInstallSelfUpgradeRelease(t *testing.T) {
 	const current, newer = "0.1.131-aabbccd", "0.1.132-bbccdde"
-	versionScript := func(tag string) string {
-		return "#!/bin/sh\ntest \"$1\" = version || exit 2\nprintf '%s\\n' '" + tag + "'\n"
+	versionScript := func(tag string, updater bool) string {
+		check := "test \"$1\" = version"
+		if updater {
+			check = "test \"$1\" = depoly && test \"$YAGP_UPDATE_PHASE\" = version"
+		}
+		return "#!/bin/sh\n" + check + " || exit 2\nprintf '%s\\n' '" + tag + "'\n"
 	}
-	name := "yagp-depoly-linux-" + runtime.GOARCH
-	for _, tt := range []struct {
-		name, tag, candidate, failure, want, cache string
-	}{
-		{"new version via cache", newer, newer, "", newer, "available"},
-		{"new version via GitHub", newer, newer, "", newer, ""},
-		{"interrupted cached archive", newer, newer, "", newer, "archive"},
-		{"rejected attestation", newer, newer, "verify", current, "available"},
-		{"missing archive", newer, newer, "archive", current, ""},
-		{"missing bundle", newer, newer, "bundle", current, ""},
-		{"malformed archive", newer, newer, "extract", current, ""},
-		{"missing staging directory", newer, newer, "stage", current, ""},
-		{"cannot start gh", newer, newer, "gh", current, ""},
-		{"mislabeled binary", newer, current, "version", current, ""},
-		{"changed installed version", newer, newer, "changed", newer, ""},
-		{"unsafe deployment lock", newer, newer, "lock", current, ""},
-		{"failed readiness", newer, newer, "restart", current, ""},
-		{"unhealthy after startup", newer, newer, "is-active", current, ""},
-		{"same version", current, current, "", current, "available"},
+	receiverName := "yagp-depoly-linux-" + runtime.GOARCH
+	updaterName := "yagp-update-linux-" + runtime.GOARCH
+	for _, failure := range []string{
+		"", "verify", "archive", "bundle", "extract", "missing-updater", "stage", "gh", "receiver-version",
+		"updater-version", "changed", "lock", "restart", "is-active",
 	} {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run("cache-"+failure, func(t *testing.T) {
 			dir := t.TempDir()
 			write := func(name, content string) string {
 				t.Helper()
@@ -503,10 +493,11 @@ func TestInstallSelfUpgradeRelease(t *testing.T) {
 				return path
 			}
 			installed := current
-			if tt.failure == "changed" {
+			if failure == "changed" {
 				installed = newer
 			}
-			executable := write("yagp-depoly", versionScript(installed))
+			executable := write("yagp-update", versionScript(installed, true))
+			receiver := write("yagp-depoly", versionScript(installed, false))
 			gh := write("gh", `#!/bin/sh
 case "$1" in
 --version) echo 'gh version 2.102.0 (2026-10-02)';;
@@ -528,71 +519,51 @@ reset-failed) ;;
 *) exit 2;;
 esac
 `)
-			if tt.failure == "verify" || tt.failure == "restart" || tt.failure == "is-active" {
-				write(tt.failure, "")
+			if failure == "verify" || failure == "restart" || failure == "is-active" {
+				write(failure, "")
 			}
 			var archive bytes.Buffer
 			compressed := gzip.NewWriter(&archive)
 			writer := tar.NewWriter(compressed)
-			binary := versionScript(tt.candidate)
-			if err := writer.WriteHeader(&tar.Header{Name: name, Size: int64(len(binary))}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := io.WriteString(writer, binary); err != nil {
-				t.Fatal(err)
+			entries := []struct {
+				name    string
+				updater bool
+			}{{receiverName, false}, {updaterName, true}}
+			for _, entry := range entries {
+				if failure == "missing-updater" && entry.updater {
+					continue
+				}
+				candidate := newer
+				if (failure == "receiver-version" && !entry.updater) || (failure == "updater-version" && entry.updater) {
+					candidate = current
+				}
+				binary := versionScript(candidate, entry.updater)
+				if err := writer.WriteHeader(&tar.Header{Name: entry.name, Size: int64(len(binary))}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.WriteString(writer, binary); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := errors.Join(writer.Close(), compressed.Close()); err != nil {
 				t.Fatal(err)
 			}
-			const cacheURL = "https://release.hanzec-overseas.cn/yagp"
-			cacheAssets := cacheURL + "/releases/download/" + tt.tag + "/"
+			cacheAssets := upgrade.YAGPReleaseCache + "/releases/download/" + newer + "/"
 			client := &http.Client{Transport: selfUpgradeRoundTripper(func(req *http.Request) (*http.Response, error) {
 				var body io.Reader
 				status := 200
 				switch req.URL.String() {
-				case cacheURL + "/latest":
-					if req.Header.Get("Accept") != "application/json" || req.Header.Get("Authorization") != "" {
-						t.Fatalf("unexpected cache request headers %v", req.Header)
-					}
-					body = strings.NewReader(`{"owner":"hanzec","repo":"yagp","tag":"` + tt.tag + `","prerelease":false}`)
-					if tt.cache == "" {
-						status = 503
-					}
-				case cacheAssets + name + ".tar.gz":
-					if tt.cache == "" {
-						t.Fatalf("requested cached asset after cache metadata failure")
-					}
+				case cacheAssets + receiverName + ".tar.gz":
 					body = bytes.NewReader(archive.Bytes())
-					if tt.cache == "archive" {
-						body = io.MultiReader(strings.NewReader("partial archive"), iotest.ErrReader(io.ErrUnexpectedEOF))
-					}
-				case cacheAssets + selfUpgradeBundle:
-					if tt.cache == "" {
-						t.Fatalf("requested cached bundle after cache metadata failure")
-					}
-					body = strings.NewReader("signed fixture")
-				case "https://api.github.com/repos/hanzec/yagp/releases/latest":
-					if tt.cache != "" {
-						t.Fatalf("requested GitHub metadata despite usable cache metadata")
-					}
-					body = strings.NewReader(`{"tag_name":"` + tt.tag + `"}`)
-				case "https://github.com/hanzec/yagp/releases/download/" + tt.tag + "/" + name + ".tar.gz":
-					if tt.cache == "available" {
-						t.Fatalf("requested GitHub archive despite usable cached archive")
-					}
-					body = bytes.NewReader(archive.Bytes())
-					if tt.failure == "archive" {
+					if failure == "archive" {
 						status = 404
 					}
-					if tt.failure == "extract" {
+					if failure == "extract" {
 						body = strings.NewReader("not an archive")
 					}
-				case "https://github.com/hanzec/yagp/releases/download/" + tt.tag + "/yagp-depoly-attestations.jsonl":
-					if tt.cache != "" {
-						t.Fatalf("requested GitHub bundle despite usable cached bundle")
-					}
+				case cacheAssets + selfUpgradeBundle:
 					body = strings.NewReader("signed fixture")
-					if tt.failure == "bundle" {
+					if failure == "bundle" {
 						status = 404
 					}
 				default:
@@ -604,9 +575,9 @@ esac
 				client: client, gh: gh, systemctl: systemctl, lockPath: filepath.Join(dir, "deploy.lock"),
 			}
 			target := executable
-			switch tt.failure {
+			switch failure {
 			case "stage":
-				target = filepath.Join(dir, "missing", "yagp-depoly")
+				target = filepath.Join(dir, "missing", "yagp-update")
 			case "gh":
 				env.gh = filepath.Join(dir, "missing-gh")
 			case "lock":
@@ -614,24 +585,30 @@ esac
 					t.Fatal(err)
 				}
 			}
-			err := env.install(context.Background(), target, current)
-			if (err != nil) != (tt.failure != "") {
-				t.Fatalf("install = %v, want failure %q", err, tt.failure)
+			err := env.install(context.Background(), target, receiver, current, newer)
+			if (err != nil) != (failure != "") {
+				t.Fatalf("install = %v, want failure %q", err, failure)
 			}
-			if live, err := os.ReadFile(executable); err != nil || string(live) != versionScript(tt.want) {
-				t.Fatalf("installed executable = %q, %v; want %s", live, err, tt.want)
+			want := installed
+			if failure == "" {
+				want = newer
+			}
+			for path, updater := range map[string]bool{executable: true, receiver: false} {
+				if live, err := os.ReadFile(path); err != nil || string(live) != versionScript(want, updater) {
+					t.Fatalf("installed executable %s = %q, %v; want %s", path, live, err, want)
+				}
 			}
 			log, err := os.ReadFile(filepath.Join(dir, "systemctl.log"))
 			const restart = "restart yagp-depoly.service\n"
 			const active = "is-active --quiet yagp-depoly.service\n"
 			const reset = "reset-failed yagp-depoly.service\n"
 			var wantLog string
-			switch {
-			case tt.failure == "restart":
+			switch failure {
+			case "restart":
 				wantLog = restart + reset + restart + active
-			case tt.failure == "is-active":
+			case "is-active":
 				wantLog = restart + active + reset + restart + active
-			case tt.failure == "" && tt.want == newer:
+			case "":
 				wantLog = restart + active
 			}
 			if wantLog == "" {
@@ -683,17 +660,17 @@ func TestSelfUpgradeTrustedToolsAndRedirects(t *testing.T) {
 	if err := checkSelfUpgradeFile("relative"); err == nil {
 		t.Fatal("accepted relative tool path")
 	}
-	origin, err := http.NewRequest("GET", "https://github.com/hanzec/yagp/releases/download/1/asset", nil)
+	origin, err := http.NewRequest("GET", upgrade.YAGPReleaseCache+"/releases/download/1/asset", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, target := range []string{"https://release-assets.githubusercontent.com/asset", "http://github.com/asset", "https://elsewhere.example/asset"} {
+	for _, target := range []string{upgrade.YAGPReleaseCache + "/releases/download/1/another-asset", "http://" + origin.URL.Host + "/asset", "https://elsewhere.example/asset"} {
 		req, err := http.NewRequest("GET", target, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		err = selfUpgradeClient().CheckRedirect(req, []*http.Request{origin})
-		if (err == nil) != strings.Contains(target, "githubusercontent.com") {
+		if (err == nil) != strings.HasPrefix(target, upgrade.YAGPReleaseCache) {
 			t.Errorf("redirect to %s = %v", target, err)
 		}
 	}

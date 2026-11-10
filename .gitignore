@@ -44,6 +44,8 @@ gost-panel
 /yagp-daemon
 /yagp-depoly
 /yagp-depoly-linux-*
+/yagp-update-linux-*
+/yagp-update.sh
 /yagp-depoly-attestations.jsonl
 /config/**/*.key
 

@@ -50,7 +50,7 @@ function check_memory() {
 function download_panel_archive() {
     local archive=$1 target=$2 url
     if [[ "$REPO" == hanzec/yagp && -z "${GH_PROXY+x}" ]]; then
-        url="https://release.hanzec-overseas.cn/yagp/latest/$archive"
+        url="https://release.hanzec.com/yagp/latest/$archive"
         info "正在下载发布包: $url"
         if curl -fL --connect-timeout 10 --speed-limit 1 --speed-time 20 "$url" -o "$target"; then
             return 0

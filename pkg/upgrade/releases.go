@@ -23,7 +23,7 @@ import (
 
 const maxArchiveSize = 128 << 20
 
-const YAGPReleaseCache = "https://release.hanzec-overseas.cn/yagp"
+const YAGPReleaseCache = "https://release.hanzec.com/yagp"
 
 type Client struct {
 	http *http.Client
