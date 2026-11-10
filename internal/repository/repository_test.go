@@ -69,7 +69,7 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	mustPersist(t, nodes.UpdateLastCheck(stale.ID))
 	legacyPort := stale.Port
 	stale.Name, stale.Remark, stale.Port = "renamed", "saved after enrollment", 39111
-	mustPersist(t, nodes.Update(&stale, nil, nil))
+	mustPersist(t, nodes.Update(&stale, nil, nil, nil))
 	current, err := nodes.FindByName("renamed")
 	mustPersist(t, err)
 	if current.Password != enrolled.Password || current.Status != model.NodeStatusOnline || current.LastCheckAt == nil ||
@@ -118,7 +118,7 @@ func TestNodeRepositoryRejectsStaleQuotaSnapshots(t *testing.T) {
 	mustPersist(t, nodes.UpdateTrafficQuota(*current, 24, 50, model.TrafficQuotaActive))
 	stale := *current
 	limit, reset := int64(200), "weekly"
-	mustPersist(t, nodes.Update(current, &limit, &reset))
+	mustPersist(t, nodes.Update(current, &limit, &reset, nil))
 	mustPersist(t, nodes.UpdateTrafficQuota(stale, 24, 100, model.TrafficQuotaBlocked))
 	current, err = nodes.FindByID(node.ID)
 	mustPersist(t, err)

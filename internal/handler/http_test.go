@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -204,6 +205,40 @@ func TestNodeHTTPInventoryLifecycle(t *testing.T) {
 	f.request(t, "DELETE", path, "", 404)
 	f.request(t, "POST", path+"/registration-token", "", 404)
 	f.request(t, "PUT", path, create, 404)
+}
+
+func TestNodeHTTPAdditionalIPs(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	f.registerSettings()
+	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{"name":"edge"}`, 200))
+	path := fmt.Sprintf("/nodes/%d", node.ID)
+	want := []string{"192.0.2.8", "2001:db8::8"}
+	f.request(t, "PUT", path, `{"name":"edge","additional_ips":[" 192.0.2.8 ","::ffff:192.0.2.8","2001:0db8::8"]}`, 200)
+	invalid := f.request(t, "PUT", path, `{"name":"invalid","additional_ips":["192.0.2.9","192.0.2.0/24"]}`, 400)
+	if invalid.Code != 10008 || !strings.Contains(invalid.Message, "192.0.2.0/24") {
+		t.Fatalf("invalid additional IP response: %+v", invalid)
+	}
+	detail := handlerData[model.GostNode](t, f.request(t, "GET", path, "", 200))
+	if detail.Name != node.Name || detail.Address != "" || !slices.Equal(detail.AdditionalIPs, want) {
+		t.Fatalf("node after updating additional IPs: %+v", detail)
+	}
+	updated := handlerData[model.GostNode](t, f.request(t, "PUT", path, `{"name":"edge","remark":"retained"}`, 200))
+	if !slices.Equal(updated.AdditionalIPs, want) {
+		t.Fatalf("update without additional IPs discarded them: %v", updated.AdditionalIPs)
+	}
+	allowlistPath := "/system/gost-allowlist"
+	selection := fmt.Sprintf(`{"node_ids":[%d]}`, node.ID)
+	config := handlerData[model.GostAllowlist](t, f.request(t, "PUT", allowlistPath, selection, 200))
+	if !slices.Equal(config.Addresses, want) {
+		t.Fatalf("allowlist for a node with only manual IPs: %+v", config)
+	}
+	f.request(t, "PUT", path, `{"name":"edge","additional_ips":[]}`, 200)
+	detail = handlerData[model.GostNode](t, f.request(t, "GET", path, "", 200))
+	config = handlerData[model.GostAllowlist](t, f.request(t, "GET", allowlistPath, "", 200))
+	if len(detail.AdditionalIPs) != 0 || len(config.Addresses) != 0 {
+		t.Fatalf("additional IPs after clearing: node=%v allowlist=%v", detail.AdditionalIPs, config.Addresses)
+	}
 }
 
 func TestForwardingHTTPInventoryAndOfflineNodes(t *testing.T) {

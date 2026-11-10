@@ -281,6 +281,7 @@ describe('Gost routing settings', () => {
   it('renders saved IPs, disables new nodes without addresses and clears the allowlist', async () => {
     const initial = deferred()
     api.getGostAllowlist.mockReturnValueOnce(initial.promise)
+    api.getRoutingNodes.mockResolvedValueOnce([...nodes, { id: 5, name: 'Manual IP', additional_ips: ['198.51.100.5'] }])
     const wrapper = mountPage(GostAllowlistSettings)
     expect(wrapper.get('[aria-label="正在读取 Gost IP 白名单"]').attributes('role')).toBe('status')
     initial.resolve({ data: { node_ids: [1, 2], addresses: ['192.0.2.1', '2001:db8::1'] } })
@@ -291,7 +292,8 @@ describe('Gost routing settings', () => {
       [1, 'Dual stack（192.0.2.1 / 2001:db8::1）', false],
       [2, 'Lost IP（未获取 IP）', false],
       [3, 'Unregistered（未获取 IP）', true],
-      [4, 'IPv4 only（192.0.2.4）', false]
+      [4, 'IPv4 only（192.0.2.4）', false],
+      [5, 'Manual IP（198.51.100.5）', false]
     ])
     wrapper.getComponent(ElSelect).vm.$emit('update:modelValue', [])
     await nextTick()

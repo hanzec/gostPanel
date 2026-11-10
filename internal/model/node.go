@@ -43,6 +43,8 @@ type GostNode struct {
 	IPv4     string     `gorm:"column:ipv4;size:45" json:"ipv4"`
 	IPv6     string     `gorm:"column:ipv6;size:45" json:"ipv6"`
 
+	AdditionalIPs []string `gorm:"type:text;serializer:json" json:"additional_ips"`
+
 	RegistrationTokenHash string     `gorm:"size:64" json:"-"`
 	RegistrationExpiresAt *time.Time `json:"-"`
 	NodeCredentials       `gorm:"embedded" json:"-"`

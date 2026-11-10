@@ -156,7 +156,8 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatalf("registration failed to return node credentials: %v", err)
 	}
 	node.Remark = "updated metadata"
-	if err := repository.NewNodeRepository(f.db).Update(&node, nil, nil); err != nil {
+	additionalIPs := []string{"203.0.113.22"}
+	if err := repository.NewNodeRepository(f.db).Update(&node, nil, nil, additionalIPs); err != nil {
 		t.Fatal(err)
 	}
 	assertRejected(token, http.StatusUnauthorized)
@@ -246,6 +247,10 @@ func TestNodeRegistration(t *testing.T) {
 		if enrolled.Address != address || enrolled.IPv4 != ipv4 || enrolled.IPv6 != ipv6 {
 			t.Fatalf("stored address, IPv4, IPv6 = %q, %q, %q; want %q, %q, %q", enrolled.Address, enrolled.IPv4, enrolled.IPv6, address, ipv4, ipv6)
 		}
+		if !slices.Equal(enrolled.AdditionalIPs, additionalIPs) {
+			t.Fatalf("daemon replaced manually configured IPs: %v", enrolled.AdditionalIPs)
+		}
+		allowed = append(allowed, additionalIPs...)
 		config, err := allowlist.Get(ctx)
 		if err != nil || !slices.Equal(config.NodeIDs, []uint{node.ID}) || !slices.Equal(config.Addresses, allowed) {
 			t.Fatalf("resolved allowlist = %+v, err = %v; want %v for the same node", config, err, allowed)

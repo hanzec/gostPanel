@@ -24,12 +24,12 @@
         <el-option
           v-for="node in nodes"
           :key="node.id"
-          :label="`${node.name}（${[node.ipv4, node.ipv6].filter(Boolean).join(' / ') || '未获取 IP'}）`"
+          :label="`${node.name}（${node.addresses.join(' / ') || '未获取 IP'}）`"
           :value="node.id"
-          :disabled="!node.ipv4 && !node.ipv6 && !nodeIds.includes(node.id)"
+          :disabled="!node.addresses.length && !nodeIds.includes(node.id)"
         />
       </el-select>
-      <p id="gost-allowlist-help" class="ops-muted field-help">面板加入节点注册时自动获取的 IPv4 和 IPv6。清空选择并保存可解除来源 IP 限制。</p>
+      <p id="gost-allowlist-help" class="ops-muted field-help">面板加入所选节点自动上报的 IPv4、IPv6 和手动填写的附加 IP。清空选择并保存可解除来源 IP 限制。</p>
     </el-form-item>
     <dl class="allowlist-preview" aria-live="polite">
       <dt>已保存的来源 IP</dt>
@@ -67,7 +67,11 @@ async function load() {
   loadError.value = ''
   try {
     const [{ data }, nodeList] = await Promise.all([getGostAllowlist(), getRoutingNodes()])
-    nodes.value = nodeList
+    nodes.value = nodeList.map(node => ({
+      id: node.id,
+      name: node.name,
+      addresses: [...new Set([node.ipv4, node.ipv6, ...(node.additional_ips || [])].filter(Boolean))]
+    }))
     showConfig(data)
   } catch (error) {
     loadError.value = error.response?.data?.message || '无法读取白名单或节点列表，请重试。'

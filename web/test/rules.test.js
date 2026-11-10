@@ -123,6 +123,8 @@ describe('forwarding rule inventory', () => {
 
 describe('forwarding rule editor and actions', () => {
   it('creates a standalone endpoint after validating the node and port, then checks that listener', async () => {
+    const additionalIP = '192.0.2.11'
+    getNodeList.mockResolvedValueOnce(result([{ ...entryNode, additional_ips: [entryNode.ipv4, additionalIP] }]))
     const wrapper = mountInventory(Rules)
     await flushPromises()
     await button(wrapper, '新建规则').trigger('click')
@@ -140,17 +142,17 @@ describe('forwarding rule editor and actions', () => {
     const listenIP = selectField(dialog, 'listen_ip')
     expect(listenIP.findAllComponents(ElOption).map(option => option.props('label'))).toEqual([
       '所有接口', 'IPv4 回环 · 127.0.0.1', 'IPv6 回环 · ::1',
-      '入口探测地址 · 192.0.2.10', '入口探测地址 · 2001:db8::8'
+      '入口探测地址 · 192.0.2.10', '入口探测地址 · 2001:db8::8', '节点附加地址 · 192.0.2.11'
     ])
-    await choose(listenIP, entryNode.ipv4)
+    await choose(listenIP, additionalIP)
     await field(dialog, 'listen_port').get('input').setValue('5353')
-    expect(dialog.get('#rule-listen-endpoint').text()).toContain('192.0.2.10:5353')
+    expect(dialog.get('#rule-listen-endpoint').text()).toContain('192.0.2.11:5353')
     await dialog.get('[aria-label="目标地址 1"]').setValue(' api.test:53 ')
     await button(dialog, '添加目标地址').trigger('click')
     await button(dialog, '添加目标地址').trigger('click')
     await dialog.get('[aria-label="目标地址 3"]').setValue('dns.test:53')
     await dialog.get('[aria-label="移除目标地址 3"]').trigger('click')
-    const created = { ...relayRule, id: 99, name: 'internal API', listen_ip: entryNode.ipv4, listen_port: 5353 }
+    const created = { ...relayRule, id: 99, name: 'internal API', listen_ip: additionalIP, listen_port: 5353 }
     createRule.mockResolvedValueOnce({ data: created })
     getRuleList.mockResolvedValueOnce(result([created]))
     checkRuleListener.mockResolvedValueOnce({ data: { available: false, reason: 'occupied' } })
@@ -159,7 +161,7 @@ describe('forwarding rule editor and actions', () => {
 
     expect(createRule).toHaveBeenCalledWith({
       node_id: 4, name: 'internal API', protocol: 'udp',
-      listen_ip: '192.0.2.10', listen_port: 5353, use_clash_ruleset: false,
+      listen_ip: additionalIP, listen_port: 5353, use_clash_ruleset: false,
       targets: ['api.test:53'], strategy: 'round', remark: ''
     })
     expect(ElMessage.success).toHaveBeenCalledWith('规则已创建')

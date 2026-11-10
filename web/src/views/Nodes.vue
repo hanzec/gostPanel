@@ -74,7 +74,7 @@
           <thead role="rowgroup">
             <tr role="row">
               <th scope="col" role="columnheader">实例</th>
-              <th scope="col" role="columnheader">节点 IP</th>
+              <th scope="col" role="columnheader">主 IP</th>
               <th scope="col" role="columnheader">状态</th>
               <th scope="col" role="columnheader">累计流量</th>
               <th scope="col" role="columnheader">操作</th>
@@ -97,16 +97,14 @@
                 <span class="inventory-secondary ops-mono ops-muted">#{{ node.id }}</span>
               </td>
               <td role="cell">
-                <span class="inventory-cell-label" aria-hidden="true">节点 IP</span>
+                <span class="inventory-cell-label" aria-hidden="true">主 IP</span>
                 <strong class="ops-mono">{{ node.address || '待获取地址' }}</strong>
-                <span v-if="node.ipv4" class="inventory-secondary ops-muted">IPv4 · <span class="ops-mono">{{ node.ipv4 }}</span></span>
-                <span v-if="node.ipv6" class="inventory-secondary ops-muted">IPv6 · <span class="ops-mono">{{ node.ipv6 }}</span></span>
-                <span class="inventory-secondary ops-muted">检查 · {{ node.last_check_at ? formatTime(node.last_check_at) : '待检查' }}</span>
               </td>
               <td class="inventory-status" role="cell">
                 <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">
                   {{ nodeStates[node.status]?.label || '未知' }}
                 </span>
+                <span class="inventory-secondary ops-muted">检查 · {{ node.last_check_at ? formatTime(node.last_check_at) : '待检查' }}</span>
               </td>
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">累计流量</span>
@@ -178,9 +176,28 @@
           <el-form-item label="节点名称" prop="name" class="inventory-form-wide">
             <el-input v-model="form.name" placeholder="例如 华东入口" />
           </el-form-item>
+          <el-form-item v-if="isEdit" label="附加 IP" prop="additionalIPs" :error="additionalIPsError" class="inventory-form-wide">
+            <el-input
+              id="node-additional-ips"
+              v-model="form.additionalIPs"
+              type="textarea"
+              :rows="3"
+              :spellcheck="false"
+              :disabled="submitLoading"
+              :aria-invalid="Boolean(additionalIPsError)"
+              :aria-describedby="additionalIPsError ? 'node-additional-ips-help node-additional-ips-error' : 'node-additional-ips-help'"
+              @input="additionalIPsError = ''"
+            />
+            <p id="node-additional-ips-help" class="node-form-help ops-muted">
+              每行填写一个 IPv4 或 IPv6 地址。daemon 未检测到的 IP 也可以手动添加。
+            </p>
+            <template #error="{ error }">
+              <p id="node-additional-ips-error" class="node-form-help node-form-error" role="alert">{{ error }}</p>
+            </template>
+          </el-form-item>
           <el-form-item label="流量上限（GiB，可选）" prop="trafficLimitGiB" class="inventory-form-wide">
             <el-input v-model.trim="form.trafficLimitGiB" inputmode="decimal" placeholder="例如 100.5" aria-describedby="node-traffic-limit-help" clearable />
-            <p id="node-traffic-limit-help" class="node-traffic-help ops-muted">
+            <p id="node-traffic-limit-help" class="node-form-help ops-muted">
               留空或输入 0 表示不限。达额后节点立即拦截转发，额度恢复后自动解除限制。在线节点约每 5 秒同步用量和周期。
             </p>
           </el-form-item>
@@ -188,7 +205,7 @@
             <el-select v-model="form.trafficResetPeriod" :disabled="!trafficLimitBytes" aria-describedby="node-traffic-reset-help">
               <el-option v-for="(label, period) in trafficResetPeriods" :key="period" :label="label" :value="period" />
             </el-select>
-            <p id="node-traffic-reset-help" class="node-traffic-help ops-muted">按北京时间零点重置，每周从周一开始。</p>
+            <p id="node-traffic-reset-help" class="node-form-help ops-muted">按北京时间零点重置，每周从周一开始。</p>
           </el-form-item>
           <el-form-item label="备注" prop="remark" class="inventory-form-wide">
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录节点用途或部署位置" />
@@ -295,6 +312,7 @@ const configTabs = [
   { name: 'observers', label: '观察器' }
 ]
 const GIB = 1024 ** 3
+const INVALID_ADDITIONAL_IP = 10008
 
 const route = useRoute()
 const router = useRouter()
@@ -333,7 +351,9 @@ const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
 const submitLoading = ref(false)
 const formRef = ref(null)
-const form = reactive({ name: '', remark: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const form = reactive({ name: '', remark: '', additionalIPs: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const additionalIPsError = ref('')
+let originalAdditionalIPs = ''
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
 const originalTrafficLimitGiB = computed(() => {
@@ -558,11 +578,14 @@ const clearFilters = () => {
 
 const openDialog = (row = null) => {
   editId.value = row?.id ?? null
+  additionalIPsError.value = ''
+  originalAdditionalIPs = row?.additional_ips?.join('\n') || ''
   originalTrafficLimitBytes.value = row?.traffic_limit_bytes ?? 0
   originalTrafficResetPeriod = row?.traffic_reset_period || 'none'
   Object.assign(form, {
     name: row?.name ?? '',
     remark: row?.remark || '',
+    additionalIPs: originalAdditionalIPs,
     trafficLimitGiB: originalTrafficLimitGiB.value,
     trafficResetPeriod: originalTrafficResetPeriod
   })
@@ -585,6 +608,9 @@ const handleSubmit = async () => {
       node.traffic_reset_period = form.trafficResetPeriod
     }
     if (isEdit.value) {
+      if (form.additionalIPs !== originalAdditionalIPs) {
+        node.additional_ips = form.additionalIPs.split('\n').map(ip => ip.trim()).filter(Boolean)
+      }
       await updateNode(editId.value, node)
       ElMessage.success('节点已更新')
     } else {
@@ -595,7 +621,11 @@ const handleSubmit = async () => {
     dialogVisible.value = false
     refreshCurrentView()
   } catch (error) {
-    console.error('保存节点失败:', error)
+    if (error.response?.data?.code === INVALID_ADDITIONAL_IP) {
+      additionalIPsError.value = error.response.data.message
+    } else {
+      console.error('保存节点失败:', error)
+    }
   } finally {
     submitLoading.value = false
   }
@@ -714,7 +744,8 @@ onBeforeUnmount(() => {
   .inventory-status { align-self: center; }
 }
 .node-address-help { margin: 0 0 12px; line-height: 1.5; }
-.node-traffic-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+.node-form-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+.node-form-error { width: 100%; color: var(--ops-danger); overflow-wrap: anywhere; }
 .node-traffic-status { margin-top: 4px; }
 .config-empty { text-align: center; padding: 24px 12px; }
 .config-entry { border: 1px solid var(--ops-border); border-radius: 8px; margin-bottom: 8px; min-width: 0; }
