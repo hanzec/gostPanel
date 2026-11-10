@@ -16,7 +16,7 @@ readonly managed_override="$managed_dir/compose.yml"
 readonly previous_override_name=.yagp-depoly.yml
 readonly docker_socket=/var/run/docker.sock
 readonly image_repo=ghcr.io/hanzec/yagp
-readonly panel_endpoint=/api/deploy/panel
+readonly webhook_base_path=/api/deploy
 readonly upgrade_endpoint=/api/deploy/deploy-tool
 
 main() {
@@ -88,7 +88,7 @@ install_webhook() {
     log '配置完成。部署账号已禁用登录，本次未更新容器。'
     log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
     log '查看部署日志：journalctl -u yagp-depoly.service -f'
-    show_install_result DEPLOY_WEBHOOK panel "$panel_endpoint" "$traefik" "$secret" "$token"
+    show_install_result DEPLOY_WEBHOOK panel "$webhook_base_path" "$traefik" "$secret" "$token"
 }
 
 install_upgrade() {
@@ -498,10 +498,11 @@ inspect_project() {
 deploy_image() {
     [[ $0 == "$install_path" ]] || usage
     root_environment
-    local digest project_dir project image running started=$SECONDS
+    local digest project_dir project image running compose_status started=$SECONDS
     IFS= read -r digest && [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] ||
         fail '需要完整的小写 SHA-256 镜像 digest。'
     image="$image_repo@$digest"
+    log "开始部署面板镜像 $image。"
 
     require_root_owned "$managed_dir"
     lock_deploy
@@ -518,7 +519,7 @@ deploy_image() {
         log "项目 $project 已运行该镜像且健康，跳过重启：$digest"
         return
     fi
-    log "项目 $project 正在拉取 $image"
+    log "项目 $project 正在拉取镜像。"
     docker_local image pull "$image" ||
         fail "镜像拉取失败（退出码 $?），当前容器保持原状。"
 
@@ -526,8 +527,12 @@ deploy_image() {
     write_override "$managed_override" "$project" "$image"
     log '启动 yagp-config-init 与 yagp，最多等待健康检查 120 秒。'
     compose "$project_dir" "$project" -f "$managed_override" \
-        up --no-build --pull never --wait --wait-timeout 120 yagp yagp-config-init ||
-        fail "Compose 更新失败（退出码 $?）。请检查容器状态，覆盖文件已记录本次 digest：$digest"
+        up --no-build --pull never --wait --wait-timeout 120 yagp yagp-config-init || {
+        compose_status=$?
+        log "正在读取项目 $project 的容器状态。"
+        compose "$project_dir" "$project" -f "$managed_override" ps --all yagp yagp-config-init || true
+        fail "Compose 更新失败（退出码 $compose_status）。覆盖文件已记录本次 digest：$digest"
+    }
     log "项目 $project 更新完成，健康检查通过，耗时 $((SECONDS - started)) 秒。"
 }
 

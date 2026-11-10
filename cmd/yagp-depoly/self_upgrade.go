@@ -87,8 +87,10 @@ func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (stri
 }
 
 func (env selfUpgradeEnvironment) install(ctx context.Context, executable, current string) error {
+	log.Printf("checking the release cache for a tool upgrade (installed %s)", current)
 	tag, cacheErr := upgrade.CachedYAGPReleaseTag(ctx, env.client)
 	if cacheErr != nil {
+		log.Print("tool release cache lookup failed, querying GitHub directly")
 		var err error
 		tag, err = latestGitHubDeployRelease(ctx, env.client)
 		if err != nil {
@@ -113,13 +115,14 @@ func (env selfUpgradeEnvironment) install(ctx context.Context, executable, curre
 	name := "yagp-depoly-linux-" + runtime.GOARCH
 	archive := filepath.Join(stage, name+".tar.gz")
 	bundle := filepath.Join(stage, selfUpgradeBundle)
-	log.Printf("downloading tool release %s", tag)
+	log.Printf("preparing tool self-upgrade %s → %s", current, tag)
 	if err := env.downloadReleaseFile(ctx, tag, archive, selfUpgradeMaxTar, cacheErr == nil); err != nil {
 		return fmt.Errorf("download tool release: %w", err)
 	}
 	if err := env.downloadReleaseFile(ctx, tag, bundle, selfUpgradeMaxBundle, cacheErr == nil); err != nil {
 		return fmt.Errorf("download tool attestation bundle: %w", err)
 	}
+	log.Printf("verifying the attestation for tool release %s", tag)
 	if err := verifySelfUpgradeAttestation(ctx, env.gh, stage, archive, bundle); err != nil {
 		return err
 	}
@@ -149,6 +152,7 @@ func (env selfUpgradeEnvironment) install(ctx context.Context, executable, curre
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	log.Printf("installing tool release %s and restarting yagp-depoly.service", tag)
 	if err := replaceSelfUpgradeBinary(executable, candidate, func(rollback bool) error {
 		return restartSelfUpgradeService(env.systemctl, rollback)
 	}); err != nil {
@@ -210,15 +214,20 @@ func getSelfUpgradeFile(ctx context.Context, client *http.Client, url string) (i
 }
 
 func (env selfUpgradeEnvironment) downloadReleaseFile(ctx context.Context, tag, target string, limit int64, useCache bool) error {
-	path := "/releases/download/" + tag + "/" + filepath.Base(target)
+	asset := filepath.Base(target)
+	path := "/releases/download/" + tag + "/" + asset
 	var cacheErr error
 	if useCache {
+		log.Printf("downloading %s from the tool release cache", asset)
 		cacheCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		cacheErr = downloadSelfUpgradeFile(cacheCtx, env.client, upgrade.YAGPReleaseCache+path, target, limit)
 		cancel()
 		if cacheErr == nil {
 			return nil
 		}
+		log.Printf("tool release cache download failed for %s, retrying GitHub directly", asset)
+	} else {
+		log.Printf("downloading %s directly from GitHub", asset)
 	}
 	err := downloadSelfUpgradeFile(ctx, env.client, "https://github.com/"+selfUpgradeRepo+path, target, limit)
 	if err != nil && cacheErr != nil {
@@ -450,6 +459,7 @@ func replaceSelfUpgradeBinary(executable, candidate string, restart func(rollbac
 		return fmt.Errorf("replace installed tool: %w", err)
 	}
 	if err := restart(false); err != nil {
+		log.Print("tool restart failed, restoring the previous version")
 		restore := filepath.Join(filepath.Dir(candidate), "rollback")
 		if restoreErr := os.Link(previous, restore); restoreErr != nil {
 			return errors.Join(err, fmt.Errorf("stage tool rollback from %s: %w", previous, restoreErr))
