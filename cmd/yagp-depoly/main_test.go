@@ -364,6 +364,19 @@ func TestWebhookRoutesShareFailuresAndKeepIndependentState(t *testing.T) {
 	if resp := request("GET", upgradePath, badIP, "", nil, nil); resp.Code != http.StatusNotFound {
 		t.Fatalf("banned route miss returned %d", resp.Code)
 	}
+	const busyIP = "192.0.2.22"
+	for i := range requestLimit {
+		path, secret, token := deployPath, panelSecret, panelToken
+		if i%2 == 0 {
+			path, secret, token = upgradePath, toolSecret, toolToken
+		}
+		if resp := request("POST", path, busyIP, "invalid body", secret, token); resp.Code != http.StatusBadRequest {
+			t.Fatalf("invalid body on %s returned %d", path, resp.Code)
+		}
+	}
+	if resp := request("POST", upgradePath, busyIP, "upgrade", toolSecret, toolToken); resp.Code != http.StatusTooManyRequests {
+		t.Fatalf("requests to both routes did not share the per-IP quota: status=%d", resp.Code)
+	}
 	if resp := request("POST", deployPath, goodIP, digest, panelSecret, panelToken); resp.Code != http.StatusAccepted {
 		t.Fatalf("panel admission returned %d", resp.Code)
 	}
