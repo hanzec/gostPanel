@@ -77,7 +77,8 @@ func runInstalledUpdate(executable, mode, phase string) error {
 		if mode == "depoly" {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
-			return applyToolRelease(ctx, executable, os.Getenv("YAGP_UPDATE_RELEASE_TAG"))
+			// The release script verifies the archive before passing it on stdin.
+			return applyToolRelease(ctx, executable, os.Getenv("YAGP_UPDATE_RELEASE_TAG"), os.Stdin)
 		}
 	}
 	return errors.New("invalid update phase")

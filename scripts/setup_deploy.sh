@@ -20,7 +20,7 @@ readonly managed_override="$managed_dir/compose.yml"
 readonly previous_override_name=.yagp-depoly.yml
 readonly docker_socket=/var/run/docker.sock
 readonly image_repo=ghcr.io/hanzec/yagp
-readonly release_cache=https://release.hanzec.com/yagp
+readonly release_cache=https://release.hanzec-overseas.cn/yagp
 readonly webhook_base_path=/api/deploy
 readonly upgrade_endpoint=/api/deploy/deploy-tool
 
@@ -59,23 +59,20 @@ log() {
 install_webhook() (
     [[ $# -ge 1 ]] || usage
     check_systemd
-    local project_dir project proxy stage gh_path arch receiver updater traefik secret token old_secret old_token with_upgrade=false
-    gh_path=$(check_release_cli)
+    local project_dir project proxy stage cosign arch receiver updater traefik secret token old_secret old_token with_upgrade=false
+    cosign=$(find_cosign)
     project_dir=$(resolve_project_dir "$1")
     shift
     proxy=$(traefik_option "$@")
-    case $(uname -m) in
-        x86_64) arch=amd64 ;;
-        aarch64|arm64) arch=arm64 ;;
-        *) fail '部署工具需要 Linux amd64 或 arm64。' ;;
-    esac
+    arch=$(tool_arch)
     project=$(inspect_project "$project_dir")
     traefik=$(inspect_traefik "$project_dir" "$project" "$proxy")
     stage=$(mktemp -d /tmp/yagp-deploy.XXXXXXXXXX)
     trap 'rm -rf -- "$stage"' EXIT
     receiver="yagp-depoly-linux-$arch"
     updater="yagp-update-linux-$arch"
-    download_tools "$stage" "$gh_path" "$receiver" "$updater"
+    download_tool_archive "$stage" "$cosign" "$receiver.tar.gz"
+    tar -xzf "$stage/$receiver.tar.gz" -C "$stage" -- "$receiver" "$updater" || fail '发布包缺少部署工具。'
     prepare_managed_dir
     lock_deploy
     old_secret="$project_dir/.yagp-webhook-secret"
@@ -110,7 +107,7 @@ install_webhook() (
 
 install_upgrade() {
     check_systemd
-    check_release_cli >/dev/null
+    find_cosign >/dev/null
     check_managed_file "$listener_unit"
     check_managed_file "$install_path"
     check_managed_file "$update_path"
@@ -155,45 +152,55 @@ check_systemd() {
         fail 'Webhook 接收器需要支持 LoadCredential 的 systemd 247 或更新版本。'
 }
 
-check_release_cli() {
-    local gh_path version
-    local version_pattern='^gh version ([0-9]+)\.([0-9]+)\.[0-9]+([[:space:]]|$)'
-    gh_path=$(PATH=/usr/local/bin:/usr/bin:/bin type -P gh) &&
-        gh_path=$(realpath -e -- "$gh_path") ||
-        fail '验证发布脚本需要 gh 2.102.0 或更新版本。'
-    check_managed_file "$gh_path"
-    require_root_path "$(dirname -- "$gh_path")"
-    version=$("$gh_path" --version) || fail '无法读取 gh 版本。'
-    [[ $version =~ $version_pattern ]] &&
-        (( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 102) )) ||
-        fail '验证发布脚本需要 gh 2.102.0 或更新版本。'
-    printf '%s\n' "$gh_path"
+tool_arch() {
+    case $(uname -m) in
+        x86_64) printf '%s\n' amd64 ;;
+        aarch64|arm64) printf '%s\n' arm64 ;;
+        *) fail '部署工具需要 Linux amd64 或 arm64。' ;;
+    esac
 }
 
-download_tools() {
-    local stage=$1 gh_path=$2 receiver=$3 updater=$4
-    local archive="$receiver.tar.gz" bundle=yagp-depoly-attestations.jsonl url tag base
+find_cosign() {
+    local cosign version
+    local version_pattern='"gitVersion"[[:space:]]*:[[:space:]]*"v([0-9]+)\.([0-9]+)\.([0-9]+)"'
+    cosign=$(PATH=/usr/local/bin:/usr/bin:/bin type -P cosign) &&
+        cosign=$(realpath -e -- "$cosign") && [[ -x $cosign ]] ||
+        fail '验证部署工具发布包需要 Cosign 3.1.3 或更新版本。'
+    check_managed_file "$cosign"
+    require_root_path "$(dirname -- "$cosign")"
+    version=$("$cosign" version --json) || fail '无法读取 Cosign 版本。'
+    [[ $version =~ $version_pattern ]] &&
+        (( 10#${BASH_REMATCH[1]} > 3 || (10#${BASH_REMATCH[1]} == 3 &&
+            (10#${BASH_REMATCH[2]} > 1 || (10#${BASH_REMATCH[2]} == 1 && 10#${BASH_REMATCH[3]} >= 3))) )) ||
+        fail '验证部署工具发布包需要 Cosign 3.1.3 或更新版本。'
+    printf '%s\n' "$cosign"
+}
+
+download_tool_archive() {
+    local stage=$1 cosign=$2 archive=$3 tag=${4:-}
+    local bundle=yagp-depoly-attestations.jsonl url base="$release_cache/releases/download/"
     local tag_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-[0-9a-f]{7}$'
     local -a curl_options=(-q -fsS --proto '=https' --connect-timeout 10 --max-time 120)
-    url=$(curl "${curl_options[@]}" --head --output /dev/null --write-out '%{redirect_url}' -- "$release_cache/latest/$archive") ||
-        fail '无法查询最新的部署工具发布包。'
-    base="$release_cache/releases/download/"
-    [[ $url == "$base"*"/$archive" ]] || fail '发布缓存返回了无效的下载地址。'
-    tag=${url#"$base"}
-    tag=${tag%"/$archive"}
-    [[ $tag =~ $tag_pattern ]] || fail '发布缓存返回了无效的版本号。'
+    if [[ -z $tag ]]; then
+        url=$(curl "${curl_options[@]}" --head --output /dev/null --write-out '%{redirect_url}' -- "$release_cache/latest/$archive") ||
+            fail '无法查询最新的部署工具发布包。'
+        [[ $url == "$base"*"/$archive" ]] || fail '发布缓存返回了无效的下载地址。'
+        tag=${url#"$base"}
+        tag=${tag%"/$archive"}
+    fi
+    [[ $tag =~ $tag_pattern ]] || fail '部署工具发布版本无效。'
 
-    log "下载部署工具 $tag（$receiver）。"
-    curl "${curl_options[@]}" --max-filesize 67108864 --output "$stage/$archive" -- "$url" ||
+    log "下载部署工具 $tag（$archive）。"
+    curl "${curl_options[@]}" --max-filesize 67108864 --output "$stage/$archive" -- "$base$tag/$archive" ||
         fail '无法下载部署工具发布包。'
     curl "${curl_options[@]}" --max-filesize 2097152 --output "$stage/$bundle" -- "$base$tag/$bundle" ||
         fail '无法下载发布包证明。'
     log "验证部署工具 $tag 的发布证明。"
-    env -i PATH="$PATH" HOME="$stage" GH_CONFIG_DIR="$stage/.gh" GH_PROMPT_DISABLED=1 LC_ALL=C \
-        "$gh_path" attestation verify "$stage/$archive" --bundle "$stage/$bundle" --repo hanzec/yagp \
-        --signer-workflow hanzec/yagp/.github/workflows/release.yml --source-ref refs/heads/master --deny-self-hosted-runners ||
+    env -i PATH="$PATH" HOME="$stage" LC_ALL=C \
+        "$cosign" --timeout 60s verify-blob-attestation --bundle "$stage/$bundle" --type slsaprovenance1 \
+        --certificate-identity https://github.com/hanzec/yagp/.github/workflows/release.yml@refs/heads/master \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com "$stage/$archive" ||
         fail '部署工具发布包验签失败。'
-    tar -xzf "$stage/$archive" -C "$stage" -- "$receiver" "$updater" || fail '发布包缺少部署工具。'
 }
 
 traefik_option() {
@@ -627,11 +634,18 @@ deploy_image() {
     log "项目 $project 更新完成，健康检查通过，耗时 $((SECONDS - started)) 秒。"
 }
 
-update_tools() {
+update_tools() (
     root_environment
-    [[ -n ${YAGP_UPDATE_RELEASE_TAG:-} ]] || fail '工具升级须由 yagp-update 验证发布脚本后执行。'
-    YAGP_UPDATE_PHASE=apply exec "$update_path" depoly
-}
+    [[ -n ${YAGP_UPDATE_RELEASE_TAG:-} ]] || fail '工具升级须由 yagp-update 指定发布版本。'
+    local stage cosign arch archive
+    cosign=$(find_cosign)
+    arch=$(tool_arch)
+    archive="yagp-depoly-linux-$arch.tar.gz"
+    stage=$(mktemp -d /tmp/yagp-deploy.XXXXXXXXXX)
+    trap 'rm -rf -- "$stage"' EXIT
+    download_tool_archive "$stage" "$cosign" "$archive" "$YAGP_UPDATE_RELEASE_TAG"
+    YAGP_UPDATE_PHASE=apply "$update_path" depoly < "$stage/$archive"
+)
 
 write_override() {
     local target=$1 project=$2 image=${3:-}

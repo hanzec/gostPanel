@@ -96,7 +96,7 @@ func TestLatestYAGPReleasePrefersCache(t *testing.T) {
 	}
 	const tag = "0.1.100-abcdef1"
 	client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
-		if req.Host != "release.hanzec.com" || req.URL.Path != "/yagp/latest" ||
+		if req.Host != "release.hanzec-overseas.cn" || req.URL.Path != "/yagp/latest" ||
 			req.Header.Get("Accept") != "application/json" || req.Header.Get("Authorization") != "" {
 			t.Errorf("unexpected cache request: %s%s with headers %v", req.Host, req.URL.Path, req.Header)
 			http.NotFound(w, req)
@@ -242,7 +242,7 @@ func TestDaemonDownloadUsesPinnedReleaseCache(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
 				switch {
-				case req.Host == "release.hanzec.com" && req.URL.Path == "/yagp/releases/tag/"+tag:
+				case req.Host == "release.hanzec-overseas.cn" && req.URL.Path == "/yagp/releases/tag/"+tag:
 					if req.Header.Get("Accept") != "application/json" {
 						t.Error("pinned cache metadata did not request JSON")
 					}
@@ -251,7 +251,7 @@ func TestDaemonDownloadUsesPinnedReleaseCache(t *testing.T) {
 						cached.Digest = ""
 					}
 					_ = json.NewEncoder(w).Encode(release{CacheTag: tag, Assets: []asset{cached}})
-				case !test.missingDigest && req.Host == "release.hanzec.com" && req.URL.Path == "/yagp/releases/download/"+tag+"/"+archiveName:
+				case !test.missingDigest && req.Host == "release.hanzec-overseas.cn" && req.URL.Path == "/yagp/releases/download/"+tag+"/"+archiveName:
 					if test.corruptArchive {
 						_, _ = w.Write(bytes.Repeat([]byte{'x'}, len(archive)))
 						return

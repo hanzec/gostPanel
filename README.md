@@ -92,34 +92,27 @@ Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板
 
 #### 通过 Webhook 自动更新面板
 
-该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。服务器需要 GitHub CLI 2.102.0 或更新版本来验证发布产物。先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
+该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。请将 Cosign 3.1.3 或更新版本安装到 `/usr/local/bin` 等由 root 管理的目录，供安装和工具升级时验证二进制发布包。 [Cosign 安装说明](https://docs.sigstore.dev/cosign/system_config/installation/)
+
+先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
 
 ```bash
 docker ps --filter network=public --format 'table {{.Names}}\t{{.Image}}'
 ```
 
-从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。以下 Bash 命令会将安装脚本和同版本的产物证明下载到 `/tmp` 下的新目录，验证通过后再用 sudo 执行脚本。
+从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。以下 Bash 命令从 GitHub Raw 下载安装脚本到 `/tmp`，再用 sudo 执行。
 
 ```bash
-release_base=https://release.hanzec.com/yagp
-bundle=yagp-depoly-attestations.jsonl
-script_url_pattern='^https://release\.hanzec\.com/yagp/releases/download/[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{7}/setup_deploy\.sh$'
 tmpdir=$(mktemp -d /tmp/yagp-deploy.XXXXXXXX) &&
   cd "$tmpdir" &&
-  script_url=$(curl -q -fsSI --connect-timeout 10 --max-time 30 \
-    -o /dev/null -w '%{redirect_url}' "$release_base/latest/setup_deploy.sh") &&
-  [[ $script_url =~ $script_url_pattern ]] &&
-  curl -q -fsS --connect-timeout 10 --max-time 30 -o setup_deploy.sh "$script_url" &&
-  curl -q -fsS --connect-timeout 10 --max-time 30 -o "$bundle" "${script_url%/*}/$bundle" &&
-  gh attestation verify setup_deploy.sh --bundle "$bundle" --repo hanzec/yagp \
-    --signer-workflow hanzec/yagp/.github/workflows/release.yml \
-    --source-ref refs/heads/master --deny-self-hosted-runners &&
+  curl -q -fsS --connect-timeout 10 --max-time 30 -o setup_deploy.sh \
+    https://raw.githubusercontent.com/hanzec/yagp/refs/heads/master/scripts/setup_deploy.sh &&
   sudo bash ./setup_deploy.sh install /opt/yagp-panel --traefik traefik-public
 ```
 
-安装脚本会自动识别 AMD64 或 ARM64，从 `release.hanzec.com` 将对应的发布包和同版本的产物证明下载到 `/tmp` 下的临时目录，验证通过后将两个程序安装到 `/usr/local/sbin/`。脚本退出时会清理下载的发布包。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。`yagp-update` 作为一次性 root 任务下载并验签最新脚本，再更新 Compose 或替换两个程序。
+安装脚本会自动识别 AMD64 或 ARM64，从 `release.hanzec-overseas.cn` 将对应的发布包和同版本的 Sigstore 证明下载到 `/tmp` 下的临时目录。Cosign 确认发布包由 `hanzec/yagp` 的 `master` 发布工作流签发后，脚本将两个程序安装到 `/usr/local/sbin/`，退出时清理下载的发布包。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。
 
-从旧版迁移时，执行一次上述 `install` 命令。它会替换旧 sudo 规则、停用并移除旧工具升级单元，保留部署目录、镜像覆盖配置和凭据。首次安装生成的 HMAC 密钥和 Bearer Token 保存在 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`，在交互终端显示。
+从旧版迁移时，等支持此安装流程的版本发布后，执行一次上述 `install` 命令。已安装 `0.1.140-00c1ae3` 的服务器也需要执行这一步。脚本会替换旧 sudo 规则、停用并移除旧工具升级单元，保留部署目录、镜像覆盖配置和凭据。首次安装生成的 HMAC 密钥和 Bearer Token 保存在 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`，在交互终端显示。
 
 安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
@@ -145,7 +138,7 @@ sudo bash ./setup_deploy.sh install-upgrade --traefik traefik-public
 
 配置好工具升级 URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布和面板部署步骤成功后等待 60 秒，为 Release 缓存留出更新时间。若面板自动部署已关闭，工作流在 Release 发布成功后开始等待。随后工作流确认 `master` 仍指向本次提交，再发送工具升级请求。
 
-也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。`yagp-update` 从 Release 下载发布脚本和同版本的程序包，并验证来自 `hanzec/yagp` 的 `master` 发布工作流的产物证明。它替换两个二进制并重启接收器，启动失败时恢复旧文件。
+也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。`yagp-update` 从 GitHub Raw 下载目标版本标签下的脚本。工具升级时，脚本从发布缓存下载同版本的程序包和 Sigstore 证明，用 Cosign 验证后替换两个二进制并重启接收器。启动失败时恢复旧文件。
 
 面板部署和工具升级共用独立的 `yagp-depoly` journal，日志默认写入磁盘并由 journald 轮转。查询链接读取的任务记录保存于 `/var/lib/yagp-update/jobs`，由 systemd-tmpfiles 清理七天前的记录。以下命令可查看接收器和更新任务的日志。
 

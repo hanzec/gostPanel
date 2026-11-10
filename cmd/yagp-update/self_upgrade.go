@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,25 +24,17 @@ import (
 )
 
 const (
-	selfUpgradeRepo      = "hanzec/yagp"
-	selfUpgradeWorkflow  = selfUpgradeRepo + "/.github/workflows/release.yml"
-	selfUpgradeBundle    = "yagp-depoly-attestations.jsonl"
-	selfUpgradeLockPath  = "/etc/yagp-depoly/deploy.lock"
-	selfUpgradeMaxTar    = 64 << 20
-	selfUpgradeMaxBundle = 2 << 20
+	selfUpgradeLockPath = "/etc/yagp-depoly/deploy.lock"
+	selfUpgradeMaxTar   = 64 << 20
 )
 
-var selfUpgradeGHVersion = regexp.MustCompile(`^gh version ([0-9]+)\.([0-9]+)\.[0-9]+(?: |$)`)
-
 type selfUpgradeEnvironment struct {
-	client      *http.Client
-	gh          string
 	systemctl   string
 	lockPath    string
 	credentials *syscall.Credential
 }
 
-func applyToolRelease(ctx context.Context, executable, tag string) error {
+func applyToolRelease(ctx context.Context, executable, tag string, verifiedArchive io.Reader) error {
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		return errors.New("tool self-upgrade requires Linux amd64 or arm64")
 	}
@@ -63,7 +54,7 @@ func applyToolRelease(ctx context.Context, executable, tag string) error {
 	if err != nil {
 		return err
 	}
-	return env.install(ctx, executable, receiver, current, tag)
+	return env.install(ctx, executable, receiver, current, tag, verifiedArchive)
 }
 
 func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (string, error), lookupUser func(string) (*user.User, error)) (selfUpgradeEnvironment, error) {
@@ -71,10 +62,6 @@ func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (stri
 		return selfUpgradeEnvironment{}, err
 	}
 	if err := checkSelfUpgradePath(filepath.Dir(lockPath), false); err != nil {
-		return selfUpgradeEnvironment{}, err
-	}
-	gh, err := findTool("gh")
-	if err != nil {
 		return selfUpgradeEnvironment{}, err
 	}
 	systemctl, err := findTool("systemctl")
@@ -86,42 +73,24 @@ func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (stri
 		return selfUpgradeEnvironment{}, err
 	}
 	return selfUpgradeEnvironment{
-		client: selfUpgradeClient(), gh: gh, systemctl: systemctl,
-		lockPath: lockPath, credentials: credentials,
+		systemctl: systemctl,
+		lockPath:  lockPath, credentials: credentials,
 	}, nil
 }
 
-func (env selfUpgradeEnvironment) install(ctx context.Context, executable, receiver, current, tag string) error {
+func (env selfUpgradeEnvironment) install(ctx context.Context, executable, receiver, current, tag string, verifiedArchive io.Reader) error {
 	dir := filepath.Dir(executable)
 	stage, err := os.MkdirTemp(dir, ".yagp-update-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	if err := verifySelfUpgradeGHVersion(ctx, env.gh, stage); err != nil {
-		return err
-	}
-
 	receiverName := "yagp-depoly-linux-" + runtime.GOARCH
 	updaterName := "yagp-update-linux-" + runtime.GOARCH
-	archive := filepath.Join(stage, receiverName+".tar.gz")
-	bundle := filepath.Join(stage, selfUpgradeBundle)
-	log.Printf("preparing tool self-upgrade %s → %s", current, tag)
-	if err := env.downloadReleaseFile(ctx, tag, archive, selfUpgradeMaxTar); err != nil {
-		return fmt.Errorf("download tool release: %w", err)
-	}
-	if err := env.downloadReleaseFile(ctx, tag, bundle, selfUpgradeMaxBundle); err != nil {
-		return fmt.Errorf("download tool attestation bundle: %w", err)
-	}
-	log.Printf("verifying the attestation for tool release %s", tag)
-	if err := verifySelfUpgradeAttestation(ctx, env.gh, stage, archive, bundle); err != nil {
-		return err
-	}
-
 	newUpdater := filepath.Join(stage, updaterName)
 	newReceiver := filepath.Join(stage, receiverName)
 	entries := map[string]string{updaterName: newUpdater, receiverName: newReceiver}
-	if err := extractSelfUpgradeBinaries(archive, entries); err != nil {
+	if err := extractSelfUpgradeBinaries(verifiedArchive, entries); err != nil {
 		return fmt.Errorf("extract signed tools: %w", err)
 	}
 
@@ -196,14 +165,6 @@ func getSelfUpgradeFile(ctx context.Context, client *http.Client, url string) (i
 	return resp.Body, nil
 }
 
-func (env selfUpgradeEnvironment) downloadReleaseFile(ctx context.Context, tag, target string, limit int64) error {
-	asset := filepath.Base(target)
-	log.Printf("downloading %s from the tool release cache", asset)
-	downloadCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	return downloadSelfUpgradeFile(downloadCtx, env.client, upgrade.YAGPReleaseCache+"/releases/download/"+tag+"/"+asset, target, limit)
-}
-
 func downloadSelfUpgradeFile(ctx context.Context, client *http.Client, url, target string, limit int64) error {
 	body, err := getSelfUpgradeFile(ctx, client, url)
 	if err != nil {
@@ -271,47 +232,13 @@ func selfUpgradeCommand(ctx context.Context, workdir, executable string, args ..
 	cmd.Env = []string{
 		"PATH=/usr/bin:/bin:/usr/local/bin",
 		"HOME=" + workdir,
-		"GH_CONFIG_DIR=" + filepath.Join(workdir, ".gh"),
-		"GH_PROMPT_DISABLED=1",
 		"LC_ALL=C",
 	}
 	return cmd
 }
 
-func verifySelfUpgradeGHVersion(ctx context.Context, gh, stage string) error {
-	output, err := selfUpgradeCommand(ctx, stage, gh, "--version").Output()
-	if err != nil {
-		return fmt.Errorf("check GitHub CLI version: %w", err)
-	}
-	matches := selfUpgradeGHVersion.FindSubmatch(output)
-	if len(matches) != 0 {
-		major, majorErr := strconv.ParseUint(string(matches[1]), 10, 32)
-		minor, minorErr := strconv.ParseUint(string(matches[2]), 10, 32)
-		if majorErr == nil && minorErr == nil && (major > 2 || (major == 2 && minor >= 102)) {
-			return nil
-		}
-	}
-	return errors.New("tool self-upgrade requires GitHub CLI 2.102.0 or newer")
-}
-
-func verifySelfUpgradeAttestation(ctx context.Context, gh, stage, archive, bundle string) error {
-	cmd := selfUpgradeCommand(ctx, stage, gh, "attestation", "verify", archive,
-		"--bundle", bundle, "--repo", selfUpgradeRepo, "--signer-workflow", selfUpgradeWorkflow,
-		"--source-ref", "refs/heads/master", "--deny-self-hosted-runners")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("verify tool attestation: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func extractSelfUpgradeBinaries(archive string, targets map[string]string) error {
-	file, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	compressed, err := gzip.NewReader(file)
+func extractSelfUpgradeBinaries(archive io.Reader, targets map[string]string) error {
+	compressed, err := gzip.NewReader(archive)
 	if err != nil {
 		return err
 	}
