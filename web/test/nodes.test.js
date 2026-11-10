@@ -21,6 +21,7 @@ const GIB = 1024 ** 3
 const primary = {
   id: 7, name: '边缘节点', remark: '入口', status: 'online', username: 'node-7',
   address: '2001:db8::7', ipv4: '192.0.2.7', ipv6: '2001:db8::7', last_check_at: '2026-11-08T02:00:00Z',
+  additional_ips: ['192.0.2.77', '2001:db8::77'],
   total_bytes: 1536, input_bytes: 512, output_bytes: 1024,
   traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily', traffic_quota_state: 'blocked', traffic_quota_used_bytes: GIB
 }
@@ -29,6 +30,7 @@ const list = (nodes, total = nodes.length) => response({ list: nodes, total })
 const token = (value = 'secret', lifetime = 60_000) => response({ token: value, expires_at: new Date(Date.now() + lifetime).toISOString() })
 const editForm = (view, title) => dialog(view, title).get('form.el-form')
 const quotaInput = '[placeholder="例如 100.5"]'
+const additionalIPsInput = 'textarea#node-additional-ips'
 let wrapper
 let messages
 let router
@@ -77,6 +79,7 @@ describe('node inventory', () => {
     expect(router.currentRoute.value.query.node).toBe('7')
     expect(api.getNode).toHaveBeenCalledWith(primary.id)
     expect(view.get('h1').text()).toBe(primary.name)
+    expect(view.findAll('.detail-endpoints dd').map(entry => entry.text())).toEqual([primary.address])
     expect(view.get('progress').element.max).toBe(primary.traffic_limit_bytes)
     expect(view.get('progress').element.value).toBe(primary.traffic_quota_used_bytes)
     expect(view.find('tbody').exists()).toBe(false)
@@ -130,7 +133,7 @@ describe('node inventory', () => {
     expect(api.getNodeList).toHaveBeenCalledTimes(5)
   })
 
-  it('shows endpoints and quota states and sends the selected status and page', async () => {
+  it('shows primary IPs and quota states and sends the selected status and page', async () => {
     api.getNodeList.mockResolvedValue(list([
       primary,
       { id: 8, name: '待注册', status: 'offline', traffic_quota_state: 'pending' },
@@ -142,7 +145,9 @@ describe('node inventory', () => {
     const view = open()
     await flushPromises()
     const rows = view.findAll('tbody tr').map(row => row.text())
-    expect(rows[0]).toContain('2001:db8::7')
+    expect(view.get('tbody tr td:nth-child(2)').text()).toBe('主 IP' + primary.address)
+    expect(rows[0]).not.toContain(primary.ipv4)
+    for (const ip of primary.additional_ips) expect(rows[0]).not.toContain(ip)
     expect(rows[0]).toContain('1.5 KiB')
     expect(rows[0]).toContain('已达上限')
     expect(rows[0]).toContain('本期用量')
@@ -212,6 +217,7 @@ describe('node registration and quota settings', () => {
     await flushPromises()
     await click(view, '添加节点')
     const form = editForm(view, '添加节点')
+    expect(form.find(additionalIPsInput).exists()).toBe(false)
     const name = form.get('[placeholder="例如 华东入口"]')
     await name.setValue(newNode.name)
     for (const invalid of ['1e2', '.00000000001', '999999999999']) {
@@ -267,6 +273,48 @@ describe('node registration and quota settings', () => {
     })
     expect(api.issueNodeRegistrationToken).not.toHaveBeenCalled()
     expect(dialog(view, '安装节点 · 边缘节点-copy').get('[role="alert"]').text()).toContain('无法读取面板注册地址')
+  })
+
+  it('edits and clears additional IPs and shows validation errors beside the input', async () => {
+    const message = '附加 IP 无效，请输入 IPv4 或 IPv6 地址'
+    const additionalIPs = ['198.51.100.9', '2001:db8::9']
+    const updated = { ...primary, additional_ips: additionalIPs }
+    api.updateNode.mockRejectedValueOnce({ response: { data: { code: 10008, message } } })
+      .mockImplementationOnce(async () => {
+        api.getNode.mockResolvedValue(response(updated))
+        return response(updated)
+      })
+      .mockResolvedValueOnce(response({ ...primary, additional_ips: [] }))
+    const view = open()
+    await flushPromises()
+    await openDetail(view)
+    await click(view, '编辑节点')
+    const edit = dialog(view, '编辑节点')
+    const field = edit.get(additionalIPsInput)
+    expect(edit.get('label[for="node-additional-ips"]').text()).toBe('附加 IP')
+    expect(field.element.value).toBe(primary.additional_ips.join('\n'))
+    await field.setValue('invalid.example')
+    await click(edit, '保存更改')
+    expect(field.element.value).toBe('invalid.example')
+    expect(field.attributes('aria-invalid')).toBe('true')
+    expect(field.attributes('aria-describedby')).toContain('node-additional-ips-error')
+    await vi.waitFor(() => expect(edit.get('#node-additional-ips-error').text()).toBe(message))
+
+    await field.setValue(' 198.51.100.9 \n\n2001:db8::9 ')
+    expect(field.attributes('aria-invalid')).toBe('false')
+    await click(edit, '保存更改')
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
+      name: primary.name, remark: primary.remark, additional_ips: additionalIPs
+    })
+
+    await click(view, '编辑节点')
+    const reopened = dialog(view, '编辑节点')
+    expect(reopened.get(additionalIPsInput).element.value).toBe(additionalIPs.join('\n'))
+    await reopened.get(additionalIPsInput).setValue('')
+    await click(reopened, '保存更改')
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
+      name: primary.name, remark: primary.remark, additional_ips: []
+    })
   })
 
   it('uses the configured address to generate, retry, copy and expire a registration command', async () => {

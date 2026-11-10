@@ -18,9 +18,9 @@
     <section class="overview-section" aria-labelledby="node-network-title">
       <h2 id="node-network-title"><el-icon aria-hidden="true"><Connection /></el-icon>网络与连接信息</h2>
       <dl class="detail-endpoints">
-        <div v-for="item in endpoints" :key="item.label">
-          <dt>{{ item.label }}</dt>
-          <dd class="ops-mono">{{ item.value }}</dd>
+        <div>
+          <dt>主 IP</dt>
+          <dd class="ops-mono">{{ node.address || '待获取地址' }}</dd>
         </div>
       </dl>
       <dl class="detail-check">
@@ -82,7 +82,7 @@
   <div class="detail-admin">
     <section class="ops-panel admin-card" aria-labelledby="node-admin-title">
       <h2 id="node-admin-title"><el-icon aria-hidden="true"><Setting /></el-icon>节点管理</h2>
-      <p class="ops-muted">修改名称、备注或流量配额，也可用这些设置创建新节点。</p>
+      <p class="ops-muted">编辑节点名称、附加 IP、备注和流量配额，也可复制节点的基本设置。</p>
       <div class="detail-buttons">
         <el-button :icon="Edit" @click="$emit('action', 'edit')">编辑节点</el-button>
         <el-button :icon="CopyDocument" @click="$emit('action', 'copy')">复制节点</el-button>
@@ -111,11 +111,6 @@ const actions = [
   { key: 'upgrade', title: '版本与升级', description: '检查稳定版本并管理自动升级', icon: Download },
   { key: 'nft', title: 'nft 配置', description: '编辑并应用 nftables 规则', icon: Lock }
 ]
-const endpoints = computed(() => [
-  { label: '节点 IP', value: props.node.address || '待获取地址' },
-  { label: 'IPv4', value: props.node.ipv4 || '未上报' },
-  { label: 'IPv6', value: props.node.ipv6 || '未上报' }
-])
 const hasQuota = computed(() => props.node.traffic_limit_bytes > 0)
 const quotaSynced = computed(() => ['active', 'blocked'].includes(props.node.traffic_quota_state))
 const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_state] || trafficQuotaStates.pending)

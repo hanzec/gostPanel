@@ -15,10 +15,11 @@ type CreateNodeReq struct {
 
 // UpdateNodeReq 更新节点请求
 type UpdateNodeReq struct {
-	Name               string  `json:"name" binding:"required,min=1,max=100"` // 节点名称
-	Remark             string  `json:"remark"`                                // 备注
-	TrafficLimitBytes  *int64  `json:"traffic_limit_bytes" binding:"omitempty,gte=0,lte=9007199254740991"`
-	TrafficResetPeriod *string `json:"traffic_reset_period" binding:"omitempty,oneof=none daily weekly monthly"`
+	Name               string   `json:"name" binding:"required,min=1,max=100"` // 节点名称
+	Remark             string   `json:"remark"`                                // 备注
+	TrafficLimitBytes  *int64   `json:"traffic_limit_bytes" binding:"omitempty,gte=0,lte=9007199254740991"`
+	TrafficResetPeriod *string  `json:"traffic_reset_period" binding:"omitempty,oneof=none daily weekly monthly"`
+	AdditionalIPs      []string `json:"additional_ips"`
 }
 
 type NodeRegistrationToken struct {

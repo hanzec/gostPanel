@@ -9,6 +9,9 @@ import (
 	"encoding/hex"
 	stderrors "errors"
 	"fmt"
+	"net/http"
+	"net/netip"
+	"strings"
 	"time"
 
 	"yagp/internal/dto"
@@ -91,6 +94,11 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 // Update 更新节点
 // 更新前会检查节点是否存在以及新名称是否与其他节点冲突
 func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, userAgent string) (*model.GostNode, error) {
+	additionalIPs, err := normalizeAdditionalIPs(req.AdditionalIPs)
+	if err != nil {
+		return nil, err
+	}
+
 	// 查询节点
 	node, err := s.nodeRepo.FindByID(id)
 	if err != nil {
@@ -113,7 +121,7 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 	node.Name = req.Name
 	node.Remark = req.Remark
 
-	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod); err != nil {
+	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod, additionalIPs); err != nil {
 		return nil, err
 	}
 
@@ -128,6 +136,30 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 		userAgent)
 
 	return node, nil
+}
+
+func normalizeAdditionalIPs(values []string) ([]string, error) {
+	if values == nil {
+		return nil, nil
+	}
+	addresses := make([]string, 0, len(values))
+	seen := make(map[netip.Addr]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		addr, err := netip.ParseAddr(value)
+		if err != nil || addr.Zone() != "" || !(addr.IsGlobalUnicast() || addr.IsLoopback()) {
+			return nil, errors.New(10008, fmt.Sprintf("附加 IP %q 无效，请输入有效的 IPv4 或 IPv6 地址", value), http.StatusBadRequest)
+		}
+		addr = addr.Unmap()
+		if !seen[addr] {
+			addresses = append(addresses, addr.String())
+			seen[addr] = true
+		}
+	}
+	return addresses, nil
 }
 
 func (s *NodeService) IssueRegistrationToken(ctx context.Context, id uint, username, ip, userAgent string) (*dto.NodeRegistrationToken, error) {

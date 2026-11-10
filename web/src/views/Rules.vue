@@ -417,6 +417,9 @@ const listenAddressOptions = computed(() => {
   for (const ip of [entry?.ipv4, entry?.ipv6]) {
     if (ip && !options.has(ip)) options.set(ip, '入口探测地址 · ' + ip)
   }
+  for (const ip of entry?.additional_ips ?? []) {
+    if (!options.has(ip)) options.set(ip, '节点附加地址 · ' + ip)
+  }
   if (form.listen_ip && !options.has(form.listen_ip)) options.set(form.listen_ip, '自定义地址 · ' + form.listen_ip)
   return options
 })
