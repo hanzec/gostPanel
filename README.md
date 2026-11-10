@@ -131,7 +131,9 @@ sudo /usr/local/sbin/yagp-depoly install-upgrade --traefik traefik-public
 
 在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET` 和 `UPGRADE_WEBHOOK_TOKEN`。工具升级任务会在仓库级 `DEPLOY_WEBHOOK_URL` 后补上 `/deploy-tool`。若已配置独立的 `UPGRADE_WEBHOOK_URL`，工具升级优先使用它。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。
 
-在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务优先从 Release 缓存查询最新版本和下载附件，失败时回退到 GitHub。只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
+将仓库级 Actions Variable `YAGP_TOOL_AUTO_UPGRADE` 设为 `true`。推送或合并到 `master` 后，工作流会在 Release 发布成功、面板部署请求受理后等待 60 秒，为 Release 缓存留出更新时间。若面板自动部署已关闭，工作流在 Release 发布成功后开始等待。随后工作流确认 `master` 仍指向本次提交，再发送工具升级请求。
+
+也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务优先从 Release 缓存查询最新版本和下载附件，失败时回退到 GitHub。只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
 
 **方式 B · Linux 二进制部署**
 
