@@ -590,7 +590,8 @@ func (s *RuleService) buildAndStartService(client *gost.Client, node *model.Gost
 	rule.ServiceID = serviceName
 	selected := rule.Type == model.RuleTypeForward && chainID != ""
 	if err := client.SaveConfig(); err != nil && selected {
-		_ = s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusError)
+		// Retain the live listener identity if rollback also fails and cleanup is retried after reload.
+		_ = s.ruleRepo.UpdateRuntime(rule.ID, serviceName, model.RuleStatusError)
 		return errors.ErrRuleStartFailed
 	}
 	if err := s.ruleRepo.UpdateRuntime(rule.ID, serviceName, model.RuleStatusRunning); err != nil {
