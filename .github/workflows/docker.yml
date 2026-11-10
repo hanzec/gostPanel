@@ -6,6 +6,9 @@ on:
       version:
         required: true
         type: string
+    outputs:
+      digest:
+        value: ${{ jobs.build-and-push.outputs.digest }}
 
 env:
   REGISTRY: ghcr.io
@@ -14,6 +17,8 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     permissions:
       contents: read
       packages: write

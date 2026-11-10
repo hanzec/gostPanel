@@ -66,6 +66,8 @@ release: build-web
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-daemon-linux-arm64 ./cmd/yagp-daemon
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags libsystemd -ldflags="$(LDFLAGS)" -o yagp-daemon-systemd-linux-amd64 ./cmd/yagp-daemon
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags libsystemd -ldflags="$(LDFLAGS)" -o yagp-daemon-systemd-linux-arm64 ./cmd/yagp-daemon
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o yagp-depoly-linux-amd64 ./cmd/yagp-depoly
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o yagp-depoly-linux-arm64 ./cmd/yagp-depoly
 	@echo "Release build complete"
 
 # 清理构建产物
