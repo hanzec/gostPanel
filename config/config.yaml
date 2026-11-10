@@ -1,4 +1,4 @@
-host: ""  # 面板对外的域名或 IP。Compose 也可使用 .env 中的 YAGP_HOST。
+host: ""  # 面板对外的域名或 IP。Compose 可通过 .env 中的 YAGP_PUBLIC_HOST 配置。
 
 server:
   port: ":39100"

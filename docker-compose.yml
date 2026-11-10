@@ -21,14 +21,14 @@ services:
     environment:
       - GIN_MODE=release
       - TZ=Asia/Shanghai
-      - YAGP_HOST=${YAGP_HOST:?Set YAGP_HOST}
+      - YAGP_HOST=${YAGP_PUBLIC_HOST:-${YAGP_HOST:?Set YAGP_PUBLIC_HOST}}
       - YAGP_DATABASE_TYPE
       - YAGP_DATABASE_DSN
     labels:
       traefik.enable: "true"
-      traefik.docker.network: ${TRAEFIK_NETWORK:-traefik}
-      traefik.http.routers.yagp.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`)"
-      traefik.http.routers.yagp.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.docker.network: ${TRAEFIK_PUBLIC_NETWORK:-${TRAEFIK_NETWORK:-traefik}}
+      traefik.http.routers.yagp.rule: "Host(`${YAGP_PUBLIC_HOST:-${YAGP_HOST:?Set YAGP_PUBLIC_HOST}}`)"
+      traefik.http.routers.yagp.entrypoints: ${TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT:-${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}}
       traefik.http.routers.yagp.tls: "true"
       traefik.http.routers.yagp.priority: "10"
       traefik.http.routers.yagp.service: yagp
@@ -37,14 +37,14 @@ services:
       traefik.http.middlewares.yagp-authentik.forwardauth.address: ${AUTHENTIK_OUTPOST_URL:?Set AUTHENTIK_OUTPOST_URL}/outpost.goauthentik.io/auth/traefik
       traefik.http.middlewares.yagp-authentik.forwardauth.trustforwardheader: "true"
       traefik.http.middlewares.yagp-authentik.forwardauth.authresponseheaders: X-Authentik-Username,X-Authentik-Groups
-      traefik.http.routers.yagp-favicon.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Path(`/favicon.svg`) && (Method(`GET`) || Method(`HEAD`))"
-      traefik.http.routers.yagp-favicon.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-favicon.rule: "Host(`${YAGP_PUBLIC_HOST:-${YAGP_HOST:?Set YAGP_PUBLIC_HOST}}`) && Path(`/favicon.svg`) && (Method(`GET`) || Method(`HEAD`))"
+      traefik.http.routers.yagp-favicon.entrypoints: ${TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT:-${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}}
       traefik.http.routers.yagp-favicon.tls: "true"
       traefik.http.routers.yagp-favicon.priority: "20"
       traefik.http.routers.yagp-favicon.service: yagp
       # Node routes authenticate on the report listener and bypass Authentik.
-      traefik.http.routers.yagp-node-register.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/node/v2/register`)"
-      traefik.http.routers.yagp-node-register.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-node-register.rule: "Host(`${YAGP_PUBLIC_HOST:-${YAGP_HOST:?Set YAGP_PUBLIC_HOST}}`) && Method(`POST`) && Path(`/api/node/v2/register`)"
+      traefik.http.routers.yagp-node-register.entrypoints: ${TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT:-${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}}
       traefik.http.routers.yagp-node-register.tls: "true"
       traefik.http.routers.yagp-node-register.priority: "50"
       traefik.http.routers.yagp-node-register.service: yagp-node
@@ -54,8 +54,8 @@ services:
       traefik.http.middlewares.yagp-node-register-limit.ratelimit.burst: "5"
       # Traefik replaces X-Real-IP from untrusted peers before this middleware runs.
       traefik.http.middlewares.yagp-node-register-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
-      traefik.http.routers.yagp-node-refresh.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`POST`) && Path(`/api/node/v2/refresh`)"
-      traefik.http.routers.yagp-node-refresh.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-node-refresh.rule: "Host(`${YAGP_PUBLIC_HOST:-${YAGP_HOST:?Set YAGP_PUBLIC_HOST}}`) && Method(`POST`) && Path(`/api/node/v2/refresh`)"
+      traefik.http.routers.yagp-node-refresh.entrypoints: ${TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT:-${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}}
       traefik.http.routers.yagp-node-refresh.tls: "true"
       traefik.http.routers.yagp-node-refresh.priority: "50"
       traefik.http.routers.yagp-node-refresh.service: yagp-node
@@ -65,8 +65,8 @@ services:
       traefik.http.middlewares.yagp-node-refresh-limit.ratelimit.burst: ${YAGP_REFRESH_RATE_BURST:-30}
       traefik.http.middlewares.yagp-node-refresh-limit.ratelimit.sourcecriterion.requestheadername: X-Real-IP
       # Count the WebSocket handshake once, regardless of session length.
-      traefik.http.routers.yagp-node-session.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && Method(`GET`) && Path(`/api/node/v2/session`)"
-      traefik.http.routers.yagp-node-session.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-node-session.rule: "Host(`${YAGP_PUBLIC_HOST:-${YAGP_HOST:?Set YAGP_PUBLIC_HOST}}`) && Method(`GET`) && Path(`/api/node/v2/session`)"
+      traefik.http.routers.yagp-node-session.entrypoints: ${TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT:-${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}}
       traefik.http.routers.yagp-node-session.tls: "true"
       traefik.http.routers.yagp-node-session.priority: "50"
       traefik.http.routers.yagp-node-session.service: yagp-node
@@ -78,8 +78,8 @@ services:
       traefik.http.services.yagp-node.loadbalancer.server.port: "39101"
       traefik.http.services.yagp-node.loadbalancer.server.scheme: http
       # Route login and callback requests directly to the outpost to avoid an auth loop.
-      traefik.http.routers.yagp-outpost.rule: "Host(`${YAGP_HOST:?Set YAGP_HOST}`) && PathPrefix(`/outpost.goauthentik.io/`)"
-      traefik.http.routers.yagp-outpost.entrypoints: ${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}
+      traefik.http.routers.yagp-outpost.rule: "Host(`${YAGP_PUBLIC_HOST:-${YAGP_HOST:?Set YAGP_PUBLIC_HOST}}`) && PathPrefix(`/outpost.goauthentik.io/`)"
+      traefik.http.routers.yagp-outpost.entrypoints: ${TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT:-${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}}
       traefik.http.routers.yagp-outpost.tls: "true"
       traefik.http.routers.yagp-outpost.priority: "100"
       traefik.http.routers.yagp-outpost.service: yagp-outpost
@@ -118,4 +118,4 @@ services:
 networks:
   proxy:
     external: true
-    name: ${TRAEFIK_NETWORK:-traefik}
+    name: ${TRAEFIK_PUBLIC_NETWORK:-${TRAEFIK_NETWORK:-traefik}}

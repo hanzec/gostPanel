@@ -338,18 +338,37 @@ show_credentials() {
 }
 
 inspect_traefik() {
-    local project_dir=$1 project=$2 proxy_container=$3 hostname metadata entrypoint network gateway proxy_ip
+    local project_dir=$1 project=$2 proxy_container=$3 settings name value metadata gateway proxy_ip
+    local hostname='' public_host='' entrypoint='' network='' legacy_entrypoint=''
+    local label_entrypoint label_network
     local host_pattern='^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$'
-    hostname=$(compose "$project_dir" "$project" config --environment | awk 'sub(/^YAGP_HOST=/, "")') ||
-        fail "无法读取 $project_dir/.env 中的 YAGP_HOST。"
+    settings=$(compose "$project_dir" "$project" config --environment |
+        awk '/^(YAGP_(PUBLIC_)?HOST|TRAEFIK_(PUBLIC_)?HTTPS_ENTRYPOINT|TRAEFIK_PUBLIC_NETWORK)=/') ||
+        fail "无法读取 $project_dir/.env 中的 Compose 变量。"
+    while IFS='=' read -r name value; do
+        case $name in
+            YAGP_PUBLIC_HOST) public_host=$value ;;
+            YAGP_HOST) hostname=$value ;;
+            TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT) entrypoint=$value ;;
+            TRAEFIK_HTTPS_ENTRYPOINT) legacy_entrypoint=$value ;;
+            TRAEFIK_PUBLIC_NETWORK) network=$value ;;
+        esac
+    done <<< "$settings"
+    hostname=${public_host:-$hostname}
     [[ $hostname =~ $host_pattern && ${#hostname} -le 253 ]] ||
-        fail "$project_dir/.env 的 YAGP_HOST 须为有效域名，不能包含协议、端口或路径。"
-    metadata=$(docker_local inspect --type container --format \
-        '{{index .Config.Labels "traefik.http.routers.yagp.entrypoints"}}|{{index .Config.Labels "traefik.docker.network"}}' yagp) ||
-        fail '无法读取 yagp 容器的 Traefik 配置。'
-    IFS='|' read -r entrypoint network <<< "$metadata"
-    [[ $entrypoint =~ ^[A-Za-z0-9_-]+$ && $network =~ ^[A-Za-z0-9_.-]+$ ]] ||
-        fail '无法识别当前 yagp 的 Traefik HTTPS 入口和 Docker 网络。'
+        fail "$project_dir/.env 的 YAGP_PUBLIC_HOST 须为有效域名，不能包含协议、端口或路径。"
+    if [[ -z $entrypoint || -z $network ]]; then
+        metadata=$(docker_local inspect --type container --format \
+            '{{index .Config.Labels "traefik.http.routers.yagp.entrypoints"}}|{{index .Config.Labels "traefik.docker.network"}}' yagp) ||
+            fail '无法读取 yagp 容器的 Traefik 配置。'
+        IFS='|' read -r label_entrypoint label_network <<< "$metadata"
+        entrypoint=${entrypoint:-${label_entrypoint:-$legacy_entrypoint}}
+        network=${network:-$label_network}
+    fi
+    [[ $entrypoint =~ ^[A-Za-z0-9_-]+$ ]] ||
+        fail "无法识别 Traefik 的公网 HTTPS 入口。请在 $project_dir/.env 中将 TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT 设为实际的 HTTPS 入口名。"
+    [[ $network =~ ^[A-Za-z0-9_.-]+$ ]] ||
+        fail "无法识别 Traefik 的公网 Docker 网络。请在 $project_dir/.env 中设置 TRAEFIK_PUBLIC_NETWORK。"
     gateway=$(docker_local network inspect --format \
         '{{if eq .Driver "bridge"}}{{range .IPAM.Config}}{{println .Gateway}}{{end}}{{end}}' -- "$network" |
         awk '/^[0-9]+\./ && !found {print; found=1}') ||
