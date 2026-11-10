@@ -279,6 +279,7 @@ func (r *NodeRepository) UpdateStats(id uint, inputBytes, outputBytes int64) err
 			"output_bytes": gorm.Expr("output_bytes + ?", outputBytes),
 			"total_bytes":  gorm.Expr("total_bytes + ?", inputBytes+outputBytes),
 		})
+	// A zero delta may be a MySQL no-op rather than a rejected increment.
 	if result.Error == nil && result.RowsAffected == 0 && (inputBytes != 0 || outputBytes != 0) {
 		return ErrTrafficCounterOverflow
 	}

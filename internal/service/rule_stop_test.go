@@ -2,12 +2,65 @@ package service
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"yagp/internal/dto"
 	bizerrors "yagp/internal/errors"
 	"yagp/internal/model"
 )
+
+func TestRuleRemovalRetriesAfterRuntimePersistenceFailure(t *testing.T) {
+	for _, operation := range []string{"stop", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			db := newServiceTestDB(t)
+			loadServiceConfig(t, "report:\n  listen: 127.0.0.1:39001\n")
+			remote := &lifecycleNode{t: t}
+			node := startServiceTestNode(t, remote)
+			saveServiceFixtures(t, db, &node)
+			service := NewRuleService(db)
+			rule, err := service.Create(&dto.CreateRuleReq{
+				NodeID: &node.ID, Name: "persisted listener", Protocol: "tcp", ListenPort: 8080, Targets: []string{"target.test:443"},
+			}, testAdmin, testIP, testAgent)
+			requireServiceError(t, err, nil)
+			requireServiceError(t, service.Start(rule.ID, testAdmin, testIP, testAgent), nil)
+			rule, err = service.GetByID(rule.ID)
+			requireServiceError(t, err, nil)
+			// Fail the real database write after the remote listener has been removed.
+			requireServiceError(t, db.Exec(`CREATE TRIGGER reject_runtime_stop
+				BEFORE UPDATE OF status, service_id ON rules WHEN NEW.status = 'stopped'
+				BEGIN SELECT RAISE(ABORT, 'runtime persistence unavailable'); END`).Error, nil)
+			remove := service.Stop
+			if operation == "delete" {
+				remove = service.Delete
+			}
+			if err := remove(rule.ID, testAdmin, testIP, testAgent); err == nil || !strings.Contains(err.Error(), "runtime persistence unavailable") {
+				t.Fatalf("runtime write failure = %v", err)
+			}
+			stored, err := service.GetByID(rule.ID)
+			requireServiceError(t, err, nil)
+			if stored.ServiceID != rule.ServiceID || stored.Status != model.RuleStatusRunning || remote.service(rule.ServiceID).Name != "" {
+				t.Fatalf("failed persistence lost the retry identity: %+v", stored)
+			}
+			var audits int64
+			requireServiceError(t, db.Model(&model.OperationLog{}).Where("action IN ?", []string{model.ActionStop, model.ActionDelete}).Count(&audits).Error, nil)
+			if audits != 0 {
+				t.Fatal("failed persistence emitted a success audit")
+			}
+			requireServiceError(t, db.Exec("DROP TRIGGER reject_runtime_stop").Error, nil)
+			requireServiceError(t, remove(rule.ID, testAdmin, testIP, testAgent), nil)
+			stored, err = service.GetByID(rule.ID)
+			if operation == "delete" {
+				requireServiceError(t, err, bizerrors.ErrRuleNotFound)
+				return
+			}
+			requireServiceError(t, err, nil)
+			if stored.ServiceID != "" || stored.Status != model.RuleStatusStopped {
+				t.Fatalf("retry did not persist the confirmed stop: %+v", stored)
+			}
+		})
+	}
+}
 
 func TestRuleRemovalRetainsUnconfirmedRuntime(t *testing.T) {
 	for _, state := range []model.RuleStatus{model.RuleStatusRunning, model.RuleStatusError, model.RuleStatusStopped} {

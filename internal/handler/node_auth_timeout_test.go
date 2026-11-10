@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,18 @@ func TestNodeAuthBodiesTimeOutWithoutExpiringSession(t *testing.T) {
 	mux.HandleFunc("POST "+nodegrpc.RefreshPath, f.handler.RefreshHTTP)
 	server := httptest.NewServer(mux)
 	defer server.Close()
+	transport := &http.Transport{MaxIdleConnsPerHost: 1}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 2 * time.Second}
+	var reused []httptrace.GotConnInfo
+	refreshContext := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) {
+		reused = append(reused, info)
+	}})
+	refresh := &nodegrpc.RefreshNodeRequest{NodeId: reply.NodeId, RefreshToken: reply.Credentials.RefreshToken, RequestId: "before-body-timeout"}
+	credentials := &nodegrpc.NodeCredentials{}
+	if err := nodegrpc.PostProtobuf(refreshContext, client, server.URL+nodegrpc.RefreshPath, refresh, credentials); err != nil {
+		t.Fatal(err)
+	}
 	var connections []net.Conn
 	cases := []struct {
 		path, contentType string
@@ -77,4 +90,17 @@ func TestNodeAuthBodiesTimeOutWithoutExpiringSession(t *testing.T) {
 	if _, err := session.Report(ctx, request); err != nil {
 		t.Fatalf("authentication body deadline expired an active WebSocket: %v", err)
 	}
+	// Successful authentication must leave a reusable connection after the body deadline passes.
+	refresh.RefreshToken, refresh.RequestId = credentials.RefreshToken, "after-body-timeout"
+	if err := nodegrpc.PostProtobuf(refreshContext, client, server.URL+nodegrpc.RefreshPath, refresh, credentials); err != nil {
+		t.Fatalf("normal refresh after slow requests timed out: %v", err)
+	}
+	if len(reused) != 2 || !reused[1].Reused || reused[0].Conn != reused[1].Conn {
+		t.Fatal("successful refresh lost its HTTP keep-alive connection")
+	}
+	stream, err := f.dial(ctx, reply.NodeId, credentials.AccessToken)
+	if err != nil {
+		t.Fatalf("refreshed credentials failed to authenticate a new session: %v", err)
+	}
+	stream.Close()
 }

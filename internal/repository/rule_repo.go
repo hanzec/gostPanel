@@ -198,6 +198,7 @@ func (r *RuleRepository) UpdateTrafficSample(id uint, delta, observed model.Obse
 			"observer_output_bytes": observed.OutputBytes,
 			"observer_connections":  observed.Connections,
 		})
+	// MySQL can report zero changed rows for an unchanged snapshot; only a positive delta can overflow.
 	if result.Error == nil && result.RowsAffected == 0 && (delta.InputBytes != 0 || delta.OutputBytes != 0 || delta.Connections != 0) {
 		return ErrTrafficCounterOverflow
 	}

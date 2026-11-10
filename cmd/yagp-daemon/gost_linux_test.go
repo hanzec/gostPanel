@@ -1,6 +1,9 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +22,77 @@ import (
 )
 
 const gostFixtureReleasePath = "/https://api.github.com/repos/go-gost/gost/releases/latest"
+
+func TestDownloadGostPreservesInstalledBinaryOnVerificationOrExtractionFailure(t *testing.T) {
+	var incomplete bytes.Buffer
+	compressed := gzip.NewWriter(&incomplete)
+	archive := tar.NewWriter(compressed)
+	if err := archive.WriteHeader(&tar.Header{Name: "gost", Size: 20, Mode: 0700}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(archive, "partial binary"); err != nil {
+		t.Fatal(err)
+	}
+	// A complete gzip stream can still contain a truncated tar entry.
+	if err := compressed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	trustedArchive := gostTestArchive(t, "gost")
+	tamperedArchive := bytes.Clone(trustedArchive)
+	tamperedArchive[len(tamperedArchive)-1] ^= 0xff
+	for _, test := range []struct {
+		name, wantError string
+		body            []byte
+		metadataFailure bool
+	}{
+		{name: "unavailable trusted metadata", metadataFailure: true, wantError: "HTTP 503"},
+		{name: "archive digest mismatch", body: tamperedArchive, wantError: "SHA-256 or size does not match"},
+		{name: "verified archive with truncated executable", body: incomplete.Bytes(), wantError: "unexpected EOF"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Host == "api.github.com" && req.URL.Path == "/repos/go-gost/gost/releases/tags/v3.3.3" {
+					if test.metadataFailure {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					metadata := test.body
+					if test.name == "archive digest mismatch" {
+						metadata = trustedArchive
+					}
+					writeGostReleaseMetadata(w, metadata)
+					return
+				}
+				wantPath := "/https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz"
+				if test.metadataFailure || req.Host != "proxy.test" || req.URL.Path != wantPath {
+					t.Errorf("unexpected download request: %s%s", req.Host, req.URL.Path)
+					http.NotFound(w, req)
+					return
+				}
+				_, _ = w.Write(test.body)
+			}))
+			t.Cleanup(server.Close)
+			routeGostDownloads(t, server)
+			t.Setenv("YAGP_GOST_VERSION", "v3.3.3")
+			output := filepath.Join(t.TempDir(), "gost")
+			if err := os.WriteFile(output, []byte("installed working Gost"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := downloadGost(t.Context(), output, false); err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("failed Gost download = %v, want %q", err, test.wantError)
+			}
+			if body, err := os.ReadFile(output); err != nil || string(body) != "installed working Gost" {
+				t.Fatalf("failed update replaced installed binary: %q, %v", body, err)
+			}
+			if info, err := os.Stat(output); err != nil || info.Mode().Perm() != 0700 {
+				t.Fatalf("failed update changed installed permissions: %v, %v", info, err)
+			}
+			if leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(output), ".gost-*")); err != nil || len(leftovers) != 0 {
+				t.Fatalf("failed update left temporary files: %v, %v", leftovers, err)
+			}
+		})
+	}
+}
 
 func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 	wantPath := "/https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz"

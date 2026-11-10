@@ -504,6 +504,8 @@ func (s *RuleService) stopSelectedEntrance(rule *model.GostRule) error {
 			return err
 		}
 	}
+	// Retain the service ID until the node config and local state are both saved;
+	// a database write failure must leave enough information to retry the stop.
 	if err := s.ruleRepo.UpdateRuntime(rule.ID, "", model.RuleStatusStopped); err != nil {
 		return err
 	}

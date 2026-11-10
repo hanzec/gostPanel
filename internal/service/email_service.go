@@ -37,7 +37,7 @@ func (s *SystemConfigService) SendTestEmail(req *dto.EmailConfigReq) error {
 	// 如果端口是 587，通常使用 STARTTLS
 
 	if req.Port == 465 {
-		// SMTPS 需自定义 dialer
+		// 隐式 TLS 在发送 AUTH 前使用系统信任根校验证书链和 SMTP 主机名。
 		tlsConfig := &tls.Config{
 			MinVersion: tls.VersionTLS12,
 			ServerName: req.Host,

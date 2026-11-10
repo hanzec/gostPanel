@@ -204,11 +204,21 @@ describe('System settings', () => {
     await flushPromises()
     expect(api.sendTestEmail).not.toHaveBeenCalled()
 
+    // Empty email inputs pass native type validation; Element Plus must focus its required-field error.
+    await email.setValue('')
+    await button(wrapper, '发送').trigger('click')
+    await vi.waitFor(() => {
+      expect(wrapper.get('#settings-test-email .el-form-item__error').text()).toBe('请输入收件人邮箱')
+      expect(document.activeElement).toBe(email.element)
+    })
+    expect(api.sendTestEmail).not.toHaveBeenCalled()
+
     const sending = deferred()
     api.sendTestEmail.mockReturnValueOnce(sending.promise).mockResolvedValue({ data: {} })
     await email.setValue('admin@example.test')
     await wrapper.get('#settings-test-email').trigger('submit')
     await flushPromises()
+    await vi.waitFor(() => expect(wrapper.find('#settings-test-email .el-form-item__error').exists()).toBe(false))
     await wrapper.get('#settings-test-email').trigger('submit')
     expect(api.sendTestEmail).toHaveBeenCalledExactlyOnceWith({
       ...settings.email,

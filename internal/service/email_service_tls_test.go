@@ -2,14 +2,20 @@ package service
 
 import (
 	"bufio"
+	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +23,110 @@ import (
 	"yagp/internal/dto"
 	bizerrors "yagp/internal/errors"
 )
+
+func TestSendTestEmailVerifiesSMTPSCertificate(t *testing.T) {
+	const childProcess = "YAGP_TEST_SMTP_TRUSTED_ROOTS"
+	if os.Getenv(childProcess) != "1" {
+		// Go's fallback root pool is process-wide and cannot be reset after a test.
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+		defer cancel()
+		child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSendTestEmailVerifiesSMTPSCertificate$", "-test.v")
+		child.Env = append(os.Environ(), childProcess+"=1", "GODEBUG="+os.Getenv("GODEBUG")+",x509usefallbackroots=1")
+		if coverage := flag.Lookup("test.gocoverdir"); coverage != nil && coverage.Value.String() != "" {
+			child.Args = append(child.Args, "-test.gocoverdir="+coverage.Value.String())
+		}
+		output, err := child.CombinedOutput()
+		if err != nil {
+			t.Fatalf("SMTPS certificate integration: %v\n%s", err, output)
+		}
+		if strings.Contains(string(output), "--- SKIP:") {
+			t.Skipf("SMTPS integration unavailable:\n%s", output)
+		}
+		return
+	}
+
+	certificate := httptest.NewTLSServer(http.NotFoundHandler())
+	defer certificate.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(certificate.Certificate())
+	x509.SetFallbackRoots(roots)
+	key := certificate.TLS.Certificates[0].PrivateKey
+	wrongHost, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
+		SerialNumber: big.NewInt(2), DNSNames: []string{"smtp.example.test"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}, certificate.Certificate(), certificate.Certificate().PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongHostCertificate, err := x509.ParseCertificate(wrongHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wrongHostCertificate.Verify(x509.VerifyOptions{Roots: roots, DNSName: "smtp.example.test"}); err != nil {
+		t.Fatalf("wrong-host fixture must have a trusted certificate chain: %v", err)
+	}
+	for _, test := range []struct {
+		name, recipient        string
+		wrongHost, oldProtocol bool
+	}{
+		{name: "trusted delivery", recipient: "recipient@example.test"},
+		{name: "recipient defaults to sender"},
+		{name: "trusted certificate for another host", wrongHost: true},
+		{name: "TLS before 1.2", oldProtocol: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := certificate.TLS.Clone()
+			if test.wrongHost {
+				config.Certificates = []tls.Certificate{{Certificate: [][]byte{wrongHost}, PrivateKey: key}}
+			}
+			if test.oldProtocol {
+				config.MinVersion, config.MaxVersion = tls.VersionTLS10, tls.VersionTLS11
+			}
+			listener, err := tls.Listen("tcp4", "127.0.0.1:465", config)
+			if err != nil {
+				t.Skipf("SMTPS integration test requires an available local port 465: %v", err)
+			}
+			defer listener.Close()
+			result := make(chan error, 1)
+			recipient := test.recipient
+			if recipient == "" {
+				recipient = "sender@example.test"
+			}
+			if test.wrongHost || test.oldProtocol {
+				go func() {
+					conn, err := listener.Accept()
+					if err != nil {
+						result <- err
+						return
+					}
+					defer conn.Close()
+					_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+					if err := conn.(*tls.Conn).Handshake(); err == nil {
+						_, _ = io.WriteString(conn, "554 unexpected successful TLS handshake\r\n")
+						result <- errors.New("client accepted the rejected TLS configuration")
+						return
+					}
+					result <- nil
+				}()
+			} else {
+				go func() { result <- receiveSMTPSTestMessage(listener, "", false, recipient, "yagp 测试邮件") }()
+			}
+			err = (&SystemConfigService{}).SendTestEmail(&dto.EmailConfigReq{
+				Host: "127.0.0.1", Port: 465, Username: "test-user", Password: "test-password",
+				FromEmail: "sender@example.test", ToEmail: test.recipient,
+			})
+			if test.wrongHost || test.oldProtocol {
+				requireServiceError(t, err, bizerrors.ErrSMTPConnectFailed)
+			} else {
+				requireServiceError(t, err, nil)
+			}
+			if err := <-result; err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestSendTestEmailRejectsUntrustedSMTPS(t *testing.T) {
 	certificate := httptest.NewTLSServer(http.NotFoundHandler())
@@ -80,7 +190,9 @@ func TestSMTPSMessageAndConnectionLifecycle(t *testing.T) {
 			}
 			defer listener.Close()
 			result := make(chan error, 1)
-			go func() { result <- receiveSMTPSTestMessage(listener, test.failure, test.noAuth) }()
+			go func() {
+				result <- receiveSMTPSTestMessage(listener, test.failure, test.noAuth, "recipient@example.test", "test")
+			}()
 			conn, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{RootCAs: roots, ServerName: "127.0.0.1"})
 			if err != nil {
 				t.Fatal(err)
@@ -105,7 +217,7 @@ func TestSMTPSMessageAndConnectionLifecycle(t *testing.T) {
 	}
 }
 
-func receiveSMTPSTestMessage(listener net.Listener, failure string, noAuth bool) error {
+func receiveSMTPSTestMessage(listener net.Listener, failure string, noAuth bool, recipient, subject string) error {
 	conn, err := listener.Accept()
 	if err != nil {
 		return err
@@ -157,6 +269,9 @@ func receiveSMTPSTestMessage(listener net.Listener, failure string, noAuth bool)
 		if err != nil || !strings.HasPrefix(line, step.command) {
 			return fmt.Errorf("SMTP command %q, want %s: %v", line, step.command, err)
 		}
+		if step.command == "RCPT" && line != "RCPT TO:<"+recipient+">\r\n" {
+			return fmt.Errorf("SMTP recipient = %q, want %s", line, recipient)
+		}
 		if failure == step.command {
 			return reject()
 		}
@@ -175,7 +290,7 @@ func receiveSMTPSTestMessage(listener net.Listener, failure string, noAuth bool)
 		}
 		message.WriteString(line)
 	}
-	if !strings.Contains(message.String(), "Subject: test\r\n") {
+	if !strings.Contains(message.String(), "Subject: "+subject+"\r\n") {
 		return fmt.Errorf("unexpected SMTP message: %q", message.String())
 	}
 	if failure == "body" {

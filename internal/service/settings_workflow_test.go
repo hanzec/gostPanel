@@ -123,6 +123,10 @@ func TestBackupCreatesReadableSnapshotAndAppliesRetention(t *testing.T) {
 		requireServiceError(t, os.WriteFile(path, []byte("old file"), 0o600), nil)
 	}
 	synctest.Test(t, func(t *testing.T) {
+		// A process exit during VACUUM may leave an unfinished snapshot. It must
+		// neither suppress today's backup nor count toward published retention.
+		unfinished := filepath.Join("backups", ".gost_panel_"+time.Now().Format("20060102")+"_235959-123.tmp")
+		requireServiceError(t, os.WriteFile(unfinished, []byte("unfinished snapshot"), 0o600), nil)
 		backup := NewBackupService(db)
 		if !backup.Supported() {
 			t.Fatal("SQLite backups should be supported")
@@ -148,8 +152,10 @@ func TestBackupCreatesReadableSnapshotAndAppliesRetention(t *testing.T) {
 		if saved.Name != "saved node" {
 			t.Fatalf("snapshot node name = %q", saved.Name)
 		}
-		if _, err := os.Stat(other); err != nil {
-			t.Fatalf("retention touched manual backup: %v", err)
+		for _, excluded := range []string{other, unfinished} {
+			if _, err := os.Stat(excluded); err != nil {
+				t.Fatalf("retention touched excluded file %s: %v", excluded, err)
+			}
 		}
 		backup.processAutoBackup()
 		sameFiles, err := filepath.Glob(filepath.Join("backups", "gost_panel_*.db"))

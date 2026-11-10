@@ -196,7 +196,7 @@ func (s *BackupService) cleanOldBackups(backupDir string) {
 		return
 	}
 
-	// 按修改时间排序（从新到旧） (按文件名排序即可，因包含时间戳)
+	// 按文件名中的创建时间排序，不使用可能被复制或恢复操作改变的文件修改时间。
 	sort.Slice(backupFiles, func(i, j int) bool {
 		return backupFiles[i].Name() > backupFiles[j].Name() // 降序，新的在前
 	})

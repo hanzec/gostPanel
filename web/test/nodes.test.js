@@ -127,6 +127,34 @@ describe('node inventory', () => {
     expect(view.get('[role="alert"]').text()).toContain('无法读取节点详情')
   })
 
+  it('keeps stale data on a failed retry, clears it on 404, and resumes polling after recovery', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    await router.push('/nodes?node=7')
+    const view = open()
+    await flushPromises()
+    api.getNode.mockRejectedValueOnce(new Error('poll failed')).mockRejectedValueOnce(new Error('retry failed'))
+    await vi.advanceTimersByTimeAsync(5000)
+    await click(view, '重新加载')
+    expect(view.get('h1').text()).toBe(primary.name)
+    expect(view.get('[role="alert"]').text()).toContain('当前显示上次获取的数据')
+
+    api.getNode.mockRejectedValueOnce({ response: { status: 404 } })
+    await click(view, '重新加载')
+    expect(view.find('h1').exists()).toBe(false)
+    expect(view.get('[role="alert"]').text()).toContain('无法读取节点详情')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getNode).toHaveBeenCalledTimes(4)
+
+    api.getNode.mockResolvedValueOnce(response(offlinePrimary))
+    await click(view, '重新加载')
+    expect(view.find('[role="alert"]').exists()).toBe(false)
+    expect(view.get('h1').text()).toBe(primary.name)
+    expect(view.text()).toContain('离线')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getNode).toHaveBeenCalledTimes(6)
+    expect(view.text()).toContain('在线')
+  })
+
   it('loads, filters, clears an empty search and recovers from a request error', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const pending = deferred()

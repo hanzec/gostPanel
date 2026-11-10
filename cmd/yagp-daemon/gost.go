@@ -169,6 +169,7 @@ func gostReleaseTag(ctx context.Context, client *upgrade.Client) (string, error)
 }
 
 func installGostBinary(path string, download func(io.Writer) error) error {
+	// Stage beside the destination so failed verification never replaces a working binary.
 	file, err := os.CreateTemp(filepath.Dir(path), ".gost-*")
 	if err != nil {
 		return err

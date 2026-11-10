@@ -113,3 +113,48 @@ func TestReportRejectsOverflowAfterCounterRestart(t *testing.T) {
 		t.Fatalf("rule after rejected overflow: %+v, %v", rule, err)
 	}
 }
+
+func TestReportContinuesNormallyAfterRejectedOverflow(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	node := model.GostNode{Name: "reporter", Username: "node", Password: "secret"}
+	if err := f.db.Create(&node).Error; err != nil {
+		t.Fatal(err)
+	}
+	rule := model.GostRule{Name: "forward", Type: model.RuleTypeForward, NodeID: &node.ID, ListenPort: 12001}
+	if err := f.db.Create(&rule).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	reports := startTestReportStream(t, ctx, startTestReportServer(t, f.db), node, nil)
+	request := &nodegrpc.ReportRequest{NodeId: uint64(node.ID), Observation: &observer.ObserveRequest{}}
+	for _, input := range []uint64{10, 1} {
+		request.Observation.Events = []*observer.Event{trafficEvent(rule.ID, input, 0, input)}
+		if _, err := reports.Report(ctx, request); err != nil {
+			t.Fatalf("normal report or counter restart was rejected: %v", err)
+		}
+	}
+	request.Observation.Events = []*observer.Event{trafficEvent(rule.ID, math.MaxInt64, 0, math.MaxInt64)}
+	if _, err := reports.Report(ctx, request); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("cumulative overflow report = %v", err)
+	}
+	// The rejected snapshot must not become the baseline for the next genuine report.
+	request.Observation.Events = []*observer.Event{trafficEvent(rule.ID, 3, 0, 3)}
+	for range 2 {
+		if _, err := reports.Report(ctx, request); err != nil {
+			t.Fatalf("normal report after overflow was rejected: %v", err)
+		}
+	}
+	if err := f.db.First(&rule, rule.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rule.InputBytes != 13 || rule.OutputBytes != 0 || rule.TotalBytes != 13 || rule.TotalRequests != 13 || rule.ObserverCounters != (model.ObserverCounters{InputBytes: 3, Connections: 3}) {
+		t.Fatalf("recovery lost or double-counted rule traffic: %+v", rule)
+	}
+	if err := f.db.First(&node, node.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if node.InputBytes != 13 || node.OutputBytes != 0 || node.TotalBytes != 13 {
+		t.Fatalf("recovery lost or double-counted node traffic: %+v", node)
+	}
+}

@@ -156,6 +156,50 @@ describe('Relay tunnel configuration', () => {
     }))
   })
 
+  it('retains the loaded endpoint pair and blocks saving when a later refresh page fails', async () => {
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await command(row(wrapper, 'Media relay'), 'edit')
+    await button(dialog(wrapper), '取消').trigger('click')
+
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...source, id: index + 1000 }))
+    const secondPage = Promise.withResolvers()
+    getRuleList.mockResolvedValueOnce(result(firstPage, 102)).mockReturnValueOnce(secondPage.promise)
+    await command(row(wrapper, 'Media relay'), 'edit')
+    const editor = dialog(wrapper)
+    const entry = selectField(editor, 'entry_rule_id')
+    const exit = selectField(editor, 'exit_rule_id')
+    expect(entry.props('modelValue')).toBe(mediaSource.id)
+    expect(exit.props('modelValue')).toBe(mediaDestination.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).not.toContain(firstPage[0].id)
+    expect(button(editor, '保存更改').element.disabled).toBe(true)
+
+    secondPage.reject(new Error('second page unavailable'))
+    await flushPromises()
+    expect(editor.get('[role="alert"]').text()).toContain('无法加载入口选项')
+    expect(entry.props('modelValue')).toBe(mediaSource.id)
+    expect(exit.props('modelValue')).toBe(mediaDestination.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).toContain(mediaSource.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).not.toContain(firstPage[0].id)
+    await editor.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateTunnel).not.toHaveBeenCalled()
+
+    getRuleList.mockResolvedValueOnce(result(firstPage, 102)).mockResolvedValueOnce(result([mediaSource, mediaDestination], 102))
+    await button(editor, '重新加载入口').trigger('click')
+    await flushPromises()
+    expect(getRuleList.mock.calls.slice(-2)).toEqual([[{ page: 1, pageSize: 100 }], [{ page: 2, pageSize: 100 }]])
+    expect(editor.find('[role="alert"]').exists()).toBe(false)
+    expect(entry.props('modelValue')).toBe(mediaSource.id)
+    expect(exit.props('modelValue')).toBe(mediaDestination.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).toContain(firstPage[0].id)
+    await button(editor, '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnel).toHaveBeenCalledExactlyOnceWith(udpRelay.id, {
+      name: udpRelay.name, entry_rule_id: mediaSource.id, exit_rule_id: mediaDestination.id, remark: ''
+    })
+  })
+
   it('validates endpoint roles and preserves the selected pair after a failed create', async () => {
     const error = new Error('relay already listening')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})

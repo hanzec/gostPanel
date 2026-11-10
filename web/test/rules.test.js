@@ -111,6 +111,57 @@ describe('forwarding rule inventory', () => {
     }
   })
 
+  it('does not publish partial node options or allow creation when a later node page fails', async () => {
+    const actualNodeAPI = await vi.importActual('@/api/node')
+    getRoutingNodes.mockImplementation(actualNodeAPI.getRoutingNodes)
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => {})
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, name: '节点 ' + (index + 1) }))
+    const lastNode = { id: 101, name: '第二页节点' }
+    const secondPage = Promise.withResolvers()
+    const originalAdapter = request.defaults.adapter
+    let retrying = false
+    const adapter = vi.fn(config => {
+      if (config.params.page === 2 && !retrying) return secondPage.promise
+      return Promise.resolve({
+        status: 200, statusText: 'OK', headers: {}, config,
+        data: { code: 0, data: { total: 101, list: config.params.page === 1 ? firstPage : [lastNode] } }
+      })
+    })
+    request.defaults.adapter = adapter
+    try {
+      const wrapper = mountInventory(Rules)
+      await flushPromises()
+      expect(adapter.mock.calls.map(([config]) => config.params.page)).toEqual([1, 2])
+      await command(row(wrapper, 'DNS'), 'copy')
+      const dialog = editDialog(wrapper)
+      await field(dialog, 'listen_port').get('input').setValue('5354')
+      expect(selectField(dialog, 'node_id').props('modelValue')).toBe(entryNode.id)
+      expect(selectField(dialog, 'node_id').findAllComponents(ElOption)).toHaveLength(0)
+      expect(button(dialog, '创建规则').element.disabled).toBe(true)
+      secondPage.reject(new Error('second page unavailable'))
+      await flushPromises()
+      expect(dialog.get('[role="alert"]').text()).toContain('无法加载节点选项')
+      expect(selectField(dialog, 'node_id').findAllComponents(ElOption)).toHaveLength(0)
+      expect(select(wrapper, 'rule-node').findAllComponents(ElOption)).toHaveLength(0)
+      expect(button(dialog, '创建规则').element.disabled).toBe(true)
+      await dialog.get('form').trigger('submit')
+      await flushPromises()
+      expect(createRule).not.toHaveBeenCalled()
+
+      retrying = true
+      await button(dialog, '重新加载节点').trigger('click')
+      await flushPromises()
+      expect(adapter.mock.calls.map(([config]) => config.params.page)).toEqual([1, 2, 1, 2])
+      expect(dialog.find('[role="alert"]').exists()).toBe(false)
+      expect(selectField(dialog, 'node_id').findAllComponents(ElOption).map(option => option.props('value'))).toEqual([
+        ...firstPage.map(node => node.id), lastNode.id
+      ])
+      expect(button(dialog, '创建规则').element.disabled).toBe(false)
+    } finally {
+      request.defaults.adapter = originalAdapter
+    }
+  })
+
   it('keeps the previous rules on refresh failure and applies filters from page one', async () => {
     const response = Promise.withResolvers()
     getRuleList.mockReturnValueOnce(response.promise)
