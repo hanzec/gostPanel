@@ -1,21 +1,169 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestServeRejectsInvalidConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "secret")
+	token := filepath.Join(dir, "token")
+	state := filepath.Join(dir, "state")
+	writeWebhookFixture(t, secret, strings.Repeat("a", 64))
+	writeWebhookFixture(t, token, strings.Repeat("b", 64))
+	writeWebhookFixture(t, state, "bad state")
+	executable := filepath.Join(dir, "yagp-depoly")
+	for _, tc := range []struct {
+		name, mode, executable string
+		args                   []string
+		want                   string
+	}{
+		{"unknown mode", "other", executable, nil, "unknown webhook mode"},
+		{"unknown flag", "panel", executable, []string{"-bogus"}, "flag provided but not defined"},
+		{"missing flags", "panel", executable, nil, "set -listen"},
+		{"relative executable", "panel", "yagp-depoly", webhookArgs("127.0.0.1:0", secret, token, state), "set -listen"},
+		{"missing secret", "panel", executable, webhookArgs("127.0.0.1:0", secret+".missing", token, state), "webhook signing secret"},
+		{"missing token", "upgrade", executable, webhookArgs("127.0.0.1:0", secret, token+".missing", state), "webhook token"},
+		{"identical credentials", "panel", executable, webhookArgs("127.0.0.1:0", secret, secret, state), "must differ"},
+		{"corrupt state", "upgrade", executable, webhookArgs("127.0.0.1:0", secret, token, state), "load webhook acceptance state"},
+		{"invalid listen", "panel", executable, webhookArgs("127.0.0.1:-1", secret, token, state+".new"), "listen for deployment webhooks"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := serve(tc.mode, tc.executable, tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("serve error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestServeWebhookOverTCP(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "secret")
+	token := filepath.Join(dir, "token")
+	writeWebhookFixture(t, secret, strings.Repeat("a", 64))
+	writeWebhookFixture(t, token, strings.Repeat("b", 64))
+	notify, socket := listenNotifySocket(t, false)
+	t.Setenv("NOTIFY_SOCKET", socket)
+	err := serveWebhook("panel", filepath.Join(dir, "yagp-depoly"),
+		webhookArgs("127.0.0.1:0", secret, token, filepath.Join(dir, "state")),
+		func(server *http.Server, listener net.Listener) error {
+			assertReadyMessage(t, notify)
+			done := make(chan error, 1)
+			go func() { done <- server.Serve(listener) }()
+			defer func() {
+				server.Close()
+				if err := <-done; !errors.Is(err, http.ErrServerClosed) {
+					t.Errorf("HTTP server shutdown = %v", err)
+				}
+			}()
+			request, err := http.NewRequest(http.MethodPost, "http://"+listener.Addr().String()+deployPath, strings.NewReader("sha256:"+strings.Repeat("a", 64)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("X-Real-IP", "192.0.2.10")
+			client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{}}
+			defer client.CloseIdleConnections()
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("real HTTP request without credentials = %d", response.StatusCode)
+			}
+			return nil
+		})
+	if errors.Is(err, os.ErrPermission) {
+		t.Skipf("loopback TCP unavailable: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNotifyReady(t *testing.T) {
+	if err := notifyReady(""); err != nil {
+		t.Fatalf("notify without systemd = %v", err)
+	}
+	if err := notifyReady(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("notify accepted a missing systemd socket")
+	}
+	if runtime.GOOS == "linux" {
+		conn, socket := listenNotifySocket(t, true)
+		if err := notifyReady(socket); err != nil {
+			t.Fatal(err)
+		}
+		assertReadyMessage(t, conn)
+	}
+}
+
+func listenNotifySocket(t *testing.T, abstract bool) (*net.UnixConn, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix datagram unavailable on Windows")
+	}
+	dir, err := os.MkdirTemp("/tmp", "yagp-notify-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	name := filepath.Join(dir, "socket")
+	if abstract {
+		name = "@" + filepath.Base(dir)
+	}
+	conn, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: name, Net: "unixgram"})
+	if errors.Is(err, os.ErrPermission) {
+		t.Skipf("Unix datagram unavailable: %v", err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	return conn, name
+}
+
+func assertReadyMessage(t *testing.T, conn *net.UnixConn) {
+	t.Helper()
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var message [32]byte
+	n, _, err := conn.ReadFromUnix(message[:])
+	if err != nil || string(message[:n]) != "READY=1" {
+		t.Fatalf("systemd notification = %q, %v", message[:n], err)
+	}
+}
+
+func webhookArgs(listen, secret, token, state string) []string {
+	return []string{"-listen", listen, "-secret-file", secret, "-token-file", token, "-trusted-proxy", "127.0.0.1", "-state-file", state}
+}
+
+func writeWebhookFixture(t *testing.T, path, value string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestDeployHandler(t *testing.T) {
 	secret := []byte(strings.Repeat("a", 64))
@@ -206,6 +354,62 @@ func TestPersistentAcceptance(t *testing.T) {
 	}
 }
 
+func TestWebhookPersistenceFailureDoesNotConsumeRequest(t *testing.T) {
+	secret := []byte(strings.Repeat("a", 64))
+	token := []byte(strings.Repeat("c", 64))
+	digest := "sha256:" + strings.Repeat("b", 64)
+	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+	queue := make(chan string, 1)
+	handler := testHandler(t, secret, token, queue)
+	path := handler.limits.stateFile
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	request := func() int {
+		req := httptest.NewRequest(http.MethodPost, deployPath, strings.NewReader(digest))
+		req.RemoteAddr = "172.18.0.2:12345"
+		req.Header.Set("X-Real-IP", "192.0.2.10")
+		req.Header.Set("Authorization", "Bearer "+string(token))
+		req.Header.Set("X-Yagp-Timestamp", timestamp)
+		req.Header.Set("X-Yagp-Signature", signRequest(secret, timestamp, digest))
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		return resp.Code
+	}
+	if got := request(); got != http.StatusInternalServerError || len(queue) != 0 {
+		t.Fatalf("failed persistence status = %d, queued = %d", got, len(queue))
+	}
+	if entries, err := os.ReadDir(filepath.Dir(path)); err != nil || len(entries) != 1 {
+		t.Fatalf("failed persistence left staging files: %v, %v", entries, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := request(); got != http.StatusAccepted || len(queue) != 1 {
+		t.Fatalf("retry after persistence failure status = %d, queued = %d", got, len(queue))
+	}
+}
+
+func TestInvalidAcceptanceStorage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "acceptance")
+	for _, invalid := range []string{"", "garbage", "0 100", "100 garbage"} {
+		writeWebhookFixture(t, path, invalid)
+		if _, err := loadRequestLimits(path); err == nil {
+			t.Fatalf("invalid acceptance state %q accepted", invalid)
+		}
+	}
+	for _, parent := range []string{filepath.Join(dir, "missing"), path} {
+		bad := filepath.Join(parent, "acceptance")
+		if _, err := loadRequestLimits(bad); err == nil {
+			t.Fatalf("invalid acceptance path %s accepted", bad)
+		}
+		if err := persistAcceptance(bad, time.Now().Unix(), time.Now().Add(time.Minute)); err == nil {
+			t.Fatalf("invalid acceptance path %s written", bad)
+		}
+	}
+}
+
 func TestHookCommands(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	panel := hookCommand("panel", "/opt/yagp-panel/yagp-depoly", digest)
@@ -218,6 +422,39 @@ func TestHookCommands(t *testing.T) {
 	upgrade := hookCommand("upgrade", "/opt/yagp-panel/yagp-depoly", "upgrade")
 	if want := []string{"/usr/bin/sudo", "-n", "--", "/usr/bin/systemctl", "--no-block", "start", "yagp-depoly-upgrade.service"}; !reflect.DeepEqual(upgrade.Args, want) || upgrade.Stdin != nil {
 		t.Fatalf("upgrade command = %v, want %v", upgrade.Args, want)
+	}
+}
+
+func TestDeploymentWorkerReportsResult(t *testing.T) {
+	for _, tc := range []struct {
+		mode, value string
+		result      error
+		want        string
+	}{
+		{"panel", "sha256:" + strings.Repeat("a", 64), nil, "deployment completed"},
+		{"upgrade", "upgrade", nil, "requested yagp-depoly-upgrade.service"},
+		{"panel", "sha256:" + strings.Repeat("b", 64), errors.New("deployment failed in fixture"), "deployment failed in fixture"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			var output bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(&output)
+			t.Cleanup(func() { log.SetOutput(previous) })
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			queue := make(chan string, 1)
+			queue <- tc.value
+			runDeployments(ctx, queue, tc.mode, func(value string) error {
+				cancel()
+				if value != tc.value {
+					t.Fatalf("worker input = %q, want %q", value, tc.value)
+				}
+				return tc.result
+			})
+			if got := output.String(); !strings.Contains(got, "starting "+tc.mode+" webhook task") || !strings.Contains(got, tc.want) {
+				t.Fatalf("worker log = %q, want start and %q", got, tc.want)
+			}
+		})
 	}
 }
 

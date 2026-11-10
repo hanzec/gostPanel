@@ -37,31 +37,42 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	return dispatch(args, executable, os.Geteuid() == 0, executePrivileged)
+}
+
+func dispatch(args []string, executable string, root bool, execute func(string, ...string) error) error {
 	switch args[0] {
 	case "serve-panel", "serve-upgrade":
 		return serve(args[0][len("serve-"):], executable, args[1:])
 	case "deploy", "self-upgrade":
-		if os.Geteuid() != 0 || len(args) != 1 || executable != installedExecutable {
+		if !root || len(args) != 1 || executable != installedExecutable {
 			return errors.New("the installed deployment command requires root and takes no arguments")
 		}
 		if args[0] == "self-upgrade" {
-			return selfUpgrade(executable)
+			return execute(executable, "self-upgrade")
 		}
-		return runInstaller(executable)
+		return execute(executable)
 	case "install":
-		if os.Geteuid() != 0 || len(args) < 2 || len(args) > 3 {
+		if !root || len(args) < 2 || len(args) > 3 {
 			return errors.New("usage: sudo yagp-depoly install <project-dir> [traefik]")
 		}
 		installArgs := []string{"install-webhook", args[1], executable}
-		return runInstaller(executable, append(installArgs, args[2:]...)...)
+		return execute(executable, append(installArgs, args[2:]...)...)
 	case "install-upgrade":
-		if os.Geteuid() != 0 || len(args) > 2 {
+		if !root || len(args) > 2 {
 			return errors.New("usage: sudo yagp-depoly install-upgrade [traefik]")
 		}
-		return runInstaller(executable, args...)
+		return execute(executable, args...)
 	default:
 		return fmt.Errorf("invalid yagp-depoly command %q", args[0])
 	}
+}
+
+func executePrivileged(executable string, args ...string) error {
+	if len(args) > 0 && args[0] == "self-upgrade" {
+		return selfUpgrade(executable)
+	}
+	return runInstaller(executable, args...)
 }
 
 func runInstaller(executable string, args ...string) error {

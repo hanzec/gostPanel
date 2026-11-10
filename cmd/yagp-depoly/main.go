@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -55,6 +56,10 @@ type hookProtocol struct {
 }
 
 func serve(mode, executable string, args []string) error {
+	return serveWebhook(mode, executable, args, (*http.Server).Serve)
+}
+
+func serveWebhook(mode, executable string, args []string, runServer func(*http.Server, net.Listener) error) error {
 	var protocol hookProtocol
 	switch mode {
 	case "panel":
@@ -104,7 +109,11 @@ func serve(mode, executable string, args []string) error {
 	}
 
 	queue := make(chan string, 1)
-	go runDeployments(queue, mode, executable)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go runDeployments(ctx, queue, mode, func(value string) error {
+		return hookCommand(mode, executable, value).Run()
+	})
 	server := &http.Server{
 		Handler: deployHandler{
 			protocol: protocol, secret: secret, token: token, trustedProxy: trustedProxy,
@@ -117,7 +126,7 @@ func serve(mode, executable string, args []string) error {
 		MaxHeaderBytes:    4096,
 	}
 	log.Printf("%s webhook listening on %s", mode, listener.Addr())
-	return server.Serve(listener)
+	return runServer(server, listener)
 }
 
 func notifyReady(socket string) error {
@@ -431,16 +440,20 @@ func hookCommand(mode, executable, value string) *exec.Cmd {
 	return cmd
 }
 
-func runDeployments(queue <-chan string, mode, executable string) {
-	for value := range queue {
-		log.Printf("starting %s webhook task %s", mode, value)
-		cmd := hookCommand(mode, executable, value)
-		if err := cmd.Run(); err != nil {
-			log.Printf("%s webhook task %s failed: %v", mode, value, err)
-		} else if mode == "upgrade" {
-			log.Print("requested yagp-depoly-upgrade.service")
-		} else {
-			log.Printf("deployment completed for %s", value)
+func runDeployments(ctx context.Context, queue <-chan string, mode string, execute func(string) error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case value := <-queue:
+			log.Printf("starting %s webhook task %s", mode, value)
+			if err := execute(value); err != nil {
+				log.Printf("%s webhook task %s failed: %v", mode, value, err)
+			} else if mode == "upgrade" {
+				log.Print("requested yagp-depoly-upgrade.service")
+			} else {
+				log.Printf("deployment completed for %s", value)
+			}
 		}
 	}
 }

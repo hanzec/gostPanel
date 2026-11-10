@@ -52,32 +52,38 @@ func selfUpgrade(executable string) error {
 	if !upgrade.ValidateTag("daemon", current) {
 		return errors.New("tool self-upgrade requires an installed release version")
 	}
-	if err := checkSelfUpgradeFile(executable); err != nil {
-		return err
-	}
-	if err := checkSelfUpgradePath(filepath.Dir(selfUpgradeLockPath), false); err != nil {
-		return err
-	}
-	gh, err := findSelfUpgradeTool("gh")
+	env, err := prepareSelfUpgrade(executable, selfUpgradeLockPath, findSelfUpgradeTool, user.Lookup)
 	if err != nil {
 		return err
 	}
-	systemctl, err := findSelfUpgradeTool("systemctl")
-	if err != nil {
-		return err
-	}
-	credentials, err := selfUpgradeCredentials()
-	if err != nil {
-		return err
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	env := selfUpgradeEnvironment{
-		client: selfUpgradeClient(), gh: gh, systemctl: systemctl,
-		lockPath: selfUpgradeLockPath, credentials: credentials,
-	}
 	return env.install(ctx, executable, current)
+}
+
+func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (string, error), lookupUser func(string) (*user.User, error)) (selfUpgradeEnvironment, error) {
+	if err := checkSelfUpgradeFile(executable); err != nil {
+		return selfUpgradeEnvironment{}, err
+	}
+	if err := checkSelfUpgradePath(filepath.Dir(lockPath), false); err != nil {
+		return selfUpgradeEnvironment{}, err
+	}
+	gh, err := findTool("gh")
+	if err != nil {
+		return selfUpgradeEnvironment{}, err
+	}
+	systemctl, err := findTool("systemctl")
+	if err != nil {
+		return selfUpgradeEnvironment{}, err
+	}
+	credentials, err := selfUpgradeCredentials(lookupUser)
+	if err != nil {
+		return selfUpgradeEnvironment{}, err
+	}
+	return selfUpgradeEnvironment{
+		client: selfUpgradeClient(), gh: gh, systemctl: systemctl,
+		lockPath: lockPath, credentials: credentials,
+	}, nil
 }
 
 func (env selfUpgradeEnvironment) install(ctx context.Context, executable, current string) error {
@@ -343,8 +349,8 @@ func extractSelfUpgradeBinary(archive, name, target string) error {
 	return nil
 }
 
-func selfUpgradeCredentials() (*syscall.Credential, error) {
-	account, err := user.Lookup("yagp-deploy")
+func selfUpgradeCredentials(lookupUser func(string) (*user.User, error)) (*syscall.Credential, error) {
+	account, err := lookupUser("yagp-deploy")
 	if err != nil {
 		return nil, fmt.Errorf("find unprivileged tool account: %w", err)
 	}
