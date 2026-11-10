@@ -23,6 +23,8 @@ import (
 
 const maxArchiveSize = 128 << 20
 
+const YAGPReleaseCache = "https://release.hanzec-overseas.cn/yagp"
+
 type Client struct {
 	http *http.Client
 }
@@ -101,18 +103,45 @@ func versionParts(component, version string) (parts [3]uint64, ok bool) {
 
 type release struct {
 	Tag        string  `json:"tag_name"`
+	CacheTag   string  `json:"tag"`
 	Draft      bool    `json:"draft"`
 	Prerelease bool    `json:"prerelease"`
 	Assets     []asset `json:"assets"`
 }
 
 type asset struct {
-	Name   string `json:"name"`
-	Digest string `json:"digest"`
-	Size   int64  `json:"size"`
+	Name        string `json:"name"`
+	Digest      string `json:"digest"`
+	Size        int64  `json:"size"`
+	DownloadURL string `json:"downloadUrl"`
+}
+
+// CachedYAGPReleaseTag reads the latest stable tag from the public release cache.
+func CachedYAGPReleaseTag(ctx context.Context, client *http.Client) (string, error) {
+	result, err := (&Client{http: client}).cachedYAGPRelease(ctx, "latest")
+	if err != nil {
+		return "", err
+	}
+	return result.Tag, nil
+}
+
+func (c *Client) cachedYAGPRelease(ctx context.Context, path string) (release, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return c.readRelease(ctx, "daemon", YAGPReleaseCache+"/"+path)
+}
+
+func preferYAGPReleaseCache(component string) bool {
+	_, explicitProxy := os.LookupEnv("GH_PROXY")
+	return component == "daemon" && !explicitProxy
 }
 
 func (c *Client) Latest(ctx context.Context, component string) (string, error) {
+	if preferYAGPReleaseCache(component) {
+		if result, err := c.cachedYAGPRelease(ctx, "latest"); err == nil {
+			return result.Tag, nil
+		}
+	}
 	release, err := c.release(ctx, component, "latest")
 	if err != nil {
 		return "", err
@@ -160,13 +189,16 @@ func (c *Client) release(ctx context.Context, component, endpoint string) (relea
 
 func (c *Client) readRelease(ctx context.Context, component, url string) (release, error) {
 	var result release
-	res, err := c.get(ctx, url)
+	res, err := c.get(ctx, url, "application/json")
 	if err != nil {
 		return result, err
 	}
 	defer res.Body.Close()
 	if err = json.NewDecoder(io.LimitReader(res.Body, 2<<20)).Decode(&result); err != nil {
 		return result, err
+	}
+	if strings.HasPrefix(url, YAGPReleaseCache+"/") {
+		result.Tag = result.CacheTag
 	}
 	if result.Draft || result.Prerelease || !ValidateTag(component, result.Tag) {
 		return result, errors.New("invalid stable release tag")
@@ -180,6 +212,12 @@ func (c *Client) Download(ctx context.Context, component, tag, variant string, d
 		return errors.New("unsupported platform or release tag")
 	}
 	archiveName, binaryName := releaseNames(component, tag, variant, runtime.GOARCH)
+	url := releaseArchiveURL(component, tag, archiveName)
+	if preferYAGPReleaseCache(component) {
+		if cached, ok := c.cachedDaemonAsset(ctx, tag, archiveName); ok {
+			return c.downloadAsset(ctx, cached.DownloadURL, cached, binaryName, dest, url)
+		}
+	}
 	info, err := c.release(ctx, component, "tags/"+tag)
 	if err != nil {
 		return err
@@ -187,14 +225,31 @@ func (c *Client) Download(ctx context.Context, component, tag, variant string, d
 	if info.Tag != tag {
 		return errors.New("release tag does not match the requested version")
 	}
-	for _, asset := range info.Assets {
-		if asset.Name == archiveName {
-			url := releaseArchiveURL(component, tag, archiveName)
-			sources := c.AssetURLs(ctx, url)
-			return c.downloadAsset(ctx, sources[0], asset, binaryName, dest, sources[1:]...)
+	metadata, ok := info.findAsset(archiveName)
+	if !ok {
+		return errors.New("release does not contain the required Linux archive")
+	}
+	sources := c.AssetURLs(ctx, url)
+	return c.downloadAsset(ctx, sources[0], metadata, binaryName, dest, sources[1:]...)
+}
+
+func (c *Client) cachedDaemonAsset(ctx context.Context, tag, name string) (asset, bool) {
+	info, err := c.cachedYAGPRelease(ctx, "releases/tag/"+tag)
+	if err != nil || info.Tag != tag {
+		return asset{}, false
+	}
+	metadata, ok := info.findAsset(name)
+	url := YAGPReleaseCache + "/releases/download/" + tag + "/" + name
+	return metadata, ok && metadata.Digest != "" && metadata.DownloadURL == url
+}
+
+func (r release) findAsset(name string) (asset, bool) {
+	for _, metadata := range r.Assets {
+		if metadata.Name == name {
+			return metadata, true
 		}
 	}
-	return errors.New("release does not contain the required Linux archive")
+	return asset{}, false
 }
 
 func releaseArchiveURL(component, tag, archive string) string {
@@ -230,7 +285,7 @@ func (c *Client) downloadAsset(ctx context.Context, url string, asset asset, bin
 		err = c.copyVerifiedAsset(mirrorCtx, url, asset.Size, checksum, file)
 		cancel()
 		if err != nil {
-			log.Printf("gh-fast download failed: %v; retrying GitHub directly", err)
+			log.Printf("release mirror download failed: %v; retrying GitHub directly", err)
 			url = fallback[0]
 		}
 	}
@@ -252,7 +307,7 @@ func (c *Client) copyVerifiedAsset(ctx context.Context, url string, size int64, 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	res, err := c.get(ctx, url)
+	res, err := c.get(ctx, url, "")
 	if err != nil {
 		return err
 	}
@@ -290,19 +345,22 @@ func extractBinary(source io.Reader, binary string, dest io.Writer) error {
 	}
 }
 
-func (c *Client) get(ctx context.Context, url string) (*http.Response, error) {
+func (c *Client) get(ctx context.Context, url, accept string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "yagp-upgrade")
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
 	res, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
 		res.Body.Close()
-		return nil, fmt.Errorf("GitHub release request returned HTTP %d", res.StatusCode)
+		return nil, fmt.Errorf("release request returned HTTP %d", res.StatusCode)
 	}
 	return res, nil
 }

@@ -7,12 +7,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"yagp/internal/buildinfo"
 	"yagp/scripts"
 )
 
-const installedExecutable = "/usr/local/sbin/yagp-depoly"
+const (
+	installedExecutable = "/usr/local/sbin/yagp-depoly"
+	traefikUsage        = "[--traefik <container-name-or-id>]"
+	installUsage        = "install <project-dir> " + traefikUsage
+	installUpgradeUsage = "install-upgrade " + traefikUsage
+)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -22,7 +28,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: yagp-depoly version | install <project-dir> [traefik] | install-upgrade [traefik]")
+		return errors.New("usage: yagp-depoly version | " + installUsage + " | " + installUpgradeUsage)
 	}
 	if args[0] == "version" && len(args) == 1 {
 		fmt.Println(buildinfo.Version)
@@ -53,19 +59,44 @@ func dispatch(args []string, executable string, root bool, execute func(string, 
 		}
 		return execute(executable)
 	case "install":
-		if !root || len(args) < 2 || len(args) > 3 {
-			return errors.New("usage: sudo yagp-depoly install <project-dir> [traefik]")
+		if !root || len(args) < 2 {
+			return errors.New("usage: sudo yagp-depoly " + installUsage)
 		}
-		installArgs := []string{"install-webhook", args[1], executable}
-		return execute(executable, append(installArgs, args[2:]...)...)
+		projectDir := args[1]
+		proxy, ok := parseTraefikOption(args[2:])
+		if !ok || projectDir == "--traefik" || strings.HasPrefix(projectDir, "--traefik=") {
+			return errors.New("usage: sudo yagp-depoly " + installUsage)
+		}
+		installArgs := []string{"install-webhook", projectDir, executable}
+		return execute(executable, append(installArgs, proxy...)...)
 	case "install-upgrade":
-		if !root || len(args) > 2 {
-			return errors.New("usage: sudo yagp-depoly install-upgrade [traefik]")
+		proxy, ok := parseTraefikOption(args[1:])
+		if !root || !ok {
+			return errors.New("usage: sudo yagp-depoly " + installUpgradeUsage)
 		}
-		return execute(executable, args...)
+		upgradeArgs := []string{"install-upgrade"}
+		return execute(executable, append(upgradeArgs, proxy...)...)
 	default:
 		return fmt.Errorf("invalid yagp-depoly command %q", args[0])
 	}
+}
+
+func parseTraefikOption(args []string) ([]string, bool) {
+	var container string
+	switch {
+	case len(args) == 0 || (len(args) == 1 && args[0] == ""):
+		return nil, true
+	case len(args) == 1:
+		container, _ = strings.CutPrefix(args[0], "--traefik=")
+	case len(args) == 2 && args[0] == "--traefik":
+		container = args[1]
+	default:
+		return nil, false
+	}
+	if container == "" || strings.HasPrefix(container, "-") {
+		return nil, false
+	}
+	return []string{container}, true
 }
 
 func executePrivileged(executable string, args ...string) error {

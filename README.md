@@ -28,7 +28,9 @@ curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/s
   | YAGP_DAEMON_VERSION="$version" bash -s -- --host 'panel.example.com' --token 'TOKEN_FROM_PANEL'
 ```
 
-安装 Gost 及在线升级时按节点的网络出口判断地区。中国大陆、香港和澳门优先通过 gh-fast 下载发布包，代理失败、其他地区或检测失败时使用 GitHub。安装脚本首次拉取 `yagp-daemon` 默认直连。可在管道右侧为 `bash` 设置 `GH_PROXY` 覆盖下载路径，设置 `GH_PROXY=''` 可强制直连。使用只支持文件下载的代理且无法访问 GitHub API 时，可同时设置 `YAGP_GOST_VERSION` 为官方稳定版标签，例如 `v3.3.3`，跳过初装时的 Gost 版本查询。
+`yagp-daemon` 安装及在线升级默认优先使用 yagp Release 缓存，缓存请求失败时回退到 GitHub。在线升级按面板版本下载并校验发布包的字节数和 SHA-256。可在管道右侧为 `bash` 设置 `GH_PROXY` 覆盖下载路径，设置 `GH_PROXY=''` 可使用 GitHub 直连。
+
+安装和升级 Gost 时按节点的网络出口判断地区。中国大陆、香港和澳门优先通过 gh-fast 下载发布包，代理失败、其他地区或检测失败时使用 GitHub。使用只支持文件下载的代理且无法访问 GitHub API 时，可设置 `YAGP_GOST_VERSION` 为官方稳定版标签，例如 `v3.3.3`，跳过初装时的 Gost 版本查询。
 
 ### 升级已安装节点
 
@@ -90,15 +92,28 @@ Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板
 
 #### 通过 Webhook 自动更新面板
 
-该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。解压 GitHub Release 中与服务器架构对应的 `yagp-depoly-linux-<arch>.tar.gz`，然后执行以下命令。示例使用 amd64、`/opt/yagp-panel` 和名为 `traefik` 的容器。
+该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
 
 ```bash
-sudo ./yagp-depoly-linux-amd64 install /opt/yagp-panel traefik
+docker ps --filter network=public --format 'table {{.Names}}\t{{.Image}}'
+```
+
+从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。ARM64 服务器将 `pkg` 改为 `yagp-depoly-linux-arm64`。
+
+```bash
+pkg=yagp-depoly-linux-amd64
+tmpdir=$(mktemp -d) &&
+  cd "$tmpdir" &&
+  { curl -fL --connect-timeout 10 --speed-limit 1 --speed-time 20 \
+      -o "$pkg.tar.gz" "https://release.hanzec-overseas.cn/yagp/latest/$pkg.tar.gz" ||
+    curl -fL -o "$pkg.tar.gz" "https://github.com/hanzec/yagp/releases/latest/download/$pkg.tar.gz"; } &&
+  tar -xzf "$pkg.tar.gz" &&
+  sudo "./$pkg" install /opt/yagp-panel --traefik traefik-public
 ```
 
 安装程序将接收器和部署命令装到同一个 `/usr/local/sbin/yagp-depoly`，并将实际面板路径写入 `/etc/yagp-depoly/project-dir`。它会迁移旧部署布局并保留镜像版本。首次安装时，shell 使用系统随机源分别生成 HMAC 密钥和 Bearer Token，在交互终端显示，并写入 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`。重装时复用现有凭据。
 
-安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。使用独立的公网和私网 Traefik 时，安装命令的最后一个参数填公网 Traefik 容器名。
+安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
 安装程序用公网域名生成 Traefik 路由和 `DEPLOY_WEBHOOK_URL`。为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到公网 Traefik file provider 加载的动态目录。迁移时先运行上面的 `install` 命令，然后替换旧路由配置，并从动态目录移除旧的独立升级路由。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
 
@@ -111,16 +126,16 @@ sudo ./yagp-depoly-linux-amd64 install /opt/yagp-panel traefik
 安装正式发布的 `yagp-depoly` 后，可在服务器上启用工具升级入口。服务器需要 GitHub CLI 2.102.0 或更新版本，用于验证随 Release 发布的产物证明。
 
 ```bash
-sudo /usr/local/sbin/yagp-depoly install-upgrade traefik
+sudo /usr/local/sbin/yagp-depoly install-upgrade --traefik traefik-public
 ```
 
 安装程序同样使用公网域名，为 `POST /api/deploy/deploy-tool` 生成 `UPGRADE_WEBHOOK_URL`。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET`、`UPGRADE_WEBHOOK_TOKEN` 和 `UPGRADE_WEBHOOK_URL`。
 
-在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务查询最新 Release，只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
+在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务优先从 Release 缓存查询最新版本和下载附件，失败时回退到 GitHub。只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
 
 **方式 B · Linux 二进制部署**
 
-安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从 GitHub 仓库 `hanzec/yagp` 下载最新发布包，也可通过 `YAGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `yagp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
+安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本优先从 yagp Release 缓存下载最新发布包，失败时回退到 GitHub 仓库 `hanzec/yagp`。也可通过 `YAGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `yagp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
 
 在本项目根目录以 root 身份运行脚本。默认端口为 `39100`。
 

@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -92,7 +93,7 @@ func TestSelfUpgradePreflight(t *testing.T) {
 	}
 }
 
-func TestLatestDeployRelease(t *testing.T) {
+func TestLatestGitHubDeployRelease(t *testing.T) {
 	for _, tt := range []struct {
 		name string
 		body string
@@ -111,9 +112,9 @@ func TestLatestDeployRelease(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(tt.body))}, nil
 			})}
-			got, err := latestDeployRelease(context.Background(), client)
+			got, err := latestGitHubDeployRelease(context.Background(), client)
 			if got != tt.want || (err != nil) != (tt.want == "") {
-				t.Fatalf("latestDeployRelease = %q, %v; want %q", got, err, tt.want)
+				t.Fatalf("latestGitHubDeployRelease = %q, %v; want %q", got, err, tt.want)
 			}
 		})
 	}
@@ -157,11 +158,15 @@ func TestDownloadSelfUpgradeFile(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("download = %v, want error %t", err, tt.wantErr)
 			}
-			if !tt.wantErr {
-				data, err := os.ReadFile(target)
-				if err != nil || string(data) != tt.content {
-					t.Fatalf("downloaded file = %q, %v", data, err)
+			if tt.wantErr {
+				if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("failed download left a file or returned a stat error: %v", err)
 				}
+				return
+			}
+			data, err := os.ReadFile(target)
+			if err != nil || string(data) != tt.content {
+				t.Fatalf("downloaded file = %q, %v", data, err)
 			}
 		})
 	}
@@ -469,21 +474,23 @@ func TestInstallSelfUpgradeRelease(t *testing.T) {
 	}
 	name := "yagp-depoly-linux-" + runtime.GOARCH
 	for _, tt := range []struct {
-		name, tag, candidate, failure, want string
+		name, tag, candidate, failure, want, cache string
 	}{
-		{"new version", newer, newer, "", newer},
-		{"rejected attestation", newer, newer, "verify", current},
-		{"missing archive", newer, newer, "archive", current},
-		{"missing bundle", newer, newer, "bundle", current},
-		{"malformed archive", newer, newer, "extract", current},
-		{"missing staging directory", newer, newer, "stage", current},
-		{"cannot start gh", newer, newer, "gh", current},
-		{"mislabeled binary", newer, current, "version", current},
-		{"changed installed version", newer, newer, "changed", newer},
-		{"unsafe deployment lock", newer, newer, "lock", current},
-		{"failed readiness", newer, newer, "restart", current},
-		{"unhealthy after startup", newer, newer, "is-active", current},
-		{"same version", current, current, "", current},
+		{"new version via cache", newer, newer, "", newer, "available"},
+		{"new version via GitHub", newer, newer, "", newer, ""},
+		{"interrupted cached archive", newer, newer, "", newer, "archive"},
+		{"rejected attestation", newer, newer, "verify", current, "available"},
+		{"missing archive", newer, newer, "archive", current, ""},
+		{"missing bundle", newer, newer, "bundle", current, ""},
+		{"malformed archive", newer, newer, "extract", current, ""},
+		{"missing staging directory", newer, newer, "stage", current, ""},
+		{"cannot start gh", newer, newer, "gh", current, ""},
+		{"mislabeled binary", newer, current, "version", current, ""},
+		{"changed installed version", newer, newer, "changed", newer, ""},
+		{"unsafe deployment lock", newer, newer, "lock", current, ""},
+		{"failed readiness", newer, newer, "restart", current, ""},
+		{"unhealthy after startup", newer, newer, "is-active", current, ""},
+		{"same version", current, current, "", current, "available"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -537,13 +544,42 @@ esac
 			if err := errors.Join(writer.Close(), compressed.Close()); err != nil {
 				t.Fatal(err)
 			}
+			const cacheURL = "https://release.hanzec-overseas.cn/yagp"
+			cacheAssets := cacheURL + "/releases/download/" + tt.tag + "/"
 			client := &http.Client{Transport: selfUpgradeRoundTripper(func(req *http.Request) (*http.Response, error) {
 				var body io.Reader
 				status := 200
 				switch req.URL.String() {
+				case cacheURL + "/latest":
+					if req.Header.Get("Accept") != "application/json" || req.Header.Get("Authorization") != "" {
+						t.Fatalf("unexpected cache request headers %v", req.Header)
+					}
+					body = strings.NewReader(`{"owner":"hanzec","repo":"yagp","tag":"` + tt.tag + `","prerelease":false}`)
+					if tt.cache == "" {
+						status = 503
+					}
+				case cacheAssets + name + ".tar.gz":
+					if tt.cache == "" {
+						t.Fatalf("requested cached asset after cache metadata failure")
+					}
+					body = bytes.NewReader(archive.Bytes())
+					if tt.cache == "archive" {
+						body = io.MultiReader(strings.NewReader("partial archive"), iotest.ErrReader(io.ErrUnexpectedEOF))
+					}
+				case cacheAssets + selfUpgradeBundle:
+					if tt.cache == "" {
+						t.Fatalf("requested cached bundle after cache metadata failure")
+					}
+					body = strings.NewReader("signed fixture")
 				case "https://api.github.com/repos/hanzec/yagp/releases/latest":
+					if tt.cache != "" {
+						t.Fatalf("requested GitHub metadata despite usable cache metadata")
+					}
 					body = strings.NewReader(`{"tag_name":"` + tt.tag + `"}`)
 				case "https://github.com/hanzec/yagp/releases/download/" + tt.tag + "/" + name + ".tar.gz":
+					if tt.cache == "available" {
+						t.Fatalf("requested GitHub archive despite usable cached archive")
+					}
 					body = bytes.NewReader(archive.Bytes())
 					if tt.failure == "archive" {
 						status = 404
@@ -552,6 +588,9 @@ esac
 						body = strings.NewReader("not an archive")
 					}
 				case "https://github.com/hanzec/yagp/releases/download/" + tt.tag + "/yagp-depoly-attestations.jsonl":
+					if tt.cache != "" {
+						t.Fatalf("requested GitHub bundle despite usable cached bundle")
+					}
 					body = strings.NewReader("signed fixture")
 					if tt.failure == "bundle" {
 						status = 404
