@@ -75,7 +75,7 @@ describe('Relay tunnel inventory', () => {
     expect(dialog(wrapper).text()).toContain('无法加载入口选项')
     await button(dialog(wrapper), '重新加载入口').trigger('click')
     await flushPromises()
-    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 1000 })
+    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 100 })
     expect(dialog(wrapper).text()).not.toContain('无法加载入口选项')
     await button(dialog(wrapper), '重新加载来源节点').trigger('click')
     await flushPromises()
@@ -132,6 +132,30 @@ describe('Relay tunnel inventory', () => {
 })
 
 describe('Relay tunnel configuration', () => {
+  it('loads later entrance pages and preserves a tunnel pair found after the first hundred', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...source, id: index + 1000 }))
+    const secondPage = [destination, mediaSource, mediaDestination]
+    getRuleList.mockResolvedValueOnce(result(firstPage, 103)).mockResolvedValueOnce(result(secondPage, 103))
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
+    expect(getRuleList.mock.calls).toEqual([[{ page: 1, pageSize: 100 }], [{ page: 2, pageSize: 100 }]])
+    expect(selectField(dialog(wrapper), 'exit_rule_id').findAllComponents(ElOption).map(option => option.props('value'))).toContain(destination.id)
+    await button(dialog(wrapper), '取消').trigger('click')
+
+    getRuleList.mockResolvedValueOnce(result(firstPage, 103)).mockResolvedValueOnce(result(secondPage, 103))
+    await command(row(wrapper, 'Media relay'), 'edit')
+    const editor = dialog(wrapper)
+    expect(selectField(editor, 'entry_rule_id').props('modelValue')).toBe(mediaSource.id)
+    expect(selectField(editor, 'exit_rule_id').props('modelValue')).toBe(mediaDestination.id)
+    await button(editor, '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnel).toHaveBeenCalledWith(udpRelay.id, expect.objectContaining({
+      entry_rule_id: mediaSource.id, exit_rule_id: mediaDestination.id
+    }))
+  })
+
   it('validates endpoint roles and preserves the selected pair after a failed create', async () => {
     const error = new Error('relay already listening')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -144,6 +168,7 @@ describe('Relay tunnel configuration', () => {
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['entry_rule_id', false, '请选择源端入口'])
+    expect(document.activeElement).toBe(selectField(editor, 'entry_rule_id').get('input').element)
     expect(createTunnel).not.toHaveBeenCalled()
 
     const sourceSelect = selectField(editor, 'entry_rule_id')

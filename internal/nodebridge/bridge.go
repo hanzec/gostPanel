@@ -173,7 +173,7 @@ func (s *controlServer) GetObserverEndpoint(context.Context, *emptypb.Empty) (*n
 }
 
 var resourceName = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*$`)
-var tunnelChainName = regexp.MustCompile(`^tunnel-[1-9][0-9]*-chain$`)
+var tunnelChainName = regexp.MustCompile(`^tunnel-[1-9][0-9]*-(clash-)?chain$`)
 
 func allowedCommand(method, path string) bool {
 	switch path {

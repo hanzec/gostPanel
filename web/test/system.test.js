@@ -161,6 +161,8 @@ describe('System settings', () => {
     await button(wrapper, '保存设置').trigger('click')
     expect(ElMessage.warning).toHaveBeenCalledWith('请填写备份保留份数')
     expect(wrapper.get('[aria-selected="true"]').text()).toContain('数据库备份')
+    await flushPromises()
+    expect(document.activeElement).toBe(retention.element)
     expect(api.updateSystemConfig).not.toHaveBeenCalled()
 
     await retention.setValue('12')
@@ -256,11 +258,14 @@ describe('System settings', () => {
     expect(serverUrl.attributes('aria-invalid')).toBe('true')
     await testButton.trigger('click')
     expect(api.sendTestBark).not.toHaveBeenCalled()
+    await flushPromises()
+    expect(document.activeElement).toBe(serverUrl.element)
 
     await serverUrl.setValue('  http://bark.local:8080/notifications  ')
     await deviceKey.setValue('')
     await button(wrapper, '保存设置').trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('请输入 Bark 设备密钥'))
+    expect(document.activeElement).toBe(deviceKey.element)
     expect(api.updateSystemConfig).not.toHaveBeenCalled()
 
     await deviceKey.setValue('  current-device-key  ')

@@ -232,10 +232,10 @@ func (s *RuleService) Delete(id uint, username, ip, userAgent string) error {
 		return errors.ErrRuleTunnelLinked
 	}
 
-	// 如果正在运行，先停止
-	if rule.Status == model.RuleStatusRunning {
+	// A failed start or stop can retain a live service even when the status is not running.
+	if rule.Status == model.RuleStatusRunning || rule.ServiceID != "" {
 		if err = s.Stop(id, username, ip, userAgent); err != nil {
-			logger.Warnf("停止规则失败: %v", err)
+			return err
 		}
 	}
 
@@ -462,13 +462,12 @@ func (s *RuleService) Stop(id uint, username, ip, userAgent string) error {
 		return err
 	}
 
-	if rule.Status != model.RuleStatusRunning {
+	if rule.Status != model.RuleStatusRunning && rule.ServiceID == "" {
 		return nil
 	}
 
 	if err := s.stopSelectedEntrance(rule); err != nil {
-		logger.Warnf("停止 Gost 服务失败: %v", err)
-		_ = s.ruleRepo.UpdateStatus(id, model.RuleStatusStopped)
+		return err
 	}
 
 	s.logService.Record(
@@ -486,11 +485,17 @@ func (s *RuleService) Stop(id uint, username, ip, userAgent string) error {
 
 // stopSelectedEntrance is used by the owning tunnel to stop its ingress service.
 func (s *RuleService) stopSelectedEntrance(rule *model.GostRule) error {
-	node, err := s.nodeRepo.FindByID(ruleEntryNodeID(rule))
-	if err != nil && !stderrors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	if node != nil && node.Status == model.NodeStatusOnline && rule.ServiceID != "" {
+	if rule.ServiceID != "" {
+		node, err := s.nodeRepo.FindByID(ruleEntryNodeID(rule))
+		if stderrors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.ErrNodeNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if node.Status != model.NodeStatusOnline {
+			return errors.ErrNodeOffline
+		}
 		client := utils.GetGostClient(node)
 		if err := client.DeleteService(rule.ServiceID); err != nil {
 			return err
@@ -499,9 +504,10 @@ func (s *RuleService) stopSelectedEntrance(rule *model.GostRule) error {
 			return err
 		}
 	}
-	if err := s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusStopped); err != nil {
+	if err := s.ruleRepo.UpdateRuntime(rule.ID, "", model.RuleStatusStopped); err != nil {
 		return err
 	}
+	rule.ServiceID = ""
 	rule.Status = model.RuleStatusStopped
 	return nil
 }

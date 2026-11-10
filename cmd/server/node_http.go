@@ -76,6 +76,8 @@ func startReports(cfg config.ReportConfig, host string, db *gorm.DB) (*nodeHTTPS
 	ctx, cancel := context.WithCancel(context.Background())
 	server := &http.Server{
 		Handler: mux, ReadHeaderTimeout: 10 * time.Second,
+		// net/http clears this deadline when a WebSocket upgrade hijacks the connection.
+		ReadTimeout: 10 * time.Second,
 		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 	go func() {

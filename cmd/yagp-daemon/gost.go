@@ -1,14 +1,11 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,124 +113,69 @@ func downloadGost(ctx context.Context, path string, showProgress bool) error {
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		return errors.New("Gost installation supports Linux amd64 and arm64")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	if showProgress {
-		fmt.Fprintln(os.Stderr, "Checking the latest stable Gost release")
+		fmt.Fprintln(os.Stderr, "Checking the stable Gost release")
 	}
 	client := upgrade.NewClient()
-	url, err := gostReleaseURL(ctx, client)
+	tag, err := gostReleaseTag(ctx, client)
 	if err != nil {
 		return err
 	}
-	sources := client.AssetURLs(ctx, url)
-	for i, source := range sources {
-		err = downloadGostArchive(ctx, source, path, showProgress)
+	if showProgress {
+		fmt.Fprintf(os.Stderr, "Downloading Gost %s; verifying the archive against GitHub's SHA-256 digest\n", tag)
+	}
+	attempts := 1
+	if showProgress {
+		attempts = 3 // Preserve the installer's retries for temporary download failures.
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		err = installGostBinary(path, func(dest io.Writer) error {
+			return client.Download(ctx, "gost", tag, "", dest)
+		})
 		if err == nil {
+			if showProgress {
+				fmt.Fprintln(os.Stderr, "Gost SHA-256 verified; executable installed")
+			}
 			return nil
 		}
-		if i+1 < len(sources) {
-			fmt.Fprintf(os.Stderr, "gh-fast download failed: %v; retrying GitHub directly\n", err)
+		if attempt+1 < attempts {
+			fmt.Fprintf(os.Stderr, "Gost download failed: %v; retrying\n", err)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
 		}
 	}
 	return err
 }
 
-func downloadGostArchive(ctx context.Context, url, path string, showProgress bool) error {
-	if showProgress {
-		return downloadGostWithCurl(ctx, url, path)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("download Gost from %s: %s", url, res.Status)
-	}
-	return extractGost(path, res.Body)
-}
-
-func gostReleaseURL(ctx context.Context, client *upgrade.Client) (string, error) {
+func gostReleaseTag(ctx context.Context, client *upgrade.Client) (string, error) {
 	if tag := os.Getenv("YAGP_GOST_VERSION"); tag != "" {
 		if !upgrade.ValidateTag("gost", tag) {
 			return "", errors.New("YAGP_GOST_VERSION must be a stable Gost tag")
 		}
-		return upgrade.GostArchiveURL(tag, runtime.GOARCH), nil
+		return tag, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	url, err := client.LatestGostArchiveURL(ctx, runtime.GOARCH)
+	tag, err := client.Latest(ctx, "gost")
 	if err != nil {
-		return "", fmt.Errorf("look up latest stable Gost release (set YAGP_GOST_VERSION to a stable tag if the GitHub API is unreachable): %w", err)
+		return "", fmt.Errorf("look up latest stable Gost release (YAGP_GOST_VERSION can pin a stable tag; GitHub metadata is still required to verify the download): %w", err)
 	}
-	return url, nil
+	return tag, nil
 }
 
-func downloadGostWithCurl(ctx context.Context, url, path string) error {
-	dir, err := os.MkdirTemp(filepath.Dir(path), ".gost-download-*")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	archivePath := filepath.Join(dir, "gost.tar.gz")
-	fmt.Fprintf(os.Stderr, "Downloading Gost: %s\n", url)
-	cmd := exec.CommandContext(ctx, "curl", "-fSL", "--retry", "2", "--connect-timeout", "10", "--max-time", "60",
-		"--write-out", "%{http_code}", "--output", archivePath, "--", url)
-	cmd.Stderr = os.Stderr
-	status, err := cmd.Output()
-	if err != nil {
-		if len(status) > 0 {
-			return fmt.Errorf("download Gost: HTTP %s: %w", status, err)
-		}
-		return fmt.Errorf("download Gost: %w", err)
-	}
-	if string(status) != "200" {
-		return fmt.Errorf("download Gost: unexpected HTTP %s", status)
-	}
-	fmt.Fprintln(os.Stderr, "Gost download completed (HTTP 200); extracting archive")
-	file, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return extractGost(path, file)
-}
-
-func extractGost(path string, source io.Reader) error {
-	compressed, err := gzip.NewReader(source)
-	if err != nil {
-		return fmt.Errorf("open Gost archive: %w", err)
-	}
-	defer compressed.Close()
-	archive := tar.NewReader(compressed)
-	for {
-		header, err := archive.Next()
-		if errors.Is(err, io.EOF) {
-			return errors.New("Gost archive has no executable")
-		}
-		if err != nil {
-			return fmt.Errorf("read Gost archive: %w", err)
-		}
-		if filepath.Clean(header.Name) == "gost" && header.Typeflag == tar.TypeReg && header.Size > 0 {
-			return installGostBinary(path, archive)
-		}
-	}
-}
-
-func installGostBinary(path string, source io.Reader) error {
+func installGostBinary(path string, download func(io.Writer) error) error {
 	file, err := os.CreateTemp(filepath.Dir(path), ".gost-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(file.Name())
-	_, err = io.Copy(file, source)
-	if err = errors.Join(err, file.Chmod(0700), file.Close()); err != nil {
+	err = download(file)
+	if err = errors.Join(err, file.Sync(), file.Chmod(0700), file.Close()); err != nil {
 		return err
 	}
 	return os.Rename(file.Name(), path)

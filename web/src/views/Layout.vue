@@ -72,13 +72,15 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Loading, Menu, SwitchButton, User } from '@element-plus/icons-vue'
 import { getUserInfo } from '@/api/auth'
 import ConsoleNav from '@/components/ConsoleNav.vue'
 import { defaultLogoUrl, useSystemStore } from '@/store/system'
 
 const system = useSystemStore()
+const route = useRoute()
 const upstream = 'https://github.com/code-gopher/gostPanel'
 const mainContent = ref(null)
 const mobileMenu = ref(false)
@@ -98,6 +100,12 @@ async function loadIdentity() {
 }
 
 onMounted(loadIdentity)
+
+// Query-only navigation keeps the page's own detail/return focus handling.
+watch(() => route.path, async () => {
+  await nextTick()
+  mainContent.value?.focus()
+})
 </script>
 
 <style scoped>

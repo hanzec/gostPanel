@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,24 +29,44 @@ func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 		err  string
 	}{
 		{"valid", 200, gostTestArchive(t, "gost"), ""},
-		{"wrong archive", 200, gostTestArchive(t, "other"), "no executable"},
+		{"wrong archive", 200, gostTestArchive(t, "other"), "does not contain the executable"},
 		{"invalid gzip", 200, []byte("invalid"), "EOF"},
 		{"missing download", 404, nil, "404"},
+		{"tampered archive", 200, gostTestArchive(t, "gost"), "SHA-256 or size does not match"},
+		{"trusted metadata unavailable", 200, gostTestArchive(t, "gost"), "HTTP 503"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				if req.URL.Path == gostFixtureReleasePath {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Host == "proxy.test" && req.URL.Path == gostFixtureReleasePath {
 					_, _ = io.WriteString(w, `{"tag_name":"v3.3.3"}`)
 					return
 				}
-				if req.Method != http.MethodGet || req.URL.Path != wantPath {
-					t.Errorf("unexpected release request: %s %s", req.Method, req.URL.Path)
+				if req.Host == "api.github.com" && req.URL.Path == "/repos/go-gost/gost/releases/tags/v3.3.3" {
+					if test.name == "trusted metadata unavailable" {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					data := test.body
+					if test.code != http.StatusOK {
+						data = gostTestArchive(t, "gost")
+					}
+					writeGostReleaseMetadata(w, data)
+					return
+				}
+				if req.Host != "proxy.test" || req.Method != http.MethodGet || req.URL.Path != wantPath {
+					t.Errorf("unexpected release request: %s %s%s", req.Method, req.Host, req.URL.Path)
+					http.NotFound(w, req)
+					return
 				}
 				w.WriteHeader(test.code)
+				if test.name == "tampered archive" {
+					_, _ = w.Write(gostTestArchive(t, "replacement"))
+					return
+				}
 				_, _ = w.Write(test.body)
 			}))
 			t.Cleanup(server.Close)
-			t.Setenv("GH_PROXY", server.URL+"/")
+			routeGostDownloads(t, server)
 			output := filepath.Join(t.TempDir(), "gost")
 			err := run(context.Background(), []string{"prepare-gost", "--output", output})
 			if test.err != "" {
@@ -54,6 +75,10 @@ func TestPrepareGostValidatesDownloadBeforeInstalling(t *testing.T) {
 				}
 				if _, err := os.Stat(output); !os.IsNotExist(err) {
 					t.Fatalf("failed download left an executable: %v", err)
+				}
+				leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(output), ".gost-*"))
+				if err != nil || len(leftovers) != 0 {
+					t.Fatalf("failed download left temporary files: %v, %v", leftovers, err)
 				}
 				return
 			}
@@ -72,9 +97,13 @@ func TestEnsureGostBinaryCLIDownloadsPinnedStableVersion(t *testing.T) {
 	archive := gostTestArchive(t, "gost")
 	var requests atomic.Int32
 	asset := "/https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodGet || req.URL.Path != asset {
-			t.Errorf("unexpected pinned release request: %s %s", req.Method, req.URL.Path)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Host == "api.github.com" && req.URL.Path == "/repos/go-gost/gost/releases/tags/v3.3.3" {
+			writeGostReleaseMetadata(w, archive)
+			return
+		}
+		if req.Method != http.MethodGet || req.Host != "proxy.test" || req.URL.Path != asset {
+			t.Errorf("unexpected pinned release request: %s %s%s", req.Method, req.Host, req.URL.Path)
 			http.NotFound(w, req)
 			return
 		}
@@ -82,7 +111,7 @@ func TestEnsureGostBinaryCLIDownloadsPinnedStableVersion(t *testing.T) {
 		_, _ = w.Write(archive)
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("GH_PROXY", server.URL+"/")
+	routeGostDownloads(t, server)
 	dir := t.TempDir()
 	args := []string{"ensure-gost-binary", "-c", filepath.Join(dir, "node.yaml")}
 	t.Setenv("YAGP_GOST_VERSION", "v3.3.3-nightly")
@@ -101,6 +130,56 @@ func TestEnsureGostBinaryCLIDownloadsPinnedStableVersion(t *testing.T) {
 	}
 }
 
+func TestPrepareGostRetriesGatewayTimeout(t *testing.T) {
+	archive := gostTestArchive(t, "gost")
+	var requests atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Host == "api.github.com" {
+			writeGostReleaseMetadata(w, archive)
+			return
+		}
+		if requests.Add(1) == 1 {
+			http.Error(w, "temporary gateway timeout", http.StatusGatewayTimeout)
+			return
+		}
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(server.Close)
+	routeGostDownloads(t, server)
+	t.Setenv("YAGP_GOST_VERSION", "v3.3.3")
+	output := filepath.Join(t.TempDir(), "gost")
+	if err := run(t.Context(), []string{"prepare-gost", "--output", output}); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("archive download made %d requests, want 2", got)
+	}
+}
+
+func TestPrepareGostStopsRetryWhenCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	archive := gostTestArchive(t, "gost")
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Host == "api.github.com" {
+			writeGostReleaseMetadata(w, archive)
+			return
+		}
+		cancel()
+		http.Error(w, "canceled download", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+	routeGostDownloads(t, server)
+	t.Setenv("YAGP_GOST_VERSION", "v3.3.3")
+	output := filepath.Join(t.TempDir(), "gost")
+	if err := run(ctx, []string{"prepare-gost", "--output", output}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled installation = %v", err)
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("canceled download left an executable: %v", err)
+	}
+}
+
 func TestEnsureGostBootstrapsMissingBinaryAndService(t *testing.T) {
 	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
 		t.Skip("set YAGP_TEST_UPGRADE=1 in a disposable Linux container")
@@ -110,6 +189,10 @@ func TestEnsureGostBootstrapsMissingBinaryAndService(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == gostFixtureReleasePath {
 			_, _ = io.WriteString(w, `{"tag_name":"v3.3.3"}`)
+			return
+		}
+		if r.Host == "api.github.com" && r.URL.Path == "/repos/go-gost/gost/releases/tags/v3.3.3" {
+			writeGostReleaseMetadata(w, archive)
 			return
 		}
 		if r.URL.Path == "/api/config" {
@@ -125,7 +208,7 @@ func TestEnsureGostBootstrapsMissingBinaryAndService(t *testing.T) {
 		_, _ = w.Write(archive)
 	}))
 	t.Cleanup(server.Close)
-	t.Setenv("GH_PROXY", server.URL+"/")
+	routeGostDownloads(t, server)
 	dir := t.TempDir()
 	bin := t.TempDir()
 	logPath := filepath.Join(bin, "systemctl.log")

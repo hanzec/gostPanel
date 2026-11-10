@@ -30,7 +30,7 @@ curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/s
 
 `yagp-daemon` 安装及在线升级默认优先使用 yagp Release 缓存，缓存请求失败时回退到 GitHub。在线升级按面板版本下载并校验发布包的字节数和 SHA-256。可在管道右侧为 `bash` 设置 `GH_PROXY` 覆盖下载路径，设置 `GH_PROXY=''` 可使用 GitHub 直连。
 
-安装和升级 Gost 时按节点的网络出口判断地区。中国大陆、香港和澳门优先通过 gh-fast 下载发布包，代理失败、其他地区或检测失败时使用 GitHub。使用只支持文件下载的代理且无法访问 GitHub API 时，可设置 `YAGP_GOST_VERSION` 为官方稳定版标签，例如 `v3.3.3`，跳过初装时的 Gost 版本查询。
+安装和升级 Gost 时按节点的网络出口判断地区。中国大陆、香港和澳门优先通过 gh-fast 下载发布包，代理失败、其他地区或检测失败时使用 GitHub。发布包须通过从 GitHub API 直连取得的字节数和 SHA-256 校验后才会安装；下载代理不能提供校验摘要。可设置 `YAGP_GOST_VERSION` 为官方稳定版标签，例如 `v3.3.3`，跳过初装时的最新版本查询；仍需能访问 GitHub API 以验证该版本的发布包。
 
 ### 升级已安装节点
 

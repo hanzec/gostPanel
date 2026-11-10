@@ -103,6 +103,13 @@ describe('console routing and Authentik gate', () => {
     await wrapper.get('aside[aria-label="管理导航"] a[href="#/logs"]').trigger('click')
     expect(openMenu.attributes('aria-expanded')).toBe('false')
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/logs'))
+    await flushPromises()
+    expect(document.activeElement.id).toBe('console-main')
+    const navigationLink = wrapper.get('.console-sidebar a[href="#/logs"]')
+    navigationLink.element.focus()
+    await router.push('/logs?keyword=keep-focus')
+    await flushPromises()
+    expect(document.activeElement).toBe(navigationLink.element)
   })
 
   it('loads every navigation route and redirects unknown URLs to the overview', async () => {
@@ -133,6 +140,24 @@ describe('console routing and Authentik gate', () => {
 })
 
 describe('branding and summary components', () => {
+  it('removes cleared copyright text from the live footer and persisted branding', async () => {
+    await router.push('/dashboard')
+    const pinia = createPinia()
+    wrapper = mount(App, { attachTo: document.body, global: { plugins: [router, pinia, ElementPlus] } })
+    await flushPromises()
+    const store = useSystemStore(pinia)
+    expect(wrapper.get('.console-footer').text()).toContain(branding.copyright)
+    expect(localStorage.getItem('copyright')).toBe(branding.copyright)
+
+    adapter.mockImplementationOnce(config => Promise.resolve(reply(config, { ...branding, copyright: '' })))
+    await store.fetchSystemConfig()
+    await flushPromises()
+    expect(store.copyright).toBe('')
+    expect(localStorage.getItem('copyright')).toBeNull()
+    expect(wrapper.get('.console-footer').text()).not.toContain(branding.copyright)
+    expect(wrapper.get('.console-footer').text()).toContain('原作者 code-gopher')
+  })
+
   it('uses sensible defaults and persists server branding', async () => {
     const store = useSystemStore()
     expect(store.siteTitle).toBe('yagp')

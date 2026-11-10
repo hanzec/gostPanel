@@ -218,7 +218,8 @@ func (c *Client) Download(ctx context.Context, component, tag, variant string, d
 			return c.downloadAsset(ctx, cached.DownloadURL, cached, binaryName, dest, url)
 		}
 	}
-	info, err := c.release(ctx, component, "tags/"+tag)
+	// A download proxy must not supply both the archive and its trusted digest.
+	info, err := c.readRelease(ctx, component, "https://api.github.com/repos/"+repository(component)+"/releases/tags/"+tag)
 	if err != nil {
 		return err
 	}

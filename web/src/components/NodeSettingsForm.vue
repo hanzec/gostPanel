@@ -21,7 +21,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { trafficResetPeriods } from '@/utils/node-display'
 
 defineProps({
@@ -32,7 +32,15 @@ defineProps({
 defineEmits(['submit'])
 const formRef = ref(null)
 defineExpose({
-  validate: () => formRef.value.validate(),
+  validate: async () => {
+    try {
+      return await formRef.value.validate()
+    } catch (errors) {
+      await nextTick()
+      formRef.value.$el.querySelector('.is-error input, .is-error textarea')?.focus()
+      throw errors
+    }
+  },
   clearValidate: () => formRef.value.clearValidate()
 })
 </script>

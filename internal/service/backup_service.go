@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -103,7 +102,7 @@ func (s *BackupService) processAutoBackup() {
 	}
 
 	for _, file := range files {
-		if !file.IsDir() && strings.HasPrefix(file.Name(), prefix) {
+		if !file.IsDir() && strings.HasPrefix(file.Name(), prefix) && strings.HasSuffix(file.Name(), ".db") {
 			// 今天已备份
 			return
 		}
@@ -134,17 +133,27 @@ func (s *BackupService) CreateBackup() error {
 		return errors.ErrBackupDirCreateFailed
 	}
 
-	// 生成备份文件名
-	filename := fmt.Sprintf("gost_panel_%s.db", time.Now().Format("20060102_150405"))
-	targetPath := filepath.Join(backupDir, filename)
-
-	// 使用 VACUUM INTO 进行在线备份 (SQLite)
-	err := s.db.Exec("VACUUM INTO ?", targetPath).Error
+	// Keep incomplete snapshots out of retention and daily-backup checks. A unique
+	// temporary name also lets manual and scheduled backups run in the same second.
+	prefix := "gost_panel_" + time.Now().Format("20060102_150405.000000000")
+	temporary, err := os.CreateTemp(backupDir, "."+prefix+"-*.tmp")
 	if err != nil {
-		logger.Warnf("VACUUM INTO 备份失败 (%v)，尝试直接文件复制", err)
-		if err := copyFile(dbPath, targetPath); err != nil {
-			return errors.ErrBackupFailed
-		}
+		return errors.ErrBackupFailed
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Close(); err != nil {
+		return errors.ErrBackupFailed
+	}
+	// Copying the main database file would omit committed data still in its WAL.
+	if err := s.db.Exec("VACUUM INTO ?", temporaryPath).Error; err != nil {
+		logger.Errorf("VACUUM INTO 备份失败: %v", err)
+		return errors.ErrBackupFailed
+	}
+	filename := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(temporaryPath), "."), ".tmp") + ".db"
+	targetPath := filepath.Join(backupDir, filename)
+	if err := os.Rename(temporaryPath, targetPath); err != nil {
+		return errors.ErrBackupFailed
 	}
 
 	logger.Infof("数据库备份成功: %s", targetPath)
@@ -201,26 +210,4 @@ func (s *BackupService) cleanOldBackups(backupDir string) {
 			logger.Infof("已删除旧备份: %s", filePath)
 		}
 	}
-}
-
-// copyFile 复制文件
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func(sourceFile *os.File) {
-		_ = sourceFile.Close()
-	}(sourceFile)
-
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func(destFile *os.File) {
-		_ = destFile.Close()
-	}(destFile)
-
-	_, err = io.Copy(destFile, sourceFile)
-	return err
 }

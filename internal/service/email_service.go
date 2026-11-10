@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/smtp"
 	"yagp/internal/dto"
 	"yagp/internal/errors"
@@ -38,8 +39,8 @@ func (s *SystemConfigService) SendTestEmail(req *dto.EmailConfigReq) error {
 	if req.Port == 465 {
 		// SMTPS 需自定义 dialer
 		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true, // 允许自签名证书，生产环境建议关闭
-			ServerName:         req.Host,
+			MinVersion: tls.VersionTLS12,
+			ServerName: req.Host,
 		}
 
 		conn, err := tls.Dial("tcp", addr, tlsConfig)
@@ -47,47 +48,42 @@ func (s *SystemConfigService) SendTestEmail(req *dto.EmailConfigReq) error {
 			return errors.ErrSMTPConnectFailed
 		}
 
-		client, err := smtp.NewClient(conn, req.Host)
-		if err != nil {
-			return errors.ErrSMTPClientFailed
-		}
-		defer func(client *smtp.Client) {
-			_ = client.Close()
-		}(client)
-
-		if req.Username != "" && req.Password != "" {
-			if err = client.Auth(auth); err != nil {
-				return errors.ErrSMTPAuthFailed
-			}
-		}
-
-		if err = client.Mail(req.FromEmail); err != nil {
-			return errors.ErrSMTPSenderFailed
-		}
-
-		if err = client.Rcpt(to[0]); err != nil {
-			return errors.ErrSMTPRecipientFailed
-		}
-
-		w, err := client.Data()
-		if err != nil {
-			return errors.ErrSMTPDataFailed
-		}
-
-		_, err = w.Write(msg)
-		if err != nil {
-			return errors.ErrSMTPWriteFailed
-		}
-
-		err = w.Close()
-		if err != nil {
-			return errors.ErrSMTPCloseFailed
-		}
-
-		return client.Quit()
+		return sendSMTPTestMessage(conn, req, toEmail, msg)
 
 	}
 
 	// 标准 SMTP / STARTTLS
 	return smtp.SendMail(addr, auth, req.FromEmail, to, msg)
+}
+
+// The SMTP transaction owns the connection, including rejected server greetings.
+func sendSMTPTestMessage(conn net.Conn, req *dto.EmailConfigReq, recipient string, msg []byte) error {
+	defer conn.Close()
+	client, err := smtp.NewClient(conn, req.Host)
+	if err != nil {
+		return errors.ErrSMTPClientFailed
+	}
+	if req.Username != "" && req.Password != "" {
+		auth := smtp.PlainAuth("", req.Username, req.Password, req.Host)
+		if err := client.Auth(auth); err != nil {
+			return errors.ErrSMTPAuthFailed
+		}
+	}
+	if err := client.Mail(req.FromEmail); err != nil {
+		return errors.ErrSMTPSenderFailed
+	}
+	if err := client.Rcpt(recipient); err != nil {
+		return errors.ErrSMTPRecipientFailed
+	}
+	w, err := client.Data()
+	if err != nil {
+		return errors.ErrSMTPDataFailed
+	}
+	if _, err := w.Write(msg); err != nil {
+		return errors.ErrSMTPWriteFailed
+	}
+	if err := w.Close(); err != nil {
+		return errors.ErrSMTPCloseFailed
+	}
+	return client.Quit()
 }

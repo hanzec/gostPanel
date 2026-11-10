@@ -143,7 +143,7 @@
             v-model:current-page="page"
             :page-size="pageSize"
             :total="total"
-            :pager-count="3"
+            :pager-count="5"
             layout="prev, pager, next"
             @current-change="fetchData()"
           />
@@ -349,7 +349,7 @@ const fetchEntrances = async () => {
   entryOptionsLoading.value = true
   try {
     const rows = []
-    const size = 1000
+    const size = 100
     for (let page = 1; ; page++) {
       const { data } = await getRuleList({ page, pageSize: size })
       const batch = data.list || []
@@ -444,7 +444,12 @@ const handleSubmit = async () => {
       await updateTunnelAllowlist(editId.value, allowlist_node_ids)
       ElMessage.success('Gost IP 白名单已保存')
     } else {
-      if (!await formRef.value.validate().catch(() => false)) return
+      if (!await formRef.value.validate().catch(() => false)) {
+        submitLoading.value = false
+        await nextTick()
+        formRef.value.$el.querySelector('.el-form-item.is-error input, .el-form-item.is-error textarea')?.focus()
+        return
+      }
       const payload = legacyEdit.value
         ? { name, remark, protocol, relay_port }
         : { name, remark, entry_rule_id, exit_rule_id }

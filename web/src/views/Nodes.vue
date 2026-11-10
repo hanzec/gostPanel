@@ -4,11 +4,15 @@
       <nav class="node-detail-crumb" aria-label="节点详情导航">
         <RouterLink :to="nodesLocation" class="node-detail-back"><el-icon aria-hidden="true"><ArrowLeft /></el-icon>返回节点列表</RouterLink>
       </nav>
+      <div v-if="detailNode && detailError" class="ops-panel inventory-error" role="alert">
+        <span>节点状态更新失败，当前显示上次获取的数据。</span>
+        <el-button :loading="detailLoading" @click="fetchDetail()">重新加载</el-button>
+      </div>
       <NodeDetails v-if="detailNode" :node="detailNode" @action="handleNodeAction($event, detailNode)" />
       <section v-else class="ops-panel inventory-state">
         <template v-if="detailError">
           <p role="alert">无法读取节点详情。</p>
-          <el-button @click="fetchDetail()">重新加载</el-button>
+          <el-button :loading="detailLoading" @click="fetchDetail()">重新加载</el-button>
         </template>
         <template v-else>
           <el-skeleton :rows="4" animated />
@@ -156,7 +160,7 @@
             v-model:current-page="page"
             :page-size="pageSize"
             :total="total"
-            :pager-count="3"
+            :pager-count="5"
             layout="prev, pager, next"
             @current-change="fetchData()"
           />
@@ -537,13 +541,15 @@ const fetchDetail = async (isSilent = false) => {
   if (isSilent && (detailLoading.value || detailError.value)) return
   const id = detailId.value
   detailLoading.value = true
-  detailError.value = false
   try {
     const res = await getNode(id)
-    if (detailId.value === id) detailNode.value = res.data
+    if (detailId.value === id) {
+      detailNode.value = res.data
+      detailError.value = false
+    }
   } catch (error) {
-    if (detailId.value === id && (!isSilent || error.response?.status === 404)) {
-      detailNode.value = null
+    if (detailId.value === id) {
+      if (error.response?.status === 404) detailNode.value = null
       detailError.value = true
     }
   } finally {

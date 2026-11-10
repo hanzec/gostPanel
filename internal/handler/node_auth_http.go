@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"yagp/internal/model"
 	"yagp/internal/service"
@@ -24,7 +25,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const nodeAuthBodyLimit = 4096
+const (
+	nodeAuthBodyLimit   = 4096
+	nodeAuthBodyTimeout = 10 * time.Second
+)
 
 func (h *ReportHandler) SetNodeTokenKey(key []byte) error {
 	tokens, err := service.NewNodeCredentialService(h.db, key)
@@ -122,12 +126,25 @@ func validNodeToken(token string) bool {
 
 func readNodeProtobuf(w http.ResponseWriter, r *http.Request, request proto.Message) bool {
 	w.Header().Set("Cache-Control", "no-store")
+	// Bound rejected bodies too: net/http may drain them before writing the response.
+	// Only enrollment and refresh use this deadline, never WebSocket sessions.
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Now().Add(nodeAuthBodyTimeout))
 	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || contentType != nodegrpc.ProtobufContentType {
 		http.Error(w, "expected a Protobuf request", http.StatusUnsupportedMediaType)
 		return false
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, nodeAuthBodyLimit))
+	// A failed read must remain bounded while net/http drains or closes the body.
+	if err == nil {
+		_ = controller.SetReadDeadline(time.Time{})
+	}
+	var timeout net.Error
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		http.Error(w, "request body timed out", http.StatusRequestTimeout)
+		return false
+	}
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
