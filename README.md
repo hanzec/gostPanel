@@ -92,26 +92,34 @@ Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板
 
 #### 通过 Webhook 自动更新面板
 
-该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
+该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。服务器需要 GitHub CLI 2.102.0 或更新版本来验证发布产物。先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
 
 ```bash
 docker ps --filter network=public --format 'table {{.Names}}\t{{.Image}}'
 ```
 
-从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。ARM64 服务器将 `pkg` 改为 `yagp-depoly-linux-arm64`。
+从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。以下 Bash 命令会将安装脚本和同版本的产物证明下载到 `/tmp` 下的新目录，验证通过后再用 sudo 执行脚本。
 
 ```bash
-pkg=yagp-depoly-linux-amd64
-tmpdir=$(mktemp -d) &&
+release_base=https://release.hanzec.com/yagp
+bundle=yagp-depoly-attestations.jsonl
+script_url_pattern='^https://release\.hanzec\.com/yagp/releases/download/[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{7}/setup_deploy\.sh$'
+tmpdir=$(mktemp -d /tmp/yagp-deploy.XXXXXXXX) &&
   cd "$tmpdir" &&
-  { curl -fL --connect-timeout 10 --speed-limit 1 --speed-time 20 \
-      -o "$pkg.tar.gz" "https://release.hanzec-overseas.cn/yagp/latest/$pkg.tar.gz" ||
-    curl -fL -o "$pkg.tar.gz" "https://github.com/hanzec/yagp/releases/latest/download/$pkg.tar.gz"; } &&
-  tar -xzf "$pkg.tar.gz" &&
-  sudo "./$pkg" install /opt/yagp-panel --traefik traefik-public
+  script_url=$(curl -q -fsSI --connect-timeout 10 --max-time 30 \
+    -o /dev/null -w '%{redirect_url}' "$release_base/latest/setup_deploy.sh") &&
+  [[ $script_url =~ $script_url_pattern ]] &&
+  curl -q -fsS --connect-timeout 10 --max-time 30 -o setup_deploy.sh "$script_url" &&
+  curl -q -fsS --connect-timeout 10 --max-time 30 -o "$bundle" "${script_url%/*}/$bundle" &&
+  gh attestation verify setup_deploy.sh --bundle "$bundle" --repo hanzec/yagp \
+    --signer-workflow hanzec/yagp/.github/workflows/release.yml \
+    --source-ref refs/heads/master --deny-self-hosted-runners &&
+  sudo bash ./setup_deploy.sh install /opt/yagp-panel --traefik traefik-public
 ```
 
-安装程序将接收器和部署命令装到同一个 `/usr/local/sbin/yagp-depoly`，并将实际面板路径写入 `/etc/yagp-depoly/project-dir`。它会迁移旧部署布局并保留镜像版本。首次安装时，shell 使用系统随机源分别生成 HMAC 密钥和 Bearer Token，在交互终端显示，并写入 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`。重装时复用现有凭据。
+安装脚本会自动识别 AMD64 或 ARM64，从 `release.hanzec.com` 将对应的发布包和同版本的产物证明下载到 `/tmp` 下的临时目录，验证通过后将两个程序安装到 `/usr/local/sbin/`。脚本退出时会清理下载的发布包。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。`yagp-update` 作为一次性 root 任务下载并验签最新脚本，再更新 Compose 或替换两个程序。
+
+从旧版迁移时，执行一次上述 `install` 命令。它会替换旧 sudo 规则、停用并移除旧工具升级单元，保留部署目录、镜像覆盖配置和凭据。首次安装生成的 HMAC 密钥和 Bearer Token 保存在 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`，在交互终端显示。
 
 安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
@@ -119,21 +127,31 @@ tmpdir=$(mktemp -d) &&
 
 在 GitHub 的 `production` Environment 中限制 `master` 部署，将安装输出的 `DEPLOY_WEBHOOK_SECRET` 和 `DEPLOY_WEBHOOK_TOKEN` 配为 Environment secrets。将 `DEPLOY_WEBHOOK_URL` 配为仓库级 Actions Secret，两个工作流任务可共用该基地址。面板任务会补上 `/panel`，也接受 `production` 中现有的完整面板 URL。最后将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
 
-两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`。两个入口共用每 IP 每分钟 20 次的限额。未定义的路径、方法和未启用的升级入口返回 `404`，与鉴权失败一起计数。1 分钟内累计 5 次后，两个入口对该 IP 封禁 15 分钟。封禁、限流或冷却期间，有效入口返回 `429`。收到 `429` 且 `Retry-After` 为 1 到 300 秒时，GitHub Actions 按指定时间等待，用新的时间戳和签名重试，最多重试两次。面板更新每次发送前都确认该版本仍是 `master` 最新提交。HTTP `202` 表示已受理，实际部署结果可用 `sudo journalctl -u yagp-depoly.service -f` 查看。
+两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`。两个入口共用每 IP 每分钟 20 次的限额。未定义的路径、方法和未启用的升级入口返回 `404`，与鉴权失败一起计数。1 分钟内累计 5 次后，两个入口对该 IP 封禁 15 分钟。封禁、限流或冷却期间，有效入口返回 `429`。收到 `429` 且 `Retry-After` 为 1 到 300 秒时，GitHub Actions 按指定时间等待，用新的时间戳和签名重试，最多重试两次。面板更新每次发送前都确认该版本仍是 `master` 最新提交。
+
+Webhook 返回 `202` 后，响应中的 `status_url` 提供短期有效的签名查询地址。用同一 HTTPS 域名访问该地址可获取任务状态和近期日志。`yagp-update` 成功退出后，任务状态才会显示 `succeeded`。
+
+也可在服务器上执行 `sudo /usr/local/sbin/yagp-update depoly` 手动升级两个程序。该命令会等到更新结束并返回实际退出码。手动更新镜像时，使用 `sudo /usr/local/sbin/yagp-update compose`，从标准输入传入目标镜像的 `sha256:…` 摘要。
 
 #### 通过独立 Webhook 升级部署工具
 
-安装正式发布的 `yagp-depoly` 后，可在服务器上启用工具升级入口。服务器需要 GitHub CLI 2.102.0 或更新版本，用于验证随 Release 发布的产物证明。
+安装两个工具后，可用同一个 `setup_deploy.sh` 启用工具升级入口。
 
 ```bash
-sudo /usr/local/sbin/yagp-depoly install-upgrade --traefik traefik-public
+sudo bash ./setup_deploy.sh install-upgrade --traefik traefik-public
 ```
 
-在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET` 和 `UPGRADE_WEBHOOK_TOKEN`。工具升级任务会在仓库级 `DEPLOY_WEBHOOK_URL` 后补上 `/deploy-tool`。若已配置独立的 `UPGRADE_WEBHOOK_URL`，工具升级优先使用它。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。
+在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET` 和 `UPGRADE_WEBHOOK_TOKEN`。工具升级任务会在仓库级 `DEPLOY_WEBHOOK_URL` 后补上 `/deploy-tool`。若已配置独立的 `UPGRADE_WEBHOOK_URL`，工具升级优先使用它。两个入口共用 Traefik 路由和接收器，各自使用独立凭据。
 
-配置好工具升级 URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布成功、面板部署请求受理后等待 60 秒，为 Release 缓存留出更新时间。若面板自动部署已关闭，工作流在 Release 发布成功后开始等待。随后工作流确认 `master` 仍指向本次提交，再发送工具升级请求。
+配置好工具升级 URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布和面板部署步骤成功后等待 60 秒，为 Release 缓存留出更新时间。若面板自动部署已关闭，工作流在 Release 发布成功后开始等待。随后工作流确认 `master` 仍指向本次提交，再发送工具升级请求。
 
-也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务优先从 Release 缓存查询最新版本和下载附件，失败时回退到 GitHub。只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
+也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。`yagp-update` 从 Release 下载发布脚本和同版本的程序包，并验证来自 `hanzec/yagp` 的 `master` 发布工作流的产物证明。它替换两个二进制并重启接收器，启动失败时恢复旧文件。
+
+面板部署和工具升级共用独立的 `yagp-depoly` journal，日志默认写入磁盘并由 journald 轮转。查询链接读取的任务记录保存于 `/var/lib/yagp-update/jobs`，由 systemd-tmpfiles 清理七天前的记录。以下命令可查看接收器和更新任务的日志。
+
+```bash
+sudo journalctl --namespace=+yagp-depoly -u yagp-depoly.service -u 'yagp-update-*.service' -f
+```
 
 **方式 B · Linux 二进制部署**
 
