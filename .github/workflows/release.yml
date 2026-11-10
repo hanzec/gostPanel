@@ -229,18 +229,18 @@ jobs:
           WEBHOOK_PATH: /api/deploy/panel
         run: &notify_depoly |
           set -euo pipefail
-          check_panel_head() {
-            if [[ "$WEBHOOK_PATH" == /api/deploy/panel ]]; then
+          check_master_head() {
+            if [[ "$GITHUB_EVENT_NAME" == push ]]; then
               local master_head
               master_head=$(git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/master)
               if [[ "${master_head%%$'\t'*}" != "$GITHUB_SHA" ]]; then
-                printf 'Skipping deployment because master has advanced.\n'
+                printf 'Skipping webhook request because master has advanced.\n'
                 exit 0
               fi
             fi
           }
 
-          check_panel_head
+          check_master_head
           if [[ "$WEBHOOK_PATH" == /api/deploy/panel ]]; then
             [[ "$WEBHOOK_PAYLOAD" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Missing or invalid image digest.' >&2; exit 1; }
           fi
@@ -293,17 +293,24 @@ jobs:
             fi
             printf 'Webhook returned HTTP 429. Retrying in %s seconds.\n' "$retry_after"
             sleep "$retry_after"
-            check_panel_head
+            check_master_head
           done
 
   upgrade-depoly:
     name: Upgrade the production deployment tool
+    needs: [build, deploy]
     if: >-
       ${{
-        github.event_name == 'workflow_dispatch' &&
-        inputs.upgrade_depoly &&
+        !cancelled() &&
         github.repository == 'hanzec/yagp' &&
-        github.ref == 'refs/heads/master'
+        github.ref == 'refs/heads/master' &&
+        (
+          (github.event_name == 'workflow_dispatch' && inputs.upgrade_depoly) ||
+          (github.event_name == 'push' && vars.YAGP_TOOL_AUTO_UPGRADE == 'true' &&
+            needs.build.result == 'success' &&
+            (needs.deploy.result == 'success' ||
+              (vars.YAGP_DEPLOY_ENABLED != 'true' && needs.deploy.result == 'skipped')))
+        )
       }}
     runs-on: ubuntu-24.04
     environment: production-tool
@@ -313,6 +320,9 @@ jobs:
       queue: max
       cancel-in-progress: false
     steps:
+      - name: Let the latest release cache expire
+        if: github.event_name == 'push'
+        run: sleep 60
       - name: Notify the tool upgrade webhook
         shell: bash
         env:
