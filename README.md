@@ -115,9 +115,9 @@ tmpdir=$(mktemp -d) &&
 
 安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
-安装程序用公网域名生成 Traefik 路由和 `DEPLOY_WEBHOOK_URL`。为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到公网 Traefik file provider 加载的动态目录。迁移时先运行上面的 `install` 命令，然后替换旧路由配置，并从动态目录移除旧的独立升级路由。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
+安装程序用公网域名生成 Traefik 路由和以 `/api/deploy` 结尾的 `DEPLOY_WEBHOOK_URL`。为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到公网 Traefik file provider 加载的动态目录。迁移时先运行上面的 `install` 命令，然后替换旧路由配置，并从动态目录移除旧的独立升级路由。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
 
-在 GitHub 的 `production` Environment 中限制 `master` 部署，将安装输出的 `DEPLOY_WEBHOOK_SECRET`、`DEPLOY_WEBHOOK_TOKEN` 和 `DEPLOY_WEBHOOK_URL` 配为 Secret。最后将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
+在 GitHub 的 `production` Environment 中限制 `master` 部署，将安装输出的 `DEPLOY_WEBHOOK_SECRET` 和 `DEPLOY_WEBHOOK_TOKEN` 配为 Environment secrets。将 `DEPLOY_WEBHOOK_URL` 配为仓库级 Actions Secret，两个工作流任务可共用该基地址。面板任务会补上 `/panel`，也接受 `production` 中现有的完整面板 URL。最后将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
 
 两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`。两个入口共用每 IP 每分钟 20 次的限额。未定义的路径、方法和未启用的升级入口返回 `404`，与鉴权失败一起计数。1 分钟内累计 5 次后，两个入口对该 IP 封禁 15 分钟。封禁、限流或冷却期间，有效入口返回 `429`。收到 `429` 且 `Retry-After` 为 1 到 300 秒时，GitHub Actions 按指定时间等待，用新的时间戳和签名重试，最多重试两次。面板更新每次发送前都确认该版本仍是 `master` 最新提交。HTTP `202` 表示已受理，实际部署结果可用 `sudo journalctl -u yagp-depoly.service -f` 查看。
 
@@ -129,7 +129,7 @@ tmpdir=$(mktemp -d) &&
 sudo /usr/local/sbin/yagp-depoly install-upgrade --traefik traefik-public
 ```
 
-安装程序同样使用公网域名，为 `POST /api/deploy/deploy-tool` 生成 `UPGRADE_WEBHOOK_URL`。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET`、`UPGRADE_WEBHOOK_TOKEN` 和 `UPGRADE_WEBHOOK_URL`。
+在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET` 和 `UPGRADE_WEBHOOK_TOKEN`。工具升级任务会在仓库级 `DEPLOY_WEBHOOK_URL` 后补上 `/deploy-tool`。若已配置独立的 `UPGRADE_WEBHOOK_URL`，工具升级优先使用它。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。
 
 在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务优先从 Release 缓存查询最新版本和下载附件，失败时回退到 GitHub。只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
 

@@ -246,8 +246,11 @@ jobs:
           fi
           : "${WEBHOOK_URL:?Missing webhook URL}"
           : "${WEBHOOK_SECRET:?Missing webhook signing secret}"
+          if [[ "$WEBHOOK_URL" =~ ^(https://[A-Za-z0-9.-]+)/api/deploy/?$ ]]; then
+            WEBHOOK_URL="${BASH_REMATCH[1]}$WEBHOOK_PATH"
+          fi
           [[ "$WEBHOOK_URL" =~ ^https://[A-Za-z0-9.-]+${WEBHOOK_PATH}$ ]] ||
-            { echo "Webhook URL must use HTTPS and the path $WEBHOOK_PATH." >&2; exit 1; }
+            { echo "Webhook URL must use HTTPS and end in /api/deploy or $WEBHOOK_PATH." >&2; exit 1; }
           [[ "$WEBHOOK_TOKEN" =~ ^[0-9a-f]{64}$ ]] ||
             { echo 'Webhook token must be 64 lowercase hexadecimal characters.' >&2; exit 1; }
           webhook_token=$WEBHOOK_TOKEN
@@ -269,7 +272,8 @@ jobs:
           PY
             )
 
-            response=$(curl -q --proto '=https' --silent --show-error --connect-timeout 10 --max-time 30 \
+            printf 'Sending %s webhook (attempt %s of 3).\n' "$WEBHOOK_PATH" "$attempt"
+            response=$(curl -q --proto '=https' --silent --connect-timeout 10 --max-time 30 \
               --output /dev/null --write-out '%{http_code} %header{retry-after}' --request POST \
               --header @- --data-binary "$WEBHOOK_PAYLOAD" -- "$WEBHOOK_URL" <<EOF
           Authorization: Bearer $webhook_token
@@ -277,7 +281,7 @@ jobs:
           X-Yagp-Signature: $signature
           Content-Type: text/plain
           EOF
-            )
+            ) || { echo "Webhook request failed (curl exit status $?)." >&2; exit 1; }
             read -r status retry_after <<< "$response"
             if [[ "$status" == 202 ]]; then
               printf 'Request accepted for %s. Check the server journal for the result.\n' "$WEBHOOK_PAYLOAD"
@@ -312,7 +316,7 @@ jobs:
       - name: Notify the tool upgrade webhook
         shell: bash
         env:
-          WEBHOOK_URL: ${{ secrets.UPGRADE_WEBHOOK_URL }}
+          WEBHOOK_URL: ${{ secrets.UPGRADE_WEBHOOK_URL || secrets.DEPLOY_WEBHOOK_URL }}
           WEBHOOK_SECRET: ${{ secrets.UPGRADE_WEBHOOK_SECRET }}
           WEBHOOK_TOKEN: ${{ secrets.UPGRADE_WEBHOOK_TOKEN }}
           WEBHOOK_PAYLOAD: upgrade
