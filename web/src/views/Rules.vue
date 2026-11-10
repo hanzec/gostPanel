@@ -623,7 +623,9 @@ const handleExport = async () => {
 
     exportJsonData.value = JSON.stringify(rows.map(rule => ({
       name: rule.name,
-      node_id: rule.node_id || rule.tunnel?.entry_node_id,
+      node_id: rule.node_id,
+      type: rule.type,
+      tunnel_id: rule.tunnel_id,
       protocol: rule.protocol,
       listen_ip: rule.listen_ip ?? '',
       listen_port: rule.listen_port,
@@ -682,6 +684,8 @@ const handleImport = async () => {
       await createRule({
         name: rule.name || '导入规则',
         node_id: rule.node_id,
+        type: rule.type,
+        tunnel_id: rule.tunnel_id,
         protocol: rule.protocol || 'tcp',
         listen_ip: rule.listen_ip ?? '',
         listen_port: rule.listen_port || 0,

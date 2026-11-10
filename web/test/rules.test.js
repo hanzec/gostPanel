@@ -334,6 +334,36 @@ describe('forwarding rule JSON exchange', () => {
     expect(button(wrapper, '导出 JSON').classes()).not.toContain('is-loading')
   })
 
+  it('preserves legacy tunnel routing when exported rules are imported again', async () => {
+    const legacy = {
+      ...relayRule, type: 'tunnel', node_id: null, tunnel_id: 8,
+      tunnel: { id: 8, entry_node_id: entryNode.id }
+    }
+    const standalone = { ...direct, type: 'forward', tunnel_id: null }
+    getRuleList.mockResolvedValue(result([legacy, standalone]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '导出 JSON').trigger('click')
+    await flushPromises()
+    const json = editDialog(wrapper).get('textarea').element.value
+    const exported = JSON.parse(json)
+    expect(exported[0]).toMatchObject({ type: 'tunnel', tunnel_id: 8, node_id: null })
+    expect(exported[0]).not.toHaveProperty('tunnel')
+    expect(exported[1]).toMatchObject({ type: 'forward', tunnel_id: null, node_id: entryNode.id })
+    await button(editDialog(wrapper), '关闭').trigger('click')
+    await button(wrapper, '导入 JSON').trigger('click')
+    await editDialog(wrapper).get('textarea').setValue(json)
+    await button(editDialog(wrapper), '创建导入规则').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledTimes(2)
+    expect(createRule).toHaveBeenNthCalledWith(1, {
+      ...exported[0], strategy: 'round'
+    })
+    expect(createRule).toHaveBeenNthCalledWith(2, exported[1])
+    expect(startRule).not.toHaveBeenCalled()
+    expect(ElMessage.success).toHaveBeenCalledWith('已导入 2 条规则')
+  })
+
   it('validates JSON and reports complete, partial and unsuccessful imports', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()

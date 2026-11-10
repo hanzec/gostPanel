@@ -122,7 +122,7 @@ func TestSelectedEntranceReportsNodeConfigurationFailures(t *testing.T) {
 	requireServiceError(t, rules.startSelectedEntrance(&rule, &entry, &tunnel, nil), bizerrors.ErrRuleStartFailed)
 	stored, err := rules.GetByID(rule.ID)
 	requireServiceError(t, err, nil)
-	if stored.Status != model.RuleStatusError || rule.ServiceID == "" || remote.service(rule.ServiceID).Name == "" {
+	if stored.Status != model.RuleStatusError || stored.ServiceID != rule.ServiceID || rule.ServiceID == "" || remote.service(rule.ServiceID).Name == "" {
 		t.Fatalf("failed start did not retain service information for tunnel rollback: rule=%+v stored=%+v", rule, stored)
 	}
 

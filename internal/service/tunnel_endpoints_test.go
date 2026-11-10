@@ -215,3 +215,56 @@ func TestEndpointTunnelRetainsLinkForRetryIfNodeCannotSave(t *testing.T) {
 	requireServiceError(t, svc.Start(rows[0].ID, testAdmin, testIP, testAgent), nil)
 	requireServiceError(t, svc.Delete(rows[0].ID, testAdmin, testIP, testAgent), nil)
 }
+
+func TestEndpointTunnelRetriesEntranceCleanupAfterFailedFirstSave(t *testing.T) {
+	for _, action := range []string{"stop", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			db := newServiceTestDB(t)
+			loadServiceConfig(t, "report:\n  listen: 127.0.0.1:39001\n")
+			entryRemote, exitRemote := &lifecycleNode{t: t}, &lifecycleNode{t: t}
+			entry, exit := startServiceTestNode(t, entryRemote), startServiceTestNode(t, exitRemote)
+			exit.Name = "exit"
+			saveServiceFixtures(t, db, &entry, &exit)
+			entryRule := model.GostRule{Name: "source", NodeID: &entry.ID, Type: model.RuleTypeForward, Protocol: model.RuleProtocolTCP, ListenPort: 10110, Targets: []string{"origin.test:1234"}}
+			exitRule := model.GostRule{Name: "exit", NodeID: &exit.ID, Type: model.RuleTypeForward, Protocol: model.RuleProtocolTCP, ListenPort: 10111}
+			saveServiceFixtures(t, db, &entryRule, &exitRule)
+			serviceID := fmt.Sprintf("rule-%d", entryRule.ID)
+			entryRemote.mu.Lock()
+			entryRemote.reject = map[string]int{
+				"POST /config?format=yaml":             http.StatusBadGateway,
+				"DELETE /config/services/" + serviceID: http.StatusBadGateway,
+			}
+			entryRemote.mu.Unlock()
+			svc := NewTunnelService(db)
+			_, err := svc.Create(&dto.CreateTunnelReq{Name: "retry", EntryRuleID: entryRule.ID, ExitRuleID: exitRule.ID}, testAdmin, testIP, testAgent)
+			requireServiceError(t, err, bizerrors.ErrRuleStartFailed)
+
+			// Reload through a new service, as a later request or panel restart would.
+			svc = NewTunnelService(db)
+			rows, _, err := svc.List(&dto.TunnelListReq{})
+			requireServiceError(t, err, nil)
+			if len(rows) != 1 || rows[0].Status != model.TunnelStatusError {
+				t.Fatalf("failed rollback should retain one retryable tunnel: %+v", rows)
+			}
+			tunnel, err := svc.GetByID(rows[0].ID)
+			requireServiceError(t, err, nil)
+			if tunnel.EntryRule.ServiceID != serviceID || tunnel.EntryRule.Status != model.RuleStatusError || entryRemote.service(serviceID).Name == "" {
+				t.Fatalf("live entrance identity was lost: %+v", tunnel.EntryRule)
+			}
+			if entryRemote.chain(tunnelChainName(tunnel.ID)).Name == "" || exitRemote.service(relayServiceName(tunnel.ID)).Name == "" {
+				t.Fatal("failed entrance rollback must retain its chain and relay")
+			}
+			entryRemote.mu.Lock()
+			entryRemote.reject = nil
+			entryRemote.mu.Unlock()
+			if action == "stop" {
+				requireServiceError(t, svc.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
+			} else {
+				requireServiceError(t, svc.Delete(tunnel.ID, testAdmin, testIP, testAgent), nil)
+			}
+			if entryRemote.service(serviceID).Name != "" || entryRemote.chain(tunnelChainName(tunnel.ID)).Name != "" || exitRemote.service(relayServiceName(tunnel.ID)).Name != "" {
+				t.Fatal("retry left a live entrance, chain or relay behind")
+			}
+		})
+	}
+}
