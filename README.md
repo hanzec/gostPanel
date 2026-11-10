@@ -92,27 +92,34 @@ Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板
 
 #### 通过 Webhook 自动更新面板
 
-该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。服务器需要 GitHub CLI 2.102.0 或更新版本来验签发布脚本。先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
+该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。服务器需要 GitHub CLI 2.102.0 或更新版本来验证发布产物。先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
 
 ```bash
 docker ps --filter network=public --format 'table {{.Names}}\t{{.Image}}'
 ```
 
-从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。ARM64 服务器将 `pkg` 改为 `yagp-depoly-linux-arm64`。
+从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。以下 Bash 命令会将安装脚本和同版本的产物证明下载到 `/tmp` 下的新目录，验证通过后再用 sudo 执行脚本。
 
 ```bash
-pkg=yagp-depoly-linux-amd64
-tmpdir=$(mktemp -d) &&
+release_base=https://release.hanzec.com/yagp
+bundle=yagp-depoly-attestations.jsonl
+script_url_pattern='^https://release\.hanzec\.com/yagp/releases/download/[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{7}/setup_deploy\.sh$'
+tmpdir=$(mktemp -d /tmp/yagp-deploy.XXXXXXXX) &&
   cd "$tmpdir" &&
-  curl -fL --connect-timeout 10 --speed-limit 1 --speed-time 20 \
-    -o "$pkg.tar.gz" "https://release.hanzec.com/yagp/latest/$pkg.tar.gz" &&
-  tar -xzf "$pkg.tar.gz" &&
+  script_url=$(curl -q -fsSI --connect-timeout 10 --max-time 30 \
+    -o /dev/null -w '%{redirect_url}' "$release_base/latest/setup_deploy.sh") &&
+  [[ $script_url =~ $script_url_pattern ]] &&
+  curl -q -fsS --connect-timeout 10 --max-time 30 -o setup_deploy.sh "$script_url" &&
+  curl -q -fsS --connect-timeout 10 --max-time 30 -o "$bundle" "${script_url%/*}/$bundle" &&
+  gh attestation verify setup_deploy.sh --bundle "$bundle" --repo hanzec/yagp \
+    --signer-workflow hanzec/yagp/.github/workflows/release.yml \
+    --source-ref refs/heads/master --deny-self-hosted-runners &&
   sudo bash ./setup_deploy.sh install /opt/yagp-panel --traefik traefik-public
 ```
 
-安装程序将两个程序装到 `/usr/local/sbin/`。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。`yagp-update` 作为一次性 root 任务从 `release.hanzec.com` 下载并验签最新脚本，再更新 Compose 或替换两个程序。
+安装脚本会自动识别 AMD64 或 ARM64，从 `release.hanzec.com` 将对应的发布包和同版本的产物证明下载到 `/tmp` 下的临时目录，验证通过后将两个程序安装到 `/usr/local/sbin/`。脚本退出时会清理下载的发布包。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。`yagp-update` 作为一次性 root 任务下载并验签最新脚本，再更新 Compose 或替换两个程序。
 
-从旧版迁移时，先解压同时包含两个程序和 `setup_deploy.sh` 的发布包，再执行上述 `install`。它会替换旧 sudo 规则、停用并移除旧工具升级单元，保留部署目录、镜像覆盖配置和凭据。首次安装生成的 HMAC 密钥和 Bearer Token 保存在 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`，在交互终端显示。
+从旧版迁移时，执行一次上述 `install` 命令。它会替换旧 sudo 规则、停用并移除旧工具升级单元，保留部署目录、镜像覆盖配置和凭据。首次安装生成的 HMAC 密钥和 Bearer Token 保存在 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`，在交互终端显示。
 
 安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
@@ -128,7 +135,7 @@ Webhook 返回 `202` 后，响应中的 `status_url` 提供短期有效的签名
 
 #### 通过独立 Webhook 升级部署工具
 
-安装两个工具后，可在发布包解压目录中启用工具升级入口。
+安装两个工具后，可用同一个 `setup_deploy.sh` 启用工具升级入口。
 
 ```bash
 sudo bash ./setup_deploy.sh install-upgrade --traefik traefik-public

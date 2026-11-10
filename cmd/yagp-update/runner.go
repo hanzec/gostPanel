@@ -150,11 +150,11 @@ func runReleaseScript(ctx context.Context, client *http.Client, gh string, reque
 	}
 	defer os.RemoveAll(stage)
 
-	script := filepath.Join(stage, "yagp-update.sh")
+	script := filepath.Join(stage, "setup_deploy.sh")
 	bundle := filepath.Join(stage, selfUpgradeBundle)
 	base := upgrade.YAGPReleaseCache + "/releases/download/" + tag + "/"
 	log.Printf("downloading update script for %s", tag)
-	if err := downloadSelfUpgradeFile(fetchCtx, client, base+"yagp-update.sh", script, 256<<10); err != nil {
+	if err := downloadSelfUpgradeFile(fetchCtx, client, base+"setup_deploy.sh", script, 256<<10); err != nil {
 		return fmt.Errorf("download update script: %w", err)
 	}
 	if err := downloadSelfUpgradeFile(fetchCtx, client, base+selfUpgradeBundle, bundle, selfUpgradeMaxBundle); err != nil {

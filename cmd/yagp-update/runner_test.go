@@ -237,7 +237,7 @@ printf '%s %s %s\n' "$1" "$YAGP_UPDATE_RELEASE_TAG" "$digest"
 						t.Error("release request did not select JSON")
 					}
 					body = `{"tag":"` + tag + `"}`
-				case upgrade.YAGPReleaseCache + "/releases/download/" + tag + "/yagp-update.sh":
+				case upgrade.YAGPReleaseCache + "/releases/download/" + tag + "/setup_deploy.sh":
 					body = script
 				case upgrade.YAGPReleaseCache + "/releases/download/" + tag + "/" + selfUpgradeBundle:
 					body = "test attestation"

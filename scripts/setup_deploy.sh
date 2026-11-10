@@ -20,6 +20,7 @@ readonly managed_override="$managed_dir/compose.yml"
 readonly previous_override_name=.yagp-depoly.yml
 readonly docker_socket=/var/run/docker.sock
 readonly image_repo=ghcr.io/hanzec/yagp
+readonly release_cache=https://release.hanzec.com/yagp
 readonly webhook_base_path=/api/deploy
 readonly upgrade_endpoint=/api/deploy/deploy-tool
 
@@ -55,26 +56,26 @@ log() {
     printf '[%s] %s\n' "$(/bin/date '+%Y-%m-%d %H:%M:%S %z')" "$*" >&2
 }
 
-install_webhook() {
+install_webhook() (
     [[ $# -ge 1 ]] || usage
     check_systemd
-    check_release_cli
-    local project_dir project proxy package_dir arch receiver updater traefik secret token old_secret old_token with_upgrade=false
+    local project_dir project proxy stage gh_path arch receiver updater traefik secret token old_secret old_token with_upgrade=false
+    gh_path=$(check_release_cli)
     project_dir=$(resolve_project_dir "$1")
     shift
     proxy=$(traefik_option "$@")
-    package_dir=$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")
     case $(uname -m) in
         x86_64) arch=amd64 ;;
         aarch64|arm64) arch=arm64 ;;
         *) fail '部署工具需要 Linux amd64 或 arm64。' ;;
     esac
-    receiver="$package_dir/yagp-depoly-linux-$arch"
-    updater="$package_dir/yagp-update-linux-$arch"
-    [[ -f $receiver && ! -L $receiver && -f $updater && ! -L $updater ]] ||
-        fail '请在同一目录中解压 setup_deploy.sh、yagp-depoly 和 yagp-update。'
     project=$(inspect_project "$project_dir")
     traefik=$(inspect_traefik "$project_dir" "$project" "$proxy")
+    stage=$(mktemp -d /tmp/yagp-deploy.XXXXXXXXXX)
+    trap 'rm -rf -- "$stage"' EXIT
+    receiver="yagp-depoly-linux-$arch"
+    updater="yagp-update-linux-$arch"
+    download_tools "$stage" "$gh_path" "$receiver" "$updater"
     prepare_managed_dir
     lock_deploy
     old_secret="$project_dir/.yagp-webhook-secret"
@@ -90,7 +91,7 @@ install_webhook() {
     fi
 
     stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
-    setup_account "$project_dir" "$project" "$receiver" "$updater" "$with_upgrade"
+    setup_account "$project_dir" "$project" "$stage/$receiver" "$stage/$updater" "$with_upgrade"
     printf '%s\n' "$secret" | write_file "$managed_dir/panel.secret" 0600
     printf '%s\n' "$token" | write_file "$managed_dir/panel.token" 0600
     write_hook_unit "$traefik" "$with_upgrade"
@@ -105,11 +106,11 @@ install_webhook() {
     log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
     log "查看部署日志：$log_query"
     show_install_result DEPLOY_WEBHOOK panel "$webhook_base_path" "$traefik" "$secret" "$token"
-}
+)
 
 install_upgrade() {
     check_systemd
-    check_release_cli
+    check_release_cli >/dev/null
     check_managed_file "$listener_unit"
     check_managed_file "$install_path"
     check_managed_file "$update_path"
@@ -166,6 +167,33 @@ check_release_cli() {
     [[ $version =~ $version_pattern ]] &&
         (( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 102) )) ||
         fail '验证发布脚本需要 gh 2.102.0 或更新版本。'
+    printf '%s\n' "$gh_path"
+}
+
+download_tools() {
+    local stage=$1 gh_path=$2 receiver=$3 updater=$4
+    local archive="$receiver.tar.gz" bundle=yagp-depoly-attestations.jsonl url tag base
+    local tag_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-[0-9a-f]{7}$'
+    local -a curl_options=(-q -fsS --proto '=https' --connect-timeout 10 --max-time 120)
+    url=$(curl "${curl_options[@]}" --head --output /dev/null --write-out '%{redirect_url}' -- "$release_cache/latest/$archive") ||
+        fail '无法查询最新的部署工具发布包。'
+    base="$release_cache/releases/download/"
+    [[ $url == "$base"*"/$archive" ]] || fail '发布缓存返回了无效的下载地址。'
+    tag=${url#"$base"}
+    tag=${tag%"/$archive"}
+    [[ $tag =~ $tag_pattern ]] || fail '发布缓存返回了无效的版本号。'
+
+    log "下载部署工具 $tag（$receiver）。"
+    curl "${curl_options[@]}" --max-filesize 67108864 --output "$stage/$archive" -- "$url" ||
+        fail '无法下载部署工具发布包。'
+    curl "${curl_options[@]}" --max-filesize 2097152 --output "$stage/$bundle" -- "$base$tag/$bundle" ||
+        fail '无法下载发布包证明。'
+    log "验证部署工具 $tag 的发布证明。"
+    env -i PATH="$PATH" HOME="$stage" GH_CONFIG_DIR="$stage/.gh" GH_PROMPT_DISABLED=1 LC_ALL=C \
+        "$gh_path" attestation verify "$stage/$archive" --bundle "$stage/$bundle" --repo hanzec/yagp \
+        --signer-workflow hanzec/yagp/.github/workflows/release.yml --source-ref refs/heads/master --deny-self-hosted-runners ||
+        fail '部署工具发布包验签失败。'
+    tar -xzf "$stage/$archive" -C "$stage" -- "$receiver" "$updater" || fail '发布包缺少部署工具。'
 }
 
 traefik_option() {
