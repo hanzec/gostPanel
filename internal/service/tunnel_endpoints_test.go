@@ -18,6 +18,7 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	loadServiceConfig(t, "report:\n  listen: 127.0.0.1:39001\n")
 	entryRemote, exitRemote := &lifecycleNode{t: t}, &lifecycleNode{t: t}
 	entry, exit := startServiceTestNode(t, entryRemote), startServiceTestNode(t, exitRemote)
+	entry.IPv4 = "192.0.2.13"
 	exit.Name, exit.Address = "exit", "198.51.100.21"
 	saveServiceFixtures(t, db, &entry, &exit)
 	rules, tunnels := NewRuleService(db), NewTunnelService(db)
@@ -86,6 +87,7 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	entryRemote.mu.Lock()
 	delete(entryRemote.reject, "POST /config/chains")
 	entryRemote.mu.Unlock()
+	request.AllowlistNodeIDs = []uint{entry.ID}
 	tunnel, err := tunnels.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
 	if tunnel.Status != model.TunnelStatusRunning || tunnel.EntryRule == nil || tunnel.ExitRule == nil ||
@@ -101,6 +103,10 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	if relay.Addr != ":9816" || relay.Metadata["enableStats"] != true || relay.Handler.Auth == nil || relay.Handler.Auth.Password == "" ||
 		*chain.Hops[0].Nodes[0].Connector.Auth != *relay.Handler.Auth || chain.Hops[0].Nodes[0].Addr != "198.51.100.21:9816" {
 		t.Fatalf("exit and chain do not use the same protected Relay endpoint")
+	}
+	allowlist := exitRemote.admission(gost.TunnelRelayAllowlistName(relay.Name))
+	if relay.Admission != allowlist.Name || !allowlist.Whitelist || len(allowlist.Matchers) != 1 || allowlist.Matchers[0] != entry.IPv4 {
+		t.Fatalf("endpoint Relay admission = %q, %+v", relay.Admission, allowlist)
 	}
 	_, err = tunnels.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrTunnelEndpointInUse)
@@ -124,14 +130,14 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	if addr, _ := entryRemote.chain(chain.Name).TunnelRelayAddress(); addr != "198.51.100.22:9816" {
 		t.Fatalf("updated relay address = %q", addr)
 	}
-	if _, pending := sync.unsavedChains.Load(entry.ID); !pending {
+	if _, pending := sync.unsavedTunnelConfig.Load(entry.ID); !pending {
 		t.Fatal("failed save was not scheduled for retry")
 	}
 	entryRemote.mu.Lock()
 	delete(entryRemote.reject, "POST /config?format=yaml")
 	entryRemote.mu.Unlock()
 	sync.syncTunnels(client, entry.ID, []model.GostTunnel{*tunnel}, []gost.ChainConfig{entryRemote.chain(chain.Name)}, exitAddresses)
-	if _, pending := sync.unsavedChains.Load(entry.ID); pending {
+	if _, pending := sync.unsavedTunnelConfig.Load(entry.ID); pending {
 		t.Fatal("successful retry did not clear pending save")
 	}
 	requireServiceError(t, repository.NewTunnelRepository(db).StopByNodeID(exit.ID), nil)

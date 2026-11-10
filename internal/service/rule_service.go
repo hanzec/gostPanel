@@ -578,7 +578,7 @@ func (s *RuleService) buildAndStartService(client *gost.Client, node *model.Gost
 		return err
 	}
 
-	if err := createServiceWithTrafficQuota(s.nodeRepo, client, *node, svc); err != nil {
+	if _, err := createServiceWithTrafficQuota(s.nodeRepo, client, *node, svc); err != nil {
 		_ = s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusError)
 		if stderrors.Is(err, errors.ErrNodeTrafficQuotaUnavailable) {
 			return err

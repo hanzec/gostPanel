@@ -120,6 +120,7 @@
                     <template #dropdown>
                       <el-dropdown-menu>
                         <el-dropdown-item command="edit" :disabled="tunnel.status === 'running'">编辑隧道</el-dropdown-item>
+                        <el-dropdown-item command="allowlist">Gost IP 白名单</el-dropdown-item>
                         <el-dropdown-item command="copy">复制隧道</el-dropdown-item>
                         <el-dropdown-item command="delete" divided class="inventory-danger">删除隧道</el-dropdown-item>
                       </el-dropdown-menu>
@@ -152,10 +153,13 @@
 
     <PanelDialog
       v-model="dialogVisible"
-      :title="isEdit ? '编辑隧道' : '添加隧道'"
+      :title="dialogTitle"
       :close-on-click-modal="false"
+      :close-on-press-escape="!submitLoading"
+      :show-close="!submitLoading"
     >
-      <p v-if="legacyEdit" class="tunnel-dialog-hint ops-muted">此隧道直接关联节点，可调整协议和 Relay 端口。</p>
+      <p v-if="allowlistOnly" class="tunnel-dialog-hint ops-muted">正在设置「{{ form.name }}」。运行中的隧道会在下一轮同步时应用变更，首次绑定白名单时会重载出口 Relay。</p>
+      <p v-else-if="legacyEdit" class="tunnel-dialog-hint ops-muted">此隧道直接关联节点，可调整协议和 Relay 端口。</p>
       <div v-else-if="entryOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
         <span>无法加载入口选项。</span>
         <el-button :loading="entryOptionsLoading" @click="fetchEntrances">重新加载入口</el-button>
@@ -166,8 +170,8 @@
         <template v-else>选定两端后，面板将配置源端与目的端并启动隧道。</template>
         <RouterLink to="/rules" class="tunnel-link" @click="dialogVisible = false">前往入口管理</RouterLink>
       </p>
-      <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" @submit.prevent="handleSubmit">
-        <div class="inventory-form-grid">
+      <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" :disabled="submitLoading" @submit.prevent="handleSubmit">
+        <div v-if="!allowlistOnly" class="inventory-form-grid">
           <el-form-item label="隧道名称" prop="name" class="inventory-form-wide">
             <el-input v-model="form.name" placeholder="例如 生产环境中继" />
           </el-form-item>
@@ -208,26 +212,65 @@
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录链路用途" />
           </el-form-item>
         </div>
+        <el-form-item class="tunnel-allowlist-field" label="Gost IP 白名单" prop="allowlist_node_ids" for="tunnel-allowlist-nodes">
+          <el-select
+            id="tunnel-allowlist-nodes"
+            v-model="form.allowlist_node_ids"
+            aria-describedby="tunnel-allowlist-help"
+            :loading="nodeOptionsLoading"
+            :disabled="nodeOptionsLoading || nodeOptionsError"
+            multiple
+            filterable
+            clearable
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="选择已获取 IP 的来源节点"
+            no-data-text="请先在节点管理中添加节点"
+          >
+            <el-option
+              v-for="node in nodeList"
+              :key="node.id"
+              :label="`${node.name}（${nodeAddresses(node).join(' / ') || '未获取 IP'}）`"
+              :value="node.id"
+              :disabled="!nodeAddresses(node).length && !form.allowlist_node_ids.includes(node.id)"
+            />
+            <el-option v-for="id in missingAllowlistNodes" :key="id" :label="`节点 #${id}（未找到）`" :value="id" />
+          </el-select>
+          <span id="tunnel-allowlist-help" class="tunnel-form-hint ops-muted">仅允许所选节点上报的 IPv4 和 IPv6 连接此隧道的出口 Relay。清空选择并保存可解除来源 IP 限制。</span>
+        </el-form-item>
+        <div v-if="nodeOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
+          <span>无法加载来源节点选项。</span>
+          <el-button :loading="nodeOptionsLoading" @click="fetchNodes">重新加载来源节点</el-button>
+        </div>
+        <dl v-else-if="!nodeOptionsLoading && form.allowlist_node_ids.length" class="tunnel-allowlist-preview" aria-live="polite">
+          <dt>来源 IP 预览</dt>
+          <dd v-if="allowlistAddresses.length">
+            <code v-for="address in allowlistAddresses" :key="address" class="ops-mono">{{ address }}</code>
+          </dd>
+          <dd v-else class="ops-muted">所选节点暂无可用 IP</dd>
+        </dl>
+        <p v-if="allowlistError" ref="allowlistErrorNotice" class="tunnel-allowlist-error" role="alert" tabindex="-1">{{ allowlistError }}</p>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitLoading" :disabled="!legacyEdit && (entryOptionsLoading || entryOptionsError)" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加并启动' }}</el-button>
+        <el-button :disabled="submitLoading" @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitLoading" :disabled="submitDisabled" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加并启动' }}</el-button>
       </template>
     </PanelDialog>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, Connection, Plus, Refresh, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { getTunnelList, createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
-import { getNodeList } from '@/api/node'
+import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
+import { getRoutingNodes } from '@/api/node'
 import { getRuleList } from '@/api/rule'
+import { nodeAddresses } from '@/utils/node-display'
 
 const tunnelStates = {
   running: { label: '运行中', icon: VideoPlay, tone: 'success' },
@@ -266,9 +309,21 @@ const dialogVisible = ref(false)
 const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
 const legacyEdit = ref(false)
+const allowlistOnly = ref(false)
+const allowlistError = ref('')
+const allowlistErrorNotice = ref(null)
 const submitLoading = ref(false)
+const submitDisabled = computed(() => allowlistOnly.value
+  ? nodeOptionsLoading.value || nodeOptionsError.value
+  : !legacyEdit.value && (entryOptionsLoading.value || entryOptionsError.value))
+const dialogTitle = computed(() => allowlistOnly.value ? 'Gost IP 白名单' : (isEdit.value ? '编辑隧道' : '添加隧道'))
 const formRef = ref(null)
-const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', relay_port: null, remark: '' })
+const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', relay_port: null, remark: '', allowlist_node_ids: [] })
+let savedAllowlistNodeIds = []
+const missingAllowlistNodes = computed(() => form.allowlist_node_ids.filter(id => !nodeList.value.some(node => node.id === id)))
+const allowlistAddresses = computed(() => [...new Set(nodeList.value
+  .filter(node => form.allowlist_node_ids.includes(node.id))
+  .flatMap(nodeAddresses))])
 const listenEndpoint = ({ listen_ip: ip, listen_port: port }) => (ip?.includes(':') ? '[' + ip + ']' : ip || '*') + ':' + port
 const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
 const entryEntrance = computed(() => entryList.value.find(rule => rule.id === form.entry_rule_id))
@@ -313,10 +368,10 @@ const fetchEntrances = async () => {
 }
 
 const fetchNodes = async () => {
+  if (nodeOptionsLoading.value) return
   nodeOptionsLoading.value = true
   try {
-    const res = await getNodeList({ pageSize: 100 })
-    nodeList.value = res.data.list || []
+    nodeList.value = await getRoutingNodes()
     nodeOptionsError.value = false
   } catch {
     nodeOptionsError.value = true
@@ -358,41 +413,62 @@ const clearFilters = () => {
   handleSearch()
 }
 
-const openDialog = (row = null) => {
+const openDialog = (row = null, onlyAllowlist = false) => {
   editId.value = row?.id ?? null
   legacyEdit.value = !!row && !row.entry_rule_id
+  allowlistOnly.value = onlyAllowlist
+  allowlistError.value = ''
+  savedAllowlistNodeIds = row?.allowlist_node_ids || []
   Object.assign(form, {
     name: row?.name || '',
     entry_rule_id: row?.entry_rule_id ?? null,
     exit_rule_id: row?.exit_rule_id ?? null,
     protocol: row?.protocol || 'tcp',
     relay_port: row?.relay_port ?? null,
-    remark: row?.remark || ''
+    remark: row?.remark || '',
+    allowlist_node_ids: [...savedAllowlistNodeIds]
   })
   formRef.value?.clearValidate()
   dialogVisible.value = true
-  if (!legacyEdit.value) fetchEntrances()
+  if (!legacyEdit.value && !onlyAllowlist) fetchEntrances()
+  if (!nodeOptionsError.value) fetchNodes()
 }
 
 const handleSubmit = async () => {
-  if (!formRef.value || submitLoading.value) return
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
-
+  if (!formRef.value || submitLoading.value || submitDisabled.value) return
   submitLoading.value = true
+  allowlistError.value = ''
   try {
-    const { name, remark, entry_rule_id, exit_rule_id, protocol, relay_port } = form
-    const payload = legacyEdit.value ? { name, remark, protocol, relay_port } : { name, remark, entry_rule_id, exit_rule_id }
-    if (isEdit.value) {
-      await updateTunnel(editId.value, payload)
-      ElMessage.success('隧道已更新')
+    const { name, remark, entry_rule_id, exit_rule_id, protocol, relay_port, allowlist_node_ids } = form
+    if (allowlistOnly.value) {
+      await updateTunnelAllowlist(editId.value, allowlist_node_ids)
+      ElMessage.success('Gost IP 白名单已保存')
     } else {
-      await createTunnel(payload)
-      ElMessage.success('隧道已添加并启动')
+      if (!await formRef.value.validate().catch(() => false)) return
+      const payload = legacyEdit.value
+        ? { name, remark, protocol, relay_port }
+        : { name, remark, entry_rule_id, exit_rule_id }
+      if (!isEdit.value || allowlist_node_ids.length !== savedAllowlistNodeIds.length ||
+        allowlist_node_ids.some(id => !savedAllowlistNodeIds.includes(id))) {
+        payload.allowlist_node_ids = allowlist_node_ids
+      }
+      if (isEdit.value) {
+        await updateTunnel(editId.value, payload)
+        ElMessage.success('隧道已更新')
+      } else {
+        await createTunnel(payload)
+        ElMessage.success('隧道已添加并启动')
+      }
     }
     dialogVisible.value = false
     fetchData()
   } catch (error) {
+    if (allowlistOnly.value) {
+      allowlistError.value = error.response?.data?.message || '无法保存 Gost IP 白名单，请重试。'
+      await nextTick()
+      allowlistErrorNotice.value?.focus()
+      return
+    }
     console.error('保存隧道失败:', error)
     if (!isEdit.value) {
       fetchData()
@@ -439,6 +515,7 @@ const toggleTunnel = async (row) => {
 
 const handleTunnelAction = (action, row) => {
   if (action === 'edit' && row.status !== 'running') openDialog(row)
+  if (action === 'allowlist') openDialog(row, true)
   if (action === 'delete') handleDelete(row)
   if (action === 'copy') {
     openDialog()
@@ -468,10 +545,14 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-dialog-hint { margin: 0 0 12px; }
 .tunnel-link { color: var(--ops-accent); }
 .tunnel-form-hint { font-size: 12px; line-height: 1.5; margin-top: 4px; }
+.tunnel-allowlist-preview { margin: 0; padding: 12px; background: var(--ops-inset); border-radius: 8px; }
+.tunnel-allowlist-preview dd { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
+.tunnel-allowlist-error { color: var(--ops-danger); overflow-wrap: anywhere; }
 
 @media (max-width: 700px) {
   .tunnel-panel .inventory-field { flex-basis: 118px; }
   .tunnel-panel .inventory-field:first-child { flex-basis: 100%; }
   .tunnel-route { gap: 6px; }
+  .tunnel-allowlist-field :deep(.el-select__wrapper) { min-height: 44px; }
 }
 </style>

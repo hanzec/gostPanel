@@ -62,6 +62,7 @@ describe('panel API contracts', () => {
     ['tunnel details', () => tunnel.getTunnel(42), 'get', '/tunnels/42'],
     ['create tunnel', () => tunnel.createTunnel(body), 'post', '/tunnels', { data: body }],
     ['update tunnel', () => tunnel.updateTunnel(42, body), 'put', '/tunnels/42', { data: body }],
+    ['update tunnel allowlist', () => tunnel.updateTunnelAllowlist(42, [12]), 'put', '/tunnels/42/allowlist', { ...silent, data: { allowlist_node_ids: [12] } }],
     ['delete tunnel', () => tunnel.deleteTunnel(42), 'delete', '/tunnels/42'],
     ['start tunnel', () => tunnel.startTunnel(42), 'post', '/tunnels/42/start'],
     ['stop tunnel', () => tunnel.stopTunnel(42), 'post', '/tunnels/42/stop'],
@@ -71,8 +72,6 @@ describe('panel API contracts', () => {
     ['test email', () => system.sendTestEmail(body), 'post', '/system/email/test', { data: body }],
     ['test Bark', () => system.sendTestBark(body), 'post', '/system/bark/test', { ...silent, data: body }],
     ['backup', system.backupSystem, 'post', '/system/backup'],
-    ['allowlist', system.getGostAllowlist, 'get', '/system/gost-allowlist'],
-    ['update allowlist', () => system.updateGostAllowlist([42]), 'put', '/system/gost-allowlist', { data: { node_ids: [42] } }],
     ['ruleset', system.getGostRuleset, 'get', '/system/gost-ruleset'],
     ['update ruleset', () => system.updateGostRuleset('https://example.test/rules.yaml', [42]), 'put', '/system/gost-ruleset',
       { ...timeout, data: { url: 'https://example.test/rules.yaml', node_ids: [42] } }]
@@ -91,7 +90,7 @@ describe('panel API contracts', () => {
       code: 0,
       data: { total: 120, list: config.params.page === 1 ? firstPage : [{ id: 101 }] }
     })))
-    await expect(system.getRoutingNodes()).resolves.toEqual([...firstPage, { id: 101 }])
+    await expect(node.getRoutingNodes()).resolves.toEqual([...firstPage, { id: 101 }])
     expect(adapter.mock.calls.map(([config]) => config.params)).toEqual([
       { page: 1, pageSize: 100 }, { page: 2, pageSize: 100 }
     ])
@@ -99,7 +98,7 @@ describe('panel API contracts', () => {
 
   it('handles an empty inventory response', async () => {
     adapter.mockImplementation(config => Promise.resolve(response(config, { code: 0, data: { total: 0 } })))
-    await expect(system.getRoutingNodes()).resolves.toEqual([])
+    await expect(node.getRoutingNodes()).resolves.toEqual([])
     expect(adapter).toHaveBeenCalledTimes(1)
   })
 })

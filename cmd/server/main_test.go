@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -57,12 +58,15 @@ func TestServerMigratesAndSeedsSettingsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, table := range []any{
-		&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.GostAllowlist{},
+		&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{},
 		&model.GostRuleset{}, &model.OperationLog{}, &model.SystemConfig{},
 	} {
 		if !db.Migrator().HasTable(table) {
 			t.Errorf("missing table for %T", table)
 		}
+	}
+	if db.Migrator().HasTable("gost_allowlists") {
+		t.Error("created the legacy global allowlist table on a fresh database")
 	}
 	if err := initSystemConfig(db); err != nil {
 		t.Fatal(err)
@@ -87,6 +91,50 @@ func TestServerMigratesAndSeedsSettingsOnce(t *testing.T) {
 	if err := autoMigrate(db); err == nil {
 		t.Fatal("migration against closed DB succeeded")
 	}
+}
+
+func TestServerMigratesGlobalAllowlistToExistingTunnels(t *testing.T) {
+	db := testSQLite(t)
+	for _, statement := range []string{
+		`CREATE TABLE gost_allowlists (id integer PRIMARY KEY, node_ids text, addresses text)`,
+		`INSERT INTO gost_allowlists (id, node_ids) VALUES (1, '[3,5]')`,
+		`CREATE TABLE tunnels (id integer PRIMARY KEY, name text NOT NULL, entry_node_id integer NOT NULL, exit_node_id integer NOT NULL)`,
+		`INSERT INTO tunnels (id, name, entry_node_id, exit_node_id) VALUES (1, 'first', 3, 5), (2, 'second', 5, 3)`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := autoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	assertSelection := func(id uint, want []uint) {
+		t.Helper()
+		var tunnel model.GostTunnel
+		if err := db.First(&tunnel, id).Error; err != nil {
+			t.Fatal(err)
+		}
+		if tunnel.AllowlistNodeIDs == nil || !slices.Equal(tunnel.AllowlistNodeIDs, want) {
+			t.Fatalf("tunnel %d allowlist = %#v, want %#v", id, tunnel.AllowlistNodeIDs, want)
+		}
+	}
+	assertSelection(1, []uint{3, 5})
+	assertSelection(2, []uint{3, 5})
+
+	first := model.GostTunnel{ID: 1, AllowlistNodeIDs: []uint{}}
+	if err := db.Model(&first).Select("AllowlistNodeIDs").Updates(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	newTunnel := model.GostTunnel{Name: "third", EntryNodeID: 3, ExitNodeID: 5, AllowlistNodeIDs: []uint{}}
+	if err := db.Create(&newTunnel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := autoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	assertSelection(1, []uint{})
+	assertSelection(2, []uint{3, 5})
+	assertSelection(newTunnel.ID, []uint{})
 }
 
 func TestServerDatabaseConfigurationErrors(t *testing.T) {

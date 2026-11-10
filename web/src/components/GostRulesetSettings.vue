@@ -56,7 +56,8 @@
 <script setup>
 import { nextTick, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getGostRuleset, getRoutingNodes, updateGostRuleset } from '@/api/system'
+import { getGostRuleset, updateGostRuleset } from '@/api/system'
+import { getRoutingNodes } from '@/api/node'
 
 const nodes = ref([])
 const nodeIds = ref([])

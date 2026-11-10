@@ -19,8 +19,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func (s *TunnelService) createEndpointTunnel(req *dto.CreateTunnelReq, username, ip, userAgent string) (*model.GostTunnel, error) {
-	tunnel := &model.GostTunnel{Name: req.Name, Remark: req.Remark, Status: model.TunnelStatusStopped, RelaySecret: rand.Text()}
+func (s *TunnelService) createEndpointTunnel(req *dto.CreateTunnelReq, nodeIDs []uint, username, ip, userAgent string) (*model.GostTunnel, error) {
+	tunnel := &model.GostTunnel{
+		Name: req.Name, Remark: req.Remark, Status: model.TunnelStatusStopped,
+		RelaySecret: rand.Text(), AllowlistNodeIDs: nodeIDs,
+	}
 	if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
 		return nil, err
 	}
@@ -133,14 +136,20 @@ func (s *TunnelService) applyEndpointTunnel(t *model.GostTunnel) error {
 		Handler:  &gost.HandlerConfig{Type: "relay", Auth: auth},
 		Metadata: map[string]any{"enableStats": true},
 	}
-	if err := s.allowlist.prepareRelay(exitClient, relay); err != nil {
+	if err := s.allowlist.prepareRelay(exitClient, relay, t); err != nil {
 		return err
 	}
-	if err := createServiceWithTrafficQuota(s.nodeRepo, exitClient, *t.ExitNode, relay); err != nil {
+	created, err := createServiceWithTrafficQuota(s.nodeRepo, exitClient, *t.ExitNode, relay)
+	if err != nil {
 		if stderrors.Is(err, errors.ErrNodeTrafficQuotaUnavailable) {
 			return err
 		}
 		return errors.ErrTunnelRelayCreateFailed
+	}
+	if !created {
+		if _, err := exitClient.SetRelayAllowlist(relay.Name, relay.Admission != ""); err != nil {
+			return err
+		}
 	}
 	chain := newTunnelChain(t.ChainID, net.JoinHostPort(relayHost(t, t.ExitNode.Address), port), t.Protocol, auth)
 	if err := entryClient.CreateChain(chain); err != nil {

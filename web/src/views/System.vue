@@ -145,14 +145,6 @@
               </template>
             </el-tab-pane>
 
-            <el-tab-pane name="gost-allowlist" label="Gost IP 白名单" lazy>
-              <header class="settings-section-heading">
-                <h2>Gost Relay 来源 IP 白名单</h2>
-                <p>统一设置面板管理的 Gost Relay 允许哪些节点连接。</p>
-              </header>
-              <GostAllowlistSettings />
-            </el-tab-pane>
-
             <el-tab-pane name="gost-ruleset" label="Clash 规则集" lazy>
               <header class="settings-section-heading">
                 <h2>透明代理规则集订阅</h2>
@@ -206,12 +198,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Bell, Coin, Connection, InfoFilled, Lock, Message, Monitor } from '@element-plus/icons-vue'
+import { Bell, Coin, Connection, InfoFilled, Message, Monitor } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { backupSystem, getSystemConfig, sendTestBark, sendTestEmail, updateSystemConfig } from '@/api/system'
-import GostAllowlistSettings from '@/components/GostAllowlistSettings.vue'
 import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { useSystemStore } from '@/store/system'
@@ -260,13 +251,6 @@ const context = computed(() => {
       icon: Coin, label: 'BACKUP', title: '备份方式',
       description: backupSupported.value ? 'SQLite 备份文件存放在面板服务的 backups 目录。' : '请使用数据库服务提供的工具创建和管理备份。',
       factLabel: '管理方式', factValue: backupSupported.value ? '面板内备份' : '数据库服务'
-    }
-  }
-  if (activeTab.value === 'gost-allowlist') {
-    return {
-      icon: Lock, label: 'ADMISSION', title: '白名单同步',
-      description: '面板向在线 Relay 同步已保存的来源 IP。离线节点重新连接后会收到更新。首次启用时，已有 Relay 可能短暂重启。',
-      factLabel: '作用范围', factValue: '面板管理的 Gost Relay'
     }
   }
   if (activeTab.value === 'gost-ruleset') {

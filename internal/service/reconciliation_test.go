@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"yagp/internal/model"
-	"yagp/internal/utils"
 	"yagp/pkg/gost"
 )
 
@@ -20,29 +20,54 @@ func TestRuleReconciliationRepairsStatusAndExitAllowlist(t *testing.T) {
 	remote := &lifecycleNode{t: t}
 	node := startServiceTestNode(t, remote)
 	entry := model.GostNode{Name: "allowed source", Port: 39000, Address: "192.0.2.8", IPv4: "192.0.2.8", Status: model.NodeStatusOffline}
-	saveServiceFixtures(t, db, &node, &entry)
+	otherSource := model.GostNode{
+		Name: "other source", Port: 39000, Status: model.NodeStatusOffline,
+		Addresses: []string{"192.0.2.10", "2001:db8::7"},
+	}
+	saveServiceFixtures(t, db, &node, &entry, &otherSource)
 	known := model.GostRule{Name: "tracked", NodeID: &node.ID, ListenPort: 8080, Status: model.RuleStatusRunning, ServiceID: "failed-service"}
 	legacy := model.GostRule{Name: "configured outside database", NodeID: &node.ID, ListenPort: 8081, Status: model.RuleStatusStopped}
 	saveServiceFixtures(t, db, &known, &legacy)
-	tunnel := model.GostTunnel{Name: "exit relay", EntryNodeID: entry.ID, ExitNodeID: node.ID}
-	saveServiceFixtures(t, db, &tunnel)
-	tunnel.ServiceID = relayServiceName(tunnel.ID)
-	requireServiceError(t, db.Save(&tunnel).Error, nil)
-	relay := gost.ServiceConfig{Name: tunnel.ServiceID, Handler: &gost.HandlerConfig{Type: "relay"}}
-	relayJSON, err := json.Marshal(relay)
-	requireServiceError(t, err, nil)
-	remote.mu.Lock()
-	remote.resources = map[string]json.RawMessage{"/config/services/" + relay.Name: relayJSON}
-	remote.gostConfig = fmt.Sprintf("{\"services\":[%s,{\"name\":\"failed-service\",\"status\":{\"state\":\"failed\"}},{\"name\":\"rule-%d\",\"status\":{\"state\":\"running\"}},{\"name\":\"untracked\"}]}", relayJSON, legacy.ID)
-	remote.mu.Unlock()
-	ctx := context.Background()
-	cfg, err := NewGostAllowlistService(db).Update(ctx, []uint{entry.ID})
-	requireServiceError(t, err, nil)
+	tunnel := model.GostTunnel{Name: "exit relay", EntryNodeID: entry.ID, ExitNodeID: node.ID, AllowlistNodeIDs: []uint{entry.ID}}
+	other := model.GostTunnel{Name: "other relay", EntryNodeID: otherSource.ID, ExitNodeID: node.ID, AllowlistNodeIDs: []uint{otherSource.ID}}
+	saveServiceFixtures(t, db, &tunnel, &other)
+	remote.resources = make(map[string]json.RawMessage)
+	for _, item := range []*model.GostTunnel{&tunnel, &other} {
+		item.ServiceID = relayServiceName(item.ID)
+		requireServiceError(t, db.Save(item).Error, nil)
+		remote.resources["/config/services/"+item.ServiceID] = fmt.Appendf(nil,
+			`{"name":%q,"handler":{"type":"relay"},"admission":%q}`, item.ServiceID, gost.LegacyRelayAllowlistName)
+	}
+	const unmanaged = "relay-tunnel-999"
+	remote.resources["/config/services/"+unmanaged] = fmt.Appendf(nil,
+		`{"name":%q,"handler":{"type":"relay"},"admission":%q}`, unmanaged, gost.LegacyRelayAllowlistName)
+	refreshConfig := func() {
+		remote.mu.Lock()
+		defer remote.mu.Unlock()
+		services := []json.RawMessage{[]byte(`{"name":"failed-service","status":{"state":"failed"}}`),
+			fmt.Appendf(nil, `{"name":"rule-%d","status":{"state":"running"}}`, legacy.ID), []byte(`{"name":"untracked"}`)}
+		admissions := []json.RawMessage{}
+		for path, resource := range remote.resources {
+			switch {
+			case strings.HasPrefix(path, "/config/services/"):
+				services = append(services, resource)
+			case strings.HasPrefix(path, "/config/admissions/"):
+				admissions = append(admissions, resource)
+			}
+		}
+		cfg, err := json.Marshal(map[string][]json.RawMessage{"services": services, "admissions": admissions})
+		requireServiceError(t, err, nil)
+		remote.gostConfig = string(cfg)
+	}
+	refreshConfig()
+	remote.reject = map[string]int{"POST /config?format=yaml": http.StatusServiceUnavailable}
+	firstName := gost.TunnelRelayAllowlistName(tunnel.ServiceID)
+	otherName := gost.TunnelRelayAllowlistName(other.ServiceID)
 	syncService := NewRuleSyncService(db)
 	syncService.Start()
 	defer syncService.Stop()
 	waitServiceCondition(t, func() bool {
-		return remote.service(relay.Name).HasRelayAllowlist()
+		return remote.service(tunnel.ServiceID).HasAdmission(firstName) && remote.service(other.ServiceID).HasAdmission(otherName)
 	})
 	waitServiceCondition(t, func() bool {
 		_, running := syncService.syncing.Load(node.ID)
@@ -53,12 +78,47 @@ func TestRuleReconciliationRepairsStatusAndExitAllowlist(t *testing.T) {
 	if known.Status != model.RuleStatusError || legacy.Status != model.RuleStatusRunning {
 		t.Fatalf("reconciled statuses = %q, %q", known.Status, legacy.Status)
 	}
-	if admission := remote.admission(gost.RelayAllowlistName); !admission.Whitelist || !reflect.DeepEqual(admission.Matchers, cfg.Addresses) {
-		t.Fatalf("reconciled admission = %+v", admission)
+	assertAdmission := func(name string, whitelist bool, matchers []string) {
+		t.Helper()
+		if admission := remote.admission(name); admission.Name != name || admission.Whitelist != whitelist || !slices.Equal(admission.Matchers, matchers) {
+			t.Fatalf("admission = %+v, want %s (whitelist %t) matching %v", admission, name, whitelist, matchers)
+		}
 	}
-	// Unmanaged relays must remain untouched when clearing the allowlist.
-	client := utils.GetGostClient(&node)
-	requireServiceError(t, syncGostAllowlist(client, &gost.GostConfig{Services: []gost.ServiceConfig{relay}}, node.ID, nil, cfg), nil)
+	assertAdmission(firstName, true, []string{entry.IPv4})
+	assertAdmission(otherName, true, otherSource.Addresses)
+	if remote.service(tunnel.ServiceID).HasAdmission(gost.LegacyRelayAllowlistName) ||
+		remote.service(other.ServiceID).HasAdmission(gost.LegacyRelayAllowlistName) ||
+		!remote.service(unmanaged).HasAdmission(gost.LegacyRelayAllowlistName) {
+		t.Fatal("legacy admission was not replaced for exactly the managed relays")
+	}
+	if _, pending := syncService.unsavedTunnelConfig.Load(node.ID); !pending {
+		t.Fatal("failed allowlist save was not marked for retry")
+	}
+	refreshConfig()
+	remote.mu.Lock()
+	remote.reject = nil
+	remote.mu.Unlock()
+	syncService.syncNodeRules(node, nil)
+	if _, pending := syncService.unsavedTunnelConfig.Load(node.ID); pending {
+		t.Fatal("allowlist save retry did not succeed")
+	}
+	requireServiceError(t, db.Model(&entry).Update("ipv4", "192.0.2.9").Error, nil)
+	syncService.syncNodeRules(node, nil)
+	assertAdmission(firstName, true, []string{"192.0.2.9"})
+	assertAdmission(otherName, true, otherSource.Addresses)
+	refreshConfig()
+	requireServiceError(t, db.Model(&entry).Update("ipv4", "").Error, nil)
+	syncService.syncNodeRules(node, nil)
+	assertAdmission(firstName, true, nil)
+	refreshConfig()
+	tunnel.AllowlistNodeIDs = []uint{}
+	requireServiceError(t, db.Save(&tunnel).Error, nil)
+	syncService.syncNodeRules(node, nil)
+	assertAdmission(firstName, false, nil)
+	assertAdmission(otherName, true, otherSource.Addresses)
+	if !remote.service(tunnel.ServiceID).HasAdmission(firstName) {
+		t.Fatal("clearing the selection detached the hot-updatable admission")
+	}
 }
 
 func TestRulesetSyncRetriesSaveWithoutRecreatingBypass(t *testing.T) {

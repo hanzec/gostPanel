@@ -128,9 +128,8 @@ func TestTunnelProvisioningRejectsUnavailableEndpoints(t *testing.T) {
 	start(bizerrors.ErrExitNodeOffline)
 	updateServiceFields(t, db, &exit, map[string]any{"status": model.NodeStatusOnline})
 
-	if _, err := NewGostAllowlistService(db).Update(ctx, []uint{entry.ID}); err != nil {
-		t.Fatal(err)
-	}
+	_, err := tunnels.UpdateAllowlist(ctx, tunnel.ID, []uint{entry.ID}, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, nil)
 	for _, command := range []string{"GET /config", "POST /config/admissions"} {
 		exitRemote.rejectCommand(command, http.StatusServiceUnavailable)
 		if err := tunnels.Start(tunnel.ID, testAdmin, testIP, testAgent); err == nil {

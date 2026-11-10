@@ -88,13 +88,13 @@ func TestRuleSyncRetargetsRunningTunnel(t *testing.T) {
 			t.Errorf("chain = %s; want %s", api.chain, want)
 		}
 	}
-	service.syncNodeRules(entry, model.GostAllowlist{}, exitAddresses)
+	service.syncNodeRules(entry, exitAddresses)
 	assertChain(original, 1, 0)
-	service.syncNodeRules(entry, model.GostAllowlist{}, exitAddresses)
+	service.syncNodeRules(entry, exitAddresses)
 	assertChain(updated, 2, 1)
-	service.syncNodeRules(entry, model.GostAllowlist{}, exitAddresses)
+	service.syncNodeRules(entry, exitAddresses)
 	assertChain(updated, 2, 2)
-	service.syncNodeRules(entry, model.GostAllowlist{}, exitAddresses)
+	service.syncNodeRules(entry, exitAddresses)
 	assertChain(updated, 2, 2)
 	for i, want := range []model.TunnelStatus{model.TunnelStatusRunning, model.TunnelStatusStopped} {
 		var stored model.GostTunnel
@@ -118,7 +118,7 @@ func TestRuleSyncDoesNotOverlapCommandsForOneNode(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		service.syncNodeRules(node, model.GostAllowlist{}, nil)
+		service.syncNodeRules(node, nil)
 		close(done)
 	}()
 	select {
@@ -126,7 +126,7 @@ func TestRuleSyncDoesNotOverlapCommandsForOneNode(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("first reconciliation did not request node configuration")
 	}
-	service.syncNodeRules(node, model.GostAllowlist{}, nil)
+	service.syncNodeRules(node, nil)
 	if calls := remote.calls.Load(); calls != 1 {
 		t.Fatalf("overlapping reconciliation sent %d config requests", calls)
 	}
@@ -136,7 +136,7 @@ func TestRuleSyncDoesNotOverlapCommandsForOneNode(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("first reconciliation did not finish")
 	}
-	service.syncNodeRules(node, model.GostAllowlist{}, nil)
+	service.syncNodeRules(node, nil)
 	if calls := remote.calls.Load(); calls != 2 {
 		t.Fatalf("next reconciliation sent %d config requests in total", calls)
 	}

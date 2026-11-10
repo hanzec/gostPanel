@@ -41,7 +41,7 @@ func TestDashboardUsesActualExitRelayTraffic(t *testing.T) {
 		remote.mu.Lock()
 		remote.gostConfig = string(data)
 		remote.mu.Unlock()
-		sync.syncNodeRules(exit, model.GostAllowlist{}, nil)
+		sync.syncNodeRules(exit, nil)
 	}
 	sample(100, 110, 230)
 	sample(100, 110, 230)
@@ -66,7 +66,7 @@ func TestDashboardUsesActualExitRelayTraffic(t *testing.T) {
 	}
 	// Saving an older settings form must not replace the last relay checkpoint.
 	running.Remark = "new remark"
-	requireServiceError(t, repository.NewTunnelRepository(db).Update(&running), nil)
+	requireServiceError(t, repository.NewTunnelRepository(db).Update(&running, false), nil)
 	requireServiceError(t, db.First(&running, running.ID).Error, nil)
 	if running.RelayTraffic.InputBytes != 410 || running.RelayTraffic.LastInputBytes != 30 {
 		t.Fatalf("saved relay checkpoint = %+v", running.RelayTraffic)

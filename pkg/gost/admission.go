@@ -8,7 +8,7 @@ import (
 	"slices"
 )
 
-const RelayAllowlistName = "yagp-relay-allowlist"
+const LegacyRelayAllowlistName = "yagp-relay-allowlist"
 
 type AdmissionConfig struct {
 	Name      string   `json:"name"`
@@ -16,8 +16,12 @@ type AdmissionConfig struct {
 	Matchers  []string `json:"matchers"`
 }
 
-func (s ServiceConfig) HasRelayAllowlist() bool {
-	return s.Admission == RelayAllowlistName || slices.Contains(s.Admissions, RelayAllowlistName)
+func TunnelRelayAllowlistName(relayName string) string {
+	return "yagp-" + relayName + "-allowlist"
+}
+
+func (s ServiceConfig) HasAdmission(name string) bool {
+	return s.Admission == name || slices.Contains(s.Admissions, name)
 }
 
 func (c *Client) EnsureAdmission(desired AdmissionConfig, current []AdmissionConfig) (bool, error) {
@@ -35,7 +39,8 @@ func (c *Client) EnsureAdmission(desired AdmissionConfig, current []AdmissionCon
 	return c.writeAdmissionConfig(method, path, desired)
 }
 
-func (c *Client) AttachRelayAllowlist(name string) (bool, error) {
+// SetRelayAllowlist replaces the panel's legacy or per-tunnel binding in one service update.
+func (c *Client) SetRelayAllowlist(name string, enabled bool) (bool, error) {
 	path := "/config/services/" + name
 	raw, err := c.resource(path)
 	if err != nil || len(raw) == 0 {
@@ -45,7 +50,9 @@ func (c *Client) AttachRelayAllowlist(name string) (bool, error) {
 	if err = json.Unmarshal(raw, &service); err != nil {
 		return false, err
 	}
-	if service.Handler == nil || service.Handler.Type != "relay" || service.HasRelayAllowlist() {
+	admission := TunnelRelayAllowlistName(name)
+	if service.Handler == nil || service.Handler.Type != "relay" ||
+		(!service.HasAdmission(LegacyRelayAllowlistName) && service.HasAdmission(admission) == enabled) {
 		return false, nil
 	}
 	// Retain unrelated Gost fields and any admission rules already on this relay.
@@ -53,9 +60,22 @@ func (c *Client) AttachRelayAllowlist(name string) (bool, error) {
 	if err = json.Unmarshal(raw, &fields); err != nil {
 		return false, err
 	}
-	fields["admissions"], err = json.Marshal(append(service.Admissions, RelayAllowlistName))
-	if err != nil {
-		return false, err
+	if service.Admission == LegacyRelayAllowlistName || service.Admission == admission {
+		delete(fields, "admission")
+	}
+	admissions := slices.DeleteFunc(service.Admissions, func(name string) bool {
+		return name == LegacyRelayAllowlistName || name == admission
+	})
+	if enabled {
+		admissions = append(admissions, admission)
+	}
+	if len(admissions) == 0 {
+		delete(fields, "admissions")
+	} else {
+		fields["admissions"], err = json.Marshal(admissions)
+		if err != nil {
+			return false, err
+		}
 	}
 	delete(fields, "status")
 	return c.writeAdmissionConfig(http.MethodPut, path, fields)

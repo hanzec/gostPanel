@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 	"net"
@@ -41,11 +42,15 @@ func NewTunnelService(db *gorm.DB) *TunnelService {
 
 // Create 创建隧道
 func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent string) (*model.GostTunnel, error) {
+	nodeIDs, err := s.allowlist.validateNodeIDs(context.Background(), req.AllowlistNodeIDs)
+	if err != nil {
+		return nil, err
+	}
 	if req.EntryRuleID != 0 || req.ExitRuleID != 0 {
 		if req.EntryNodeID != 0 || req.ExitNodeID != 0 || req.Protocol != "" || req.RelayPort != 0 {
 			return nil, errors.ErrTunnelEndpointsRequired
 		}
-		return s.createEndpointTunnel(req, username, ip, userAgent)
+		return s.createEndpointTunnel(req, nodeIDs, username, ip, userAgent)
 	}
 	// 检查入口和出口是否相同
 	if req.EntryNodeID == req.ExitNodeID {
@@ -72,13 +77,14 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 
 	// 创建隧道
 	tunnel := &model.GostTunnel{
-		Name:        req.Name,
-		EntryNodeID: req.EntryNodeID,
-		ExitNodeID:  req.ExitNodeID,
-		Protocol:    req.Protocol,
-		RelayPort:   req.RelayPort,
-		Remark:      req.Remark,
-		Status:      model.TunnelStatusStopped,
+		Name:             req.Name,
+		EntryNodeID:      req.EntryNodeID,
+		ExitNodeID:       req.ExitNodeID,
+		Protocol:         req.Protocol,
+		RelayPort:        req.RelayPort,
+		Remark:           req.Remark,
+		Status:           model.TunnelStatusStopped,
+		AllowlistNodeIDs: nodeIDs,
 	}
 
 	if err = s.tunnelRepo.Create(tunnel); err != nil {
@@ -113,6 +119,13 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 	if tunnel.Status == model.TunnelStatusRunning {
 		return nil, errors.ErrTunnelRunning
 	}
+	if req.AllowlistNodeIDs != nil {
+		nodeIDs, err := s.allowlist.validateNodeIDs(context.Background(), req.AllowlistNodeIDs)
+		if err != nil {
+			return nil, err
+		}
+		tunnel.AllowlistNodeIDs = nodeIDs
+	}
 	if tunnel.EntryRuleID != nil || req.EntryRuleID != 0 || req.ExitRuleID != 0 {
 		if tunnel.EntryRuleID == nil || req.Protocol != "" || req.RelayPort != 0 {
 			return nil, errors.ErrTunnelEndpointsRequired
@@ -134,7 +147,7 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 	tunnel.Name = req.Name
 	tunnel.Remark = req.Remark
 
-	if err = s.tunnelRepo.Update(tunnel); err != nil {
+	if err = s.tunnelRepo.Update(tunnel, req.AllowlistNodeIDs != nil); err != nil {
 		return nil, err
 	}
 
@@ -147,6 +160,25 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 		ip,
 		userAgent)
 
+	return tunnel, nil
+}
+
+// UpdateAllowlist 只更新白名单，运行中的隧道会在下一轮同步应用。
+func (s *TunnelService) UpdateAllowlist(ctx context.Context, id uint, nodeIDs []uint, username, ip, userAgent string) (*model.GostTunnel, error) {
+	tunnel, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	nodeIDs, err = s.allowlist.validateNodeIDs(ctx, nodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	tunnel.AllowlistNodeIDs = nodeIDs
+	if err := s.tunnelRepo.UpdateAllowlist(ctx, tunnel); err != nil {
+		return nil, err
+	}
+	s.logService.Record(username, model.ActionUpdate, model.ResourceTypeTunnel, id,
+		fmt.Sprintf("更新隧道 IP 白名单: %s", tunnel.Name), ip, userAgent)
 	return tunnel, nil
 }
 
@@ -291,18 +323,19 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 		},
 	}
 
-	if err = s.allowlist.prepareRelay(exitClient, relaySvc); err != nil {
+	if err = s.allowlist.prepareRelay(exitClient, relaySvc, tunnel); err != nil {
 		return err
 	}
-	if err = createServiceWithTrafficQuota(s.nodeRepo, exitClient, *exitNode, relaySvc); err != nil {
+	created, err := createServiceWithTrafficQuota(s.nodeRepo, exitClient, *exitNode, relaySvc)
+	if err != nil {
 		_ = s.tunnelRepo.UpdateStatus(id, model.TunnelStatusError)
 		if stderrors.Is(err, errors.ErrNodeTrafficQuotaUnavailable) {
 			return err
 		}
 		return errors.ErrTunnelRelayCreateFailed
 	}
-	if relaySvc.Admission != "" {
-		if _, err = exitClient.AttachRelayAllowlist(relaySvc.Name); err != nil {
+	if !created {
+		if _, err = exitClient.SetRelayAllowlist(relaySvc.Name, relaySvc.Admission != ""); err != nil {
 			return err
 		}
 	}

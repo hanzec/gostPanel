@@ -241,15 +241,11 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatalf("report using rotated credentials: %v", err)
 	}
 
-	allowlist := service.NewGostAllowlistService(f.db)
-	if _, err := allowlist.Update(ctx, []uint{node.ID}); err != nil {
-		t.Fatal(err)
-	}
 	ipUpdate := &nodegrpc.NodeIPsRequest{NodeId: uint64(node.ID), Ipv6: "2001:db8::8", Ipv4: "2001:db8::9"}
 	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("IP update with wrong address family = %v", err)
 	}
-	assertIPs := func(address, ipv4, ipv6 string, allowed []string) {
+	assertIPs := func(address, ipv4, ipv6 string) {
 		t.Helper()
 		if err := f.db.First(&enrolled, node.ID).Error; err != nil {
 			t.Fatal(err)
@@ -257,32 +253,28 @@ func TestNodeRegistration(t *testing.T) {
 		if enrolled.Address != address || enrolled.IPv4 != ipv4 || enrolled.IPv6 != ipv6 {
 			t.Fatalf("stored address, IPv4, IPv6 = %q, %q, %q; want %q, %q, %q", enrolled.Address, enrolled.IPv4, enrolled.IPv6, address, ipv4, ipv6)
 		}
-		config, err := allowlist.Get(ctx)
-		if err != nil || !slices.Equal(config.NodeIDs, []uint{node.ID}) || !slices.Equal(config.Addresses, allowed) {
-			t.Fatalf("resolved allowlist = %+v, err = %v; want %v for the same node", config, err, allowed)
-		}
 	}
-	assertIPs("2001:db8::7", "", "2001:db8::7", []string{"2001:db8::7"})
+	assertIPs("2001:db8::7", "", "2001:db8::7")
 	ipUpdate.Ipv4 = ""
 	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); err != nil {
 		t.Fatalf("IP update using current credentials: %v", err)
 	}
-	assertIPs("2001:db8::8", "", "2001:db8::8", []string{"2001:db8::8"})
+	assertIPs("2001:db8::8", "", "2001:db8::8")
 	ipUpdate.Ipv4, ipUpdate.Ipv6 = "198.51.100.9", ""
 	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); err != nil {
 		t.Fatalf("IP update with IPv4 only: %v", err)
 	}
-	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::8", []string{"198.51.100.9", "2001:db8::8"})
+	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::8")
 	ipUpdate.Ipv4, ipUpdate.Ipv6 = "", "2001:db8::a"
 	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); err != nil {
 		t.Fatalf("IP update with IPv6 only: %v", err)
 	}
-	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::a", []string{"198.51.100.9", "2001:db8::a"})
+	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::a")
 	ipUpdate.Ipv6 = "2001:db8::7"
 	if _, err := currentStream.UpdateNodeIPs(ctx, ipUpdate); err != nil {
 		t.Fatalf("returning to the IP at the start of the session: %v", err)
 	}
-	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::7", []string{"198.51.100.9", "2001:db8::7"})
+	assertIPs("198.51.100.9", "198.51.100.9", "2001:db8::7")
 	if enrolled.Password != first.reply.GetPassword() || enrolled.RegistrationTokenHash != "" {
 		t.Fatal("updating IPs changed the enrollment state")
 	}
@@ -319,10 +311,6 @@ func TestNodeSessionReportsMultipleAddresses(t *testing.T) {
 	want := []string{"198.51.100.10", "198.51.100.9"}
 	if node.Address != "198.51.100.9" || node.IPv6 != "" || !slices.Equal(node.Addresses, want) {
 		t.Fatalf("unexpected node address snapshot: %q, %q, %v", node.Address, node.IPv6, node.Addresses)
-	}
-	allowlist, err := service.NewGostAllowlistService(f.db).Update(ctx, []uint{node.ID})
-	if err != nil || !slices.Equal(allowlist.Addresses, want) {
-		t.Fatalf("relay allowlist = %v, %v", allowlist.Addresses, err)
 	}
 	report.Ipv4, report.Ipv6 = "", "2001:db8::7"
 	report.Addresses = []string{report.Ipv6}
