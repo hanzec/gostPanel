@@ -88,6 +88,34 @@ Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板
 
 面板网页、API 和节点 WebSocket 共用 Traefik 的 HTTPS 域名和 `443` 端口。Compose 不向宿主机发布面板的 `39100` 或 `39101` 端口。
 
+#### 通过 Webhook 自动更新面板
+
+该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。解压 GitHub Release 中与服务器架构对应的 `yagp-depoly-linux-<arch>.tar.gz`，然后执行以下命令。示例使用 amd64、`/opt/yagp-panel` 和名为 `traefik` 的容器。
+
+```bash
+sudo ./yagp-depoly-linux-amd64 install /opt/yagp-panel traefik
+```
+
+安装程序将接收器和部署命令装到同一个 `/usr/local/sbin/yagp-depoly`，并将实际面板路径写入 `/etc/yagp-depoly/project-dir`。它会迁移旧部署布局并保留镜像版本。首次安装时，shell 使用系统随机源分别生成 HMAC 密钥和 Bearer Token，在交互终端显示，并写入 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`。重装时复用现有凭据。
+
+为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到 Traefik file provider 加载的动态目录。有旧版路由时替换其配置文件。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 通过现有 HTTPS 入口将 `POST /_yagp/deploy` 转发到宿主机内网端口 `39102`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
+
+在 GitHub 的 `production` Environment 中限制 `master` 部署，将安装输出的 `DEPLOY_WEBHOOK_SECRET`、`DEPLOY_WEBHOOK_TOKEN` 和 `DEPLOY_WEBHOOK_URL=https://面板域名/_yagp/deploy` 配为 Secret。最后将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
+
+两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`，限流或冷却返回 `429`。每个 IP 每分钟最多 20 次请求，1 分钟内 5 次鉴权失败会临时封禁 15 分钟。HTTP `202` 表示已受理，实际部署结果可用 `sudo journalctl -u yagp-depoly.service -f` 查看。
+
+#### 通过独立 Webhook 升级部署工具
+
+安装正式发布的 `yagp-depoly` 后，可在服务器上启用工具升级入口。服务器需要 GitHub CLI 2.102.0 或更新版本，用于验证随 Release 发布的产物证明。
+
+```bash
+sudo /usr/local/sbin/yagp-depoly install-upgrade traefik
+```
+
+将 `/etc/yagp-depoly/traefik-upgrade.yml` 复制到 Traefik 的动态配置目录。升级入口共用 `yagp-deploy` 系统账号，使用独立凭据和内网端口 `39103`。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。两个接收器进程共用这个账号的权限。在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET`、`UPGRADE_WEBHOOK_TOKEN` 以及 `UPGRADE_WEBHOOK_URL=https://面板域名/_yagp/upgrade`。
+
+在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务查询最新 Release，只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启两个接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
+
 **方式 B · Linux 二进制部署**
 
 安装脚本适用于使用 systemd 且内存大于 128 MB 的 Linux 服务器。脚本默认从 GitHub 仓库 `hanzec/yagp` 下载最新发布包，也可通过 `YAGP_REPO=owner/repo` 指定发布来源。最新版本须包含对应架构的 `yagp-linux-<arch>.tar.gz`。等待发布包期间可以使用 Docker 或从源码构建。
