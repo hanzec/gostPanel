@@ -158,9 +158,7 @@ jobs:
         id: depoly-attestation
         uses: actions/attest@v4
         with:
-          subject-path: |
-            yagp-depoly-linux-*.tar.gz
-            scripts/setup_deploy.sh
+          subject-path: yagp-depoly-linux-*.tar.gz
 
       - name: Prepare the deployment tool attestation for release
         if: steps.depoly-attestation.outputs.bundle-path != ''
@@ -186,7 +184,6 @@ jobs:
           files: |
             yagp-*.tar.gz
             yagp-*.zip
-            scripts/setup_deploy.sh
             ${{ steps.depoly-attestation.outputs.bundle-path != '' && 'yagp-depoly-attestations.jsonl' || '' }}
           fail_on_unmatched_files: true
           overwrite_files: false

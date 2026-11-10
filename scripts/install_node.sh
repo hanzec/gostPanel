@@ -185,7 +185,7 @@ bridge_bin="${YAGP_DAEMON_BIN:-}"
 if [[ -z "$bridge_bin" ]]; then
     bridge_archive="yagp-daemon-linux-$arch.tar.gz"
     if [[ "$repo" != hanzec/yagp || -n "${GH_PROXY+x}" ]] ||
-        ! download_bridge_archive "https://release.hanzec.com/yagp/$cache_path/$bridge_archive" --speed-limit 1 --speed-time 20; then
+        ! download_bridge_archive "https://release.hanzec-overseas.cn/yagp/$cache_path/$bridge_archive" --speed-limit 1 --speed-time 20; then
         download_bridge_archive "${GH_PROXY:-}https://github.com/$repo/releases/$release_path/$bridge_archive" ||
             die 'yagp-daemon 下载失败，请检查上面的 curl 日志。'
     fi

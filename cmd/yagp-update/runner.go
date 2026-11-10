@@ -128,18 +128,13 @@ func runUpdate(directory, id, mode string, runScript scriptRunner) error {
 }
 
 func runPublishedScript(ctx context.Context, request deployjob.Request, output io.Writer) error {
-	client := selfUpgradeClient()
-	gh, err := findSelfUpgradeTool("gh")
-	if err != nil {
-		return err
-	}
-	return runReleaseScript(ctx, client, gh, request, output)
+	return runReleaseScript(ctx, selfUpgradeClient(), request, output)
 }
 
-func runReleaseScript(ctx context.Context, client *http.Client, gh string, request deployjob.Request, output io.Writer) error {
+func runReleaseScript(ctx context.Context, client *http.Client, request deployjob.Request, output io.Writer) error {
 	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	log.Print("checking the release server for the latest update script")
+	log.Print("checking the release cache for the latest update version")
 	tag, err := upgrade.CachedYAGPReleaseTag(fetchCtx, client)
 	if err != nil {
 		return fmt.Errorf("query latest update release: %w", err)
@@ -151,25 +146,14 @@ func runReleaseScript(ctx context.Context, client *http.Client, gh string, reque
 	defer os.RemoveAll(stage)
 
 	script := filepath.Join(stage, "setup_deploy.sh")
-	bundle := filepath.Join(stage, selfUpgradeBundle)
-	base := upgrade.YAGPReleaseCache + "/releases/download/" + tag + "/"
-	log.Printf("downloading update script for %s", tag)
-	if err := downloadSelfUpgradeFile(fetchCtx, client, base+"setup_deploy.sh", script, 256<<10); err != nil {
+	url := "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/" + tag + "/scripts/setup_deploy.sh"
+	log.Printf("downloading update script for %s from GitHub", tag)
+	if err := downloadSelfUpgradeFile(fetchCtx, client, url, script, 256<<10); err != nil {
 		return fmt.Errorf("download update script: %w", err)
-	}
-	if err := downloadSelfUpgradeFile(fetchCtx, client, base+selfUpgradeBundle, bundle, selfUpgradeMaxBundle); err != nil {
-		return fmt.Errorf("download update attestation: %w", err)
-	}
-	log.Printf("verifying update script for %s", tag)
-	if err := verifySelfUpgradeGHVersion(fetchCtx, gh, stage); err != nil {
-		return err
-	}
-	if err := verifySelfUpgradeAttestation(fetchCtx, gh, stage, script, bundle); err != nil {
-		return err
 	}
 	cancel()
 
-	log.Printf("running signed %s update script", request.Mode)
+	log.Printf("running %s update script", request.Mode)
 	command := exec.CommandContext(ctx, "/bin/bash", "-p", script, request.Mode)
 	command.Env = []string{updatePath, "YAGP_UPDATE_RELEASE_TAG=" + tag}
 	command.Stdin = strings.NewReader(request.Digest + "\n")

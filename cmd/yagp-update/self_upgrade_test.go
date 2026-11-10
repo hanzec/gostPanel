@@ -36,7 +36,6 @@ func TestSelfUpgradePreflight(t *testing.T) {
 		{"success", "", "65534", "65534", ""},
 		{"missing executable", "executable", "65534", "65534", "no such file"},
 		{"unsafe lock directory", "lock", "65534", "65534", ""},
-		{"missing gh", "gh", "65534", "65534", "gh unavailable"},
 		{"missing systemctl", "systemctl", "65534", "65534", "systemctl unavailable"},
 		{"missing account", "account", "65534", "65534", "find unprivileged tool account"},
 		{"root account", "", "0", "65534", "invalid unprivileged tool account"},
@@ -80,7 +79,7 @@ func TestSelfUpgradePreflight(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || env.client == nil || env.lockPath != lock || env.gh != tool || env.systemctl != tool || env.credentials == nil ||
+			if err != nil || env.lockPath != lock || env.systemctl != tool || env.credentials == nil ||
 				env.credentials.Uid != 65534 || env.credentials.Gid != 65534 || len(env.credentials.Groups) != 0 {
 				t.Fatalf("unexpected self-upgrade environment: %+v, %v", env, err)
 			}
@@ -153,55 +152,6 @@ func TestDownloadKeepsExistingFile(t *testing.T) {
 	}
 }
 
-func TestSelfUpgradeVerificationCommands(t *testing.T) {
-	dir := t.TempDir()
-	gh := filepath.Join(dir, "gh")
-	if err := os.WriteFile(gh, []byte(`#!/bin/sh
-case "$1" in
---version)
-  echo 'gh version 2.102.0 (2026-10-02)'
-  ;;
-attestation)
-  printf '%s\n' "$@" > args
-  test "$4" = '--bundle' && test -f "$5"
-  ;;
-esac
-`), 0755); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if err := verifySelfUpgradeGHVersion(ctx, gh, dir); err != nil {
-		t.Fatal(err)
-	}
-	archive, bundle := filepath.Join(dir, "binary.tar.gz"), filepath.Join(dir, "bundle.jsonl")
-	if err := verifySelfUpgradeAttestation(ctx, gh, dir, archive, bundle); err == nil {
-		t.Fatal("failed verification was accepted")
-	}
-	if err := os.WriteFile(bundle, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := verifySelfUpgradeAttestation(ctx, gh, dir, archive, bundle); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(filepath.Join(dir, "args"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"attestation", "verify", archive, "--bundle", bundle,
-		"--repo", "hanzec/yagp", "--signer-workflow", "hanzec/yagp/.github/workflows/release.yml",
-		"--source-ref", "refs/heads/master", "--deny-self-hosted-runners"}
-	if string(got) != strings.Join(want, "\n")+"\n" {
-		t.Fatalf("verification arguments = %q, want %q", got, want)
-	}
-
-	if err := os.WriteFile(gh, []byte("#!/bin/sh\necho 'gh version 2.101.9'\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := verifySelfUpgradeGHVersion(ctx, gh, dir); err == nil {
-		t.Fatal("GitHub CLI with a known policy bypass was accepted")
-	}
-}
-
 func TestExtractSelfUpgradeBinary(t *testing.T) {
 	const name = "yagp-depoly-linux-amd64"
 	for _, tt := range []struct {
@@ -218,12 +168,8 @@ func TestExtractSelfUpgradeBinary(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			archive := filepath.Join(dir, "tool.tar.gz")
-			file, err := os.Create(archive)
-			if err != nil {
-				t.Fatal(err)
-			}
-			compressed := gzip.NewWriter(file)
+			var archive bytes.Buffer
+			compressed := gzip.NewWriter(&archive)
 			writer := tar.NewWriter(compressed)
 			for _, header := range tt.entries {
 				if err := writer.WriteHeader(&header); err != nil {
@@ -233,7 +179,7 @@ func TestExtractSelfUpgradeBinary(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := errors.Join(writer.Close(), compressed.Close(), file.Close()); err != nil {
+			if err := errors.Join(writer.Close(), compressed.Close()); err != nil {
 				t.Fatal(err)
 			}
 			target := filepath.Join(dir, "candidate")
@@ -242,7 +188,7 @@ func TestExtractSelfUpgradeBinary(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err = extractSelfUpgradeBinaries(archive, map[string]string{name: target})
+			err := extractSelfUpgradeBinaries(&archive, map[string]string{name: target})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("extractSelfUpgradeBinary = %v, want error %t", err, tt.wantErr)
 			}
@@ -257,33 +203,24 @@ func TestExtractSelfUpgradeBinary(t *testing.T) {
 }
 
 func TestExtractMissingOrMalformedTar(t *testing.T) {
-	dir := t.TempDir()
-	archive, target := filepath.Join(dir, "archive"), filepath.Join(dir, "binary")
-	if err := extractSelfUpgradeBinaries(archive, map[string]string{"binary": target}); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing archive = %v, want file error", err)
+	var archive bytes.Buffer
+	targets := map[string]string{"binary": filepath.Join(t.TempDir(), "binary")}
+	if err := extractSelfUpgradeBinaries(&archive, targets); !errors.Is(err, io.EOF) {
+		t.Fatalf("empty archive = %v, want EOF", err)
 	}
-	file, err := os.Create(archive)
-	if err != nil {
+	writer := gzip.NewWriter(&archive)
+	_, err := io.WriteString(writer, strings.Repeat("x", 512))
+	if err := errors.Join(err, writer.Close()); err != nil {
 		t.Fatal(err)
 	}
-	writer := gzip.NewWriter(file)
-	_, err = io.WriteString(writer, strings.Repeat("x", 512))
-	if err := errors.Join(err, writer.Close(), file.Close()); err != nil {
-		t.Fatal(err)
-	}
-	if err := extractSelfUpgradeBinaries(archive, map[string]string{"binary": target}); !errors.Is(err, tar.ErrHeader) {
+	if err := extractSelfUpgradeBinaries(&archive, targets); !errors.Is(err, tar.ErrHeader) {
 		t.Fatalf("malformed archive = %v, want malformed tar error", err)
 	}
 }
 
 func TestExtractTruncatedBinary(t *testing.T) {
-	dir := t.TempDir()
-	archive := filepath.Join(dir, "archive")
-	file, err := os.Create(archive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	compressed := gzip.NewWriter(file)
+	var archive bytes.Buffer
+	compressed := gzip.NewWriter(&archive)
 	writer := tar.NewWriter(compressed)
 	if err := writer.WriteHeader(&tar.Header{Name: "binary", Size: 4}); err != nil {
 		t.Fatal(err)
@@ -292,10 +229,10 @@ func TestExtractTruncatedBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Close the compressed stream without writing the missing tar contents.
-	if err := errors.Join(compressed.Close(), file.Close()); err != nil {
+	if err := compressed.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := extractSelfUpgradeBinaries(archive, map[string]string{"binary": filepath.Join(dir, "candidate")}); !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err := extractSelfUpgradeBinaries(&archive, map[string]string{"binary": filepath.Join(t.TempDir(), "candidate")}); !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("truncated archive = %v, want unexpected EOF", err)
 	}
 }
@@ -479,10 +416,10 @@ func TestInstallSelfUpgradeRelease(t *testing.T) {
 	receiverName := "yagp-depoly-linux-" + runtime.GOARCH
 	updaterName := "yagp-update-linux-" + runtime.GOARCH
 	for _, failure := range []string{
-		"", "verify", "archive", "bundle", "extract", "missing-updater", "stage", "gh", "receiver-version",
+		"", "extract", "missing-updater", "stage", "receiver-version",
 		"updater-version", "changed", "lock", "restart", "is-active",
 	} {
-		t.Run("cache-"+failure, func(t *testing.T) {
+		t.Run("apply-"+failure, func(t *testing.T) {
 			dir := t.TempDir()
 			write := func(name, content string) string {
 				t.Helper()
@@ -498,13 +435,6 @@ func TestInstallSelfUpgradeRelease(t *testing.T) {
 			}
 			executable := write("yagp-update", versionScript(installed, true))
 			receiver := write("yagp-depoly", versionScript(installed, false))
-			gh := write("gh", `#!/bin/sh
-case "$1" in
---version) echo 'gh version 2.102.0 (2026-10-02)';;
-attestation) test -f "$3" && test -f "$5" && test ! -f "$(dirname "$0")/verify";;
-*) exit 2;;
-esac
-`)
 			systemctl := write("systemctl", `#!/bin/sh
 dir=$(dirname "$0")
 printf '%s\n' "$*" >> "$dir/systemctl.log"
@@ -519,7 +449,7 @@ reset-failed) ;;
 *) exit 2;;
 esac
 `)
-			if failure == "verify" || failure == "restart" || failure == "is-active" {
+			if failure == "restart" || failure == "is-active" {
 				write(failure, "")
 			}
 			var archive bytes.Buffer
@@ -548,44 +478,23 @@ esac
 			if err := errors.Join(writer.Close(), compressed.Close()); err != nil {
 				t.Fatal(err)
 			}
-			cacheAssets := upgrade.YAGPReleaseCache + "/releases/download/" + newer + "/"
-			client := &http.Client{Transport: selfUpgradeRoundTripper(func(req *http.Request) (*http.Response, error) {
-				var body io.Reader
-				status := 200
-				switch req.URL.String() {
-				case cacheAssets + receiverName + ".tar.gz":
-					body = bytes.NewReader(archive.Bytes())
-					if failure == "archive" {
-						status = 404
-					}
-					if failure == "extract" {
-						body = strings.NewReader("not an archive")
-					}
-				case cacheAssets + selfUpgradeBundle:
-					body = strings.NewReader("signed fixture")
-					if failure == "bundle" {
-						status = 404
-					}
-				default:
-					t.Fatalf("unexpected request %s", req.URL)
-				}
-				return &http.Response{StatusCode: status, Status: http.StatusText(status), Body: io.NopCloser(body)}, nil
-			})}
+			if failure == "extract" {
+				archive.Reset()
+				archive.WriteString("not an archive")
+			}
 			env := selfUpgradeEnvironment{
-				client: client, gh: gh, systemctl: systemctl, lockPath: filepath.Join(dir, "deploy.lock"),
+				systemctl: systemctl, lockPath: filepath.Join(dir, "deploy.lock"),
 			}
 			target := executable
 			switch failure {
 			case "stage":
 				target = filepath.Join(dir, "missing", "yagp-update")
-			case "gh":
-				env.gh = filepath.Join(dir, "missing-gh")
 			case "lock":
 				if err := os.Symlink(executable, env.lockPath); err != nil {
 					t.Fatal(err)
 				}
 			}
-			err := env.install(context.Background(), target, receiver, current, newer)
+			err := env.install(context.Background(), target, receiver, current, newer, &archive)
 			if (err != nil) != (failure != "") {
 				t.Fatalf("install = %v, want failure %q", err, failure)
 			}
