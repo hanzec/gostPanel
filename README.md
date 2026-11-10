@@ -183,7 +183,13 @@ database:
   dsn: "yagp:<password>@tcp(mysql.internal:3306)/yagp?charset=utf8mb4&loc=Local"
 ```
 
-面板备份功能适用于 SQLite。MySQL 使用数据库服务的备份机制。
+面板备份功能适用于 SQLite。在 **系统设置 → 数据库备份** 中可立即备份或开启自动备份，并设置保留份数。快照包含已提交的数据；生成失败会报错并保留已有备份，自动任务会在后续检查时重试。MySQL 使用数据库服务的备份机制。
+
+备份文件位于面板工作目录的 `backups/`。Docker 内对应 `/app/backups`，当前 Compose 未挂载该目录；使用面板备份前，请在 `yagp` 服务的 `volumes` 中追加 `${PWD:-.}/backups:/app/backups`，然后执行 `docker compose up -d` 应用挂载，避免重建容器时丢失快照。
+
+### 邮件与推送通知
+
+在 **系统设置 → 通知管理** 中配置 SMTP 和 Bark，测试按钮使用当前表单参数；点击 **保存设置** 后才会保存配置。SMTP 的 `465` 端口使用隐式 TLS，发送认证信息前会校验证书链及 SMTP 主机名，并要求 TLS 1.2 或更新版本。证书不受信任或主机名不匹配时连接会失败；私有 CA 应加入面板运行环境的系统信任库，不能通过跳过校验解决。
 
 ### 启用节点注册和流量上报
 
@@ -196,6 +202,8 @@ Compose 按真实客户端 IP 对注册、刷新和建连分别限速。注册�
 Traefik 为直连客户端生成 `X-Real-IP`。如果前面还有反向代理，须让前置代理用实际客户端 IP 覆盖 `X-Real-IP`，并仅将该代理加入 Traefik 入口的 `forwardedHeaders.trustedIPs`，保持 `forwardedHeaders.insecure` 关闭。二进制直连部署需在自己的入口配置注册、刷新和建连限速。 [Traefik 限速配置](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/ratelimit/)
 
 已认证的会话按节点分别限制两类上报。流量上报平均每秒 100 次、突发 500 次，IP 更新平均每秒 1 次、突发 5 次。节点重连时沿用原配额，超限的上报返回 `ResourceExhausted`。命令和回包不计入上报配额。面板和节点均限制单条 WebSocket 消息为 5 MiB，包含 Protobuf 封装开销。
+
+节点接入 HTTP 请求的读取超时为 10 秒；注册或刷新正文读取超时返回 HTTP `408`。成功建立的 WebSocket 会话可持续连接。
 
 ```yaml
 host: "panel.example.com"
@@ -218,27 +226,39 @@ report:
 
 ---
 
-## 📸 上游界面预览
+## 📸 当前界面预览
+
+以下为当前 Vue 界面的示例数据截图，使用文档专用 IP 地址和虚构记录，不代表实际部署状态。截图覆盖六个主要页面；交互与响应式要求见[界面设计标准](./docs/ui-design-standard.md)。
 
 <table>
   <tr>
     <td align="center">
-      <h3>仪表板</h3>
-      <img src="./docs/screenshots/dash.png" alt="仪表板" width="400"/>
+      <h3>运行总览</h3>
+      <img src="./docs/screenshots/dash.png" alt="yagp 当前运行总览界面，展示示例流量及资源状态" width="400"/>
     </td>
     <td align="center">
       <h3>节点管理</h3>
-      <img src="./docs/screenshots/node.png" alt="节点管理" width="400"/>
+      <img src="./docs/screenshots/node.png" alt="yagp 当前节点管理界面，展示示例节点、连接状态和配额" width="400"/>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <h3>转发管理</h3>
-      <img src="./docs/screenshots/forwards.png" alt="转发管理" width="400"/>
+      <h3>入口管理</h3>
+      <img src="./docs/screenshots/forwards.png" alt="yagp 当前入口管理界面，展示监听、目标和关联隧道" width="400"/>
     </td>
     <td align="center">
       <h3>隧道管理</h3>
-      <img src="./docs/screenshots/tunnels.png" alt="隧道管理" width="400"/>
+      <img src="./docs/screenshots/tunnels.png" alt="yagp 当前隧道管理界面，展示源端与目的端入口配对" width="400"/>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <h3>操作日志</h3>
+      <img src="./docs/screenshots/logs.png" alt="yagp 当前操作日志界面，展示示例管理员操作记录" width="400"/>
+    </td>
+    <td align="center">
+      <h3>系统设置</h3>
+      <img src="./docs/screenshots/system.png" alt="yagp 当前系统设置的通知管理页，展示 SMTP 和 Bark 配置" width="400"/>
     </td>
   </tr>
 </table>
@@ -250,6 +270,8 @@ report:
 按 [一键安装步骤](#安装新节点) 添加实例。节点显示离线时，可点击 **安装** 重新生成安装命令。
 
 节点在线后即可创建并启动转发规则。Gost 的本机观察器把累计统计交给守护进程，守护进程通过 WebSocket 上报。面板计算本次增量，在同一笔事务内更新规则与节点的计数。
+
+需要清理节点上的运行服务时，停止或删除入口会先停止服务并保存节点配置。节点离线、节点配置保存失败或面板数据库写入失败时，入口记录会保留；排除故障后可重试。已被隧道占用的入口需在 **隧道管理** 中操作对应隧道。
 
 首次注册时，`yagp-daemon` 验证面板 TLS 证书，再通过 HTTPS POST 提交一次性注册令牌和探测到的 IP。面板返回节点 ID 和后续通信凭据。守护进程将面板凭据写入 `/etc/yagp-daemon/<ID>/panel-credentials.yaml`，文件权限为 `0600`。替换已有节点时，新节点注册成功后使用新凭据。
 
@@ -332,7 +354,7 @@ systemd 节点使用 `yagp-daemon.service` 和 `yagp-gost.service`。Gost 在守
 
 ### 自动版本号
 
-推送到 `main` 时，GitHub Actions 使用该次推送的最后一个提交生成版本，并发布 GitHub Release 和同名的 GHCR 镜像标签。仓库默认分支为 `master` 时，推送到 `master` 也会触发发布。默认分支的最新提交可以更新 `latest`。
+`master` 是当前默认分支，日常改动以它为 PR 合并目标。推送或合并到 `master` 后，GitHub Actions 使用该次推送的最后一个提交生成版本，并发布 GitHub Release 和同名的 GHCR 镜像标签。`main` 是历史发布分支，推送到它仍会触发发布，操作前需明确确认。默认分支的最新提交可以更新 `latest`。
 
 版本格式为 `x.y.z-sha`，例如 `0.1.67-a1b2c3d`。`x.y` 在仓库根目录的 `VERSION` 中维护，`z` 是沿第一父提交统计的主线提交数，`sha` 是提交 SHA 的前 7 位。用 `bash scripts/version.sh` 可查看当前检出提交的版本，需要完整 Git 历史。
 
@@ -347,6 +369,8 @@ GitHub Release 正文由 `cmd/release-notes` 生成。程序沿当前分支的�
 推送到 `main` 或 `master`，以及以这些分支为目标的 PR，都会运行 **Vue and Go tests** 检查。测试任务先检查 Vue，再构建 Go 需要嵌入的前端产物，并在隔离的 Linux 容器中运行 Go 测试，包括真实 nftables 配额和使用隔离 systemd 命令的升级场景。发布 GitHub Release 和推送 Docker 镜像都要等这个检查通过。
 
 运行摘要分别显示 Vue 和 Go 的语句覆盖率。通过检查需要 Vue 达到 90%，Go 超过 90%。本地可运行 `npm --prefix web run test:coverage` 生成前端报告 `web/coverage/index.html`。构建前端后，运行 `go test ./... -cover` 可查看各个 Go 包的覆盖率。Windows 常规测试会跳过 Linux 专用场景。
+
+入口列表 API `GET /api/v1/rules` 的 `pageSize` 最大为 `100`，超限返回 HTTP `400`。需要更多记录时递增 `page`，不要通过超过上限的页容量请求全部数据。
 
 ```bash
 # 完整构建，产物为 yagp 和 yagp-daemon

@@ -36,7 +36,7 @@
           <h2 id="node-inventory-title" tabindex="-1">节点清单</h2>
           <p class="ops-muted">查看节点状态与流量，点击任意节点行进入详情。</p>
         </div>
-        <span class="inventory-badge ops-mono">gRPC / TLS</span>
+        <span class="inventory-badge ops-mono">WebSocket / TLS</span>
       </div>
 
       <form class="ops-toolbar inventory-filters" aria-label="筛选节点" @submit.prevent="handleSearch">
