@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+
 	"yagp/internal/model"
 
 	"gorm.io/gorm"
@@ -24,8 +26,16 @@ func (r *TunnelRepository) Create(tunnel *model.GostTunnel) error {
 }
 
 // Update 只更新隧道可编辑的配置。
-func (r *TunnelRepository) Update(tunnel *model.GostTunnel) error {
-	return r.DB.Model(tunnel).Select("name", "entry_node_id", "exit_node_id", "entry_rule_id", "exit_rule_id", "protocol", "relay_port", "remark", "updated_at").Updates(tunnel).Error
+func (r *TunnelRepository) Update(tunnel *model.GostTunnel, updateAllowlist bool) error {
+	fields := []string{"name", "entry_node_id", "exit_node_id", "entry_rule_id", "exit_rule_id", "protocol", "relay_port", "remark", "updated_at"}
+	if updateAllowlist {
+		fields = append(fields, "allowlist_node_ids")
+	}
+	return r.DB.Model(tunnel).Select(fields).Updates(tunnel).Error
+}
+
+func (r *TunnelRepository) UpdateAllowlist(ctx context.Context, tunnel *model.GostTunnel) error {
+	return r.DB.WithContext(ctx).Model(tunnel).Select("allowlist_node_ids", "updated_at").Updates(tunnel).Error
 }
 
 // Delete 删除隧道

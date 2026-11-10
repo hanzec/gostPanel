@@ -171,7 +171,7 @@ func TestRepositoryForwardingRelationsAndScopedUpdates(t *testing.T) {
 	mustPersist(t, tunnels.Create(&tunnel))
 	mustPersist(t, tunnels.Create(&other))
 	tunnel.Remark = "persisted"
-	mustPersist(t, tunnels.Update(&tunnel))
+	mustPersist(t, tunnels.Update(&tunnel, false))
 	mustPersist(t, tunnels.UpdateServiceInfo(tunnel.ID, "relay-service", "relay-chain"))
 	mustPersist(t, tunnels.UpdateStatus(tunnel.ID, model.TunnelStatusRunning))
 	mustPersist(t, tunnels.UpdateStatus(other.ID, model.TunnelStatusRunning))

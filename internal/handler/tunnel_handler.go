@@ -65,6 +65,29 @@ func (h *TunnelHandler) Update(c *gin.Context) {
 	response.Success(c, tunnel)
 }
 
+// UpdateAllowlist 保存隧道出口 Relay 的来源 IP 白名单。
+func (h *TunnelHandler) UpdateAllowlist(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "无效的隧道 ID")
+		return
+	}
+
+	var req dto.UpdateTunnelAllowlistReq
+	if err = c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请提供白名单节点 ID 列表")
+		return
+	}
+
+	ctx := GetRequestContext(c)
+	tunnel, err := h.tunnelService.UpdateAllowlist(c.Request.Context(), uint(id), req.AllowlistNodeIDs, ctx.Username, ctx.ClientIP, ctx.UserAgent)
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+	response.Success(c, tunnel)
+}
+
 // Delete 删除隧道
 func (h *TunnelHandler) Delete(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)

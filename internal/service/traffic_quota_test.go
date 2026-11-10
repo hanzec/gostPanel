@@ -230,7 +230,7 @@ func TestCreateServiceWithTrafficQuotaRollsBackOnlyNewService(t *testing.T) {
 				t.Fatal(err)
 			}
 			service := gost.BuildTCPForwardService("rule-1", 5010, []string{"localhost:8080"}, "round")
-			err := createServiceWithTrafficQuota(repo, utils.GetGostClient(&node), node, service)
+			_, err := createServiceWithTrafficQuota(repo, utils.GetGostClient(&node), node, service)
 			if tc.wantErrMessage != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErrMessage) {
 					t.Errorf("start error = %v, want error containing %q", err, tc.wantErrMessage)
@@ -289,7 +289,7 @@ func TestRuleSyncClearsQuotaEvenWhenGostConfigIsUnavailable(t *testing.T) {
 			if err := repo.Create(&node); err != nil {
 				t.Fatal(err)
 			}
-			NewRuleSyncService(db).syncNodeRules(node, model.GostAllowlist{}, nil)
+			NewRuleSyncService(db).syncNodeRules(node, nil)
 			saved, err := repo.FindByID(node.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -417,7 +417,7 @@ func TestRuleSyncRecoversWhenConfigAndQuotaCommandsFail(t *testing.T) {
 			remote.commands = []trafficQuotaAdminCommand{tc.admin}
 			remote.quotaErr = tc.quotaErr
 			remote.mu.Unlock()
-			service.syncNodeRules(node, model.GostAllowlist{}, nil)
+			service.syncNodeRules(node, nil)
 			requireServiceError(t, db.First(&node, node.ID).Error, nil)
 			requireServiceError(t, db.First(&rule, rule.ID).Error, nil)
 			if node.TrafficQuotaState != tc.wantQuota || rule.Status != tc.wantRule {

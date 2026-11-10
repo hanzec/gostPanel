@@ -12,10 +12,7 @@ import (
 	"yagp/pkg/gost"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
-
-const gostAllowlistID = 1
 
 type GostAllowlistService struct {
 	db *gorm.DB
@@ -25,31 +22,12 @@ func NewGostAllowlistService(db *gorm.DB) *GostAllowlistService {
 	return &GostAllowlistService{db: db}
 }
 
-func (s *GostAllowlistService) Get(ctx context.Context) (model.GostAllowlist, error) {
-	config := model.GostAllowlist{NodeIDs: []uint{}, Addresses: []string{}}
-	if err := s.db.WithContext(ctx).Find(&config, gostAllowlistID).Error; err != nil {
-		return model.GostAllowlist{}, err
-	}
-	// Nodes can report new IPs at runtime; resolve their current addresses on each sync.
-	addresses, err := s.resolveAddresses(ctx, config.NodeIDs, false)
-	if err != nil {
-		return model.GostAllowlist{}, err
-	}
-	config.Addresses = addresses
-	return config, nil
-}
-
-func (s *GostAllowlistService) Update(ctx context.Context, nodeIDs []uint) (model.GostAllowlist, error) {
+func (s *GostAllowlistService) validateNodeIDs(ctx context.Context, nodeIDs []uint) ([]uint, error) {
 	nodeIDs = append([]uint{}, nodeIDs...)
 	slices.Sort(nodeIDs)
-	config := model.GostAllowlist{ID: gostAllowlistID, NodeIDs: slices.Compact(nodeIDs)}
-	addresses, err := s.resolveAddresses(ctx, config.NodeIDs, true)
-	if err != nil {
-		return config, err
-	}
-	config.Addresses = addresses
-	err = s.db.WithContext(ctx).Clauses(clause.OnConflict{UpdateAll: true}).Create(&config).Error
-	return config, err
+	nodeIDs = slices.Compact(nodeIDs)
+	_, err := s.resolveAddresses(ctx, nodeIDs, true)
+	return nodeIDs, err
 }
 
 func (s *GostAllowlistService) resolveAddresses(ctx context.Context, nodeIDs []uint, strict bool) ([]string, error) {
@@ -83,67 +61,70 @@ func (s *GostAllowlistService) resolveAddresses(ctx context.Context, nodeIDs []u
 	return slices.Compact(addresses), nil
 }
 
-func relayAdmission(config model.GostAllowlist) gost.AdmissionConfig {
-	return gost.AdmissionConfig{
-		Name:      gost.RelayAllowlistName,
-		Whitelist: len(config.NodeIDs) > 0,
-		Matchers:  config.Addresses,
-	}
-}
-
 func relayServiceName(id uint) string {
 	return fmt.Sprintf("relay-tunnel-%d", id)
 }
 
-func (s *GostAllowlistService) prepareRelay(client *gost.Client, relay *gost.ServiceConfig) error {
-	config, err := s.Get(context.Background())
-	if err != nil || config.ID == 0 {
-		return err
+func (s *GostAllowlistService) prepareRelay(client *gost.Client, relay *gost.ServiceConfig, tunnel *model.GostTunnel) error {
+	if len(tunnel.AllowlistNodeIDs) == 0 {
+		return nil
 	}
 	current, err := client.GetConfig()
 	if err != nil {
 		return err
 	}
-	if _, err = client.EnsureAdmission(relayAdmission(config), current.Admissions); err != nil {
+	if _, err = s.ensureRelayAdmission(client, current.Admissions, relay.Name, tunnel.AllowlistNodeIDs); err != nil {
 		return err
 	}
-	relay.Admission = gost.RelayAllowlistName
+	relay.Admission = gost.TunnelRelayAllowlistName(relay.Name)
 	return nil
 }
 
-func syncGostAllowlist(client *gost.Client, current *gost.GostConfig, nodeID uint, tunnels []model.GostTunnel, config model.GostAllowlist) error {
-	managed := make(map[string]bool)
+func (s *GostAllowlistService) ensureRelayAdmission(client *gost.Client, current []gost.AdmissionConfig, relayName string, nodeIDs []uint) (bool, error) {
+	// Resolve current addresses on every sync so address changes are picked up without saving the selection again.
+	addresses, err := s.resolveAddresses(context.Background(), nodeIDs, false)
+	if err != nil {
+		return false, err
+	}
+	return client.EnsureAdmission(gost.AdmissionConfig{
+		Name:      gost.TunnelRelayAllowlistName(relayName),
+		Whitelist: len(nodeIDs) > 0,
+		Matchers:  addresses,
+	}, current)
+}
+
+func (s *GostAllowlistService) syncRelays(client *gost.Client, current *gost.GostConfig, nodeID uint, tunnels []model.GostTunnel) (bool, error) {
+	managed := make(map[string][]uint)
 	for _, tunnel := range tunnels {
 		if tunnel.ExitNodeID == nodeID && tunnel.ServiceID == relayServiceName(tunnel.ID) {
-			managed[tunnel.ServiceID] = true
+			managed[tunnel.ServiceID] = tunnel.AllowlistNodeIDs
 		}
 	}
-	var relays []gost.ServiceConfig
-	for _, svc := range current.Services {
-		if managed[svc.Name] && svc.Handler != nil && svc.Handler.Type == "relay" &&
-			(len(config.NodeIDs) > 0 || svc.HasRelayAllowlist()) {
-			relays = append(relays, svc)
-		}
-	}
-	if len(relays) == 0 {
-		return nil
-	}
-	changed, err := client.EnsureAdmission(relayAdmission(config), current.Admissions)
-	if err != nil {
-		return err
-	}
+	var changed bool
 	var syncError error
-	for _, relay := range relays {
-		if !relay.HasRelayAllowlist() {
-			updated, err := client.AttachRelayAllowlist(relay.Name)
+	for _, relay := range current.Services {
+		nodeIDs, managedRelay := managed[relay.Name]
+		if !managedRelay || relay.Handler == nil || relay.Handler.Type != "relay" {
+			continue
+		}
+		hasAdmission := relay.HasAdmission(gost.TunnelRelayAllowlistName(relay.Name))
+		// Keep an existing per-tunnel binding when clearing the selection to avoid reloading the relay.
+		enabled := len(nodeIDs) > 0 || hasAdmission
+		if enabled {
+			updated, err := s.ensureRelayAdmission(client, current.Admissions, relay.Name, nodeIDs)
+			changed = changed || updated
+			if err != nil {
+				syncError = errors.Join(syncError, fmt.Errorf("%s: %w", relay.Name, err))
+				continue
+			}
+		}
+		if relay.HasAdmission(gost.LegacyRelayAllowlistName) || enabled != hasAdmission {
+			updated, err := client.SetRelayAllowlist(relay.Name, enabled)
 			changed = changed || updated
 			if err != nil {
 				syncError = errors.Join(syncError, fmt.Errorf("%s: %w", relay.Name, err))
 			}
 		}
 	}
-	if changed {
-		syncError = errors.Join(syncError, client.SaveConfig())
-	}
-	return syncError
+	return changed, syncError
 }

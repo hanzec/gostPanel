@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -19,15 +18,15 @@ import (
 // RuleSyncService 规则状态同步服务
 // 定时从 Gost 节点同步规则的真实运行状态
 type RuleSyncService struct {
-	nodeRepo      *repository.NodeRepository
-	ruleRepo      *repository.RuleRepository
-	tunnelRepo    *repository.TunnelRepository
-	allowlist     *GostAllowlistService
-	syncing       sync.Map
-	unsavedChains sync.Map
-	ticker        *time.Ticker
-	stopChan      chan struct{}
-	wg            sync.WaitGroup
+	nodeRepo            *repository.NodeRepository
+	ruleRepo            *repository.RuleRepository
+	tunnelRepo          *repository.TunnelRepository
+	allowlist           *GostAllowlistService
+	syncing             sync.Map
+	unsavedTunnelConfig sync.Map
+	ticker              *time.Ticker
+	stopChan            chan struct{}
+	wg                  sync.WaitGroup
 }
 
 // NewRuleSyncService 创建规则状态同步服务
@@ -82,22 +81,18 @@ func (s *RuleSyncService) syncAll() {
 		return
 	}
 
-	allowlist, err := s.allowlist.Get(context.Background())
-	if err != nil {
-		logger.Errorf("[Sync] 读取 Gost 白名单失败: %v", err)
-	}
 	exitAddresses := make(map[uint]string, len(nodes))
 	for _, node := range nodes {
 		exitAddresses[node.ID] = node.Address
 	}
 	for _, node := range nodes {
 		// 并发同步每个节点
-		go s.syncNodeRules(node, allowlist, exitAddresses)
+		go s.syncNodeRules(node, exitAddresses)
 	}
 }
 
 // syncNodeRules 同步单个节点的规则
-func (s *RuleSyncService) syncNodeRules(node model.GostNode, allowlist model.GostAllowlist, exitAddresses map[uint]string) {
+func (s *RuleSyncService) syncNodeRules(node model.GostNode, exitAddresses map[uint]string) {
 	// 如果节点离线，跳过规则同步
 	if node.Status == model.NodeStatusOffline {
 		return
@@ -143,10 +138,12 @@ func (s *RuleSyncService) syncNodeRules(node model.GostNode, allowlist model.Gos
 		return
 	}
 	s.recordRelayTraffic(node.ID, tunnels, gostCfg.Services)
-	if allowlist.ID != 0 {
-		if err = syncGostAllowlist(client, gostCfg, node.ID, tunnels, allowlist); err != nil {
-			logger.Errorf("[Sync] 下发 Gost 白名单到节点 %d 失败: %v", node.ID, err)
-		}
+	changed, err := s.allowlist.syncRelays(client, gostCfg, node.ID, tunnels)
+	if err != nil {
+		logger.Errorf("[Sync] 下发隧道 IP 白名单到节点 %d 失败: %v", node.ID, err)
+	}
+	if changed {
+		s.unsavedTunnelConfig.Store(node.ID, struct{}{})
 	}
 	s.syncTunnels(client, node.ID, tunnels, gostCfg.Chains, exitAddresses)
 }
@@ -214,12 +211,12 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 			}
 		}
 	}
-	if _, unsaved := s.unsavedChains.Load(nodeID); changed || unsaved {
+	if _, unsaved := s.unsavedTunnelConfig.Load(nodeID); changed || unsaved {
 		if err := client.SaveConfig(); err != nil {
-			s.unsavedChains.Store(nodeID, struct{}{})
+			s.unsavedTunnelConfig.Store(nodeID, struct{}{})
 			logger.Warnf("[Sync] 保存节点 %d 隧道配置失败: %v", nodeID, err)
 		} else {
-			s.unsavedChains.Delete(nodeID)
+			s.unsavedTunnelConfig.Delete(nodeID)
 		}
 	}
 }

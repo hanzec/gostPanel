@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,7 +52,7 @@ func newHandlerHTTPFixture(t *testing.T) *handlerHTTPFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.SystemConfig{}, &model.GostAllowlist{}, &model.GostRuleset{}); err != nil {
+	if err := db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.SystemConfig{}, &model.GostRuleset{}); err != nil {
 		t.Fatal(err)
 	}
 	engine := gin.New()
@@ -139,6 +140,7 @@ func (f *handlerHTTPFixture) registerForwarding() {
 	f.engine.POST("/tunnels", tunnels.Create)
 	f.engine.GET("/tunnels/:id", tunnels.GetByID)
 	f.engine.PUT("/tunnels/:id", tunnels.Update)
+	f.engine.PUT("/tunnels/:id/allowlist", tunnels.UpdateAllowlist)
 	f.engine.DELETE("/tunnels/:id", tunnels.Delete)
 	f.engine.POST("/tunnels/:id/start", tunnels.Start)
 	f.engine.POST("/tunnels/:id/stop", tunnels.Stop)
@@ -152,9 +154,6 @@ func (f *handlerHTTPFixture) registerSettings() {
 	f.engine.POST("/system/email/test", sys.TestEmail)
 	f.engine.POST("/system/bark/test", sys.TestBark)
 	f.engine.POST("/system/backup", sys.Backup)
-	allowlist := NewGostAllowlistHandler(service.NewGostAllowlistService(f.db))
-	f.engine.GET("/system/gost-allowlist", allowlist.Get)
-	f.engine.PUT("/system/gost-allowlist", allowlist.Update)
 	ruleset := NewGostRulesetHandler(service.NewGostRulesetService(f.db))
 	f.engine.GET("/system/gost-ruleset", ruleset.Get)
 	f.engine.PUT("/system/gost-ruleset", ruleset.Update)
@@ -317,7 +316,7 @@ func TestHTTPReportsUnavailableDatabase(t *testing.T) {
 	}
 	for _, path := range []string{
 		"/nodes", "/rules", "/tunnels", "/logs", "/dashboard/stats", "/nodes/1/config",
-		"/system/config", "/system/public-config", "/system/gost-allowlist", "/system/gost-ruleset",
+		"/system/config", "/system/public-config", "/system/gost-ruleset",
 	} {
 		f.request(t, "GET", path, "", 500)
 	}
@@ -358,5 +357,54 @@ func TestForwardingHTTPStartIsIdempotent(t *testing.T) {
 	}
 	if got := handlerData[model.GostRule](t, f.request(t, "GET", rulePath, "", 200)); got.Status != rule.Status || got.ServiceID != rule.ServiceID {
 		t.Fatalf("repeated rule start changed configuration: %+v", got)
+	}
+}
+
+func TestTunnelHTTPAllowlistIsIndependentAndEditableWhileRunning(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerForwarding()
+	entry := model.GostNode{Name: "entry", Port: 39110, IPv4: "192.0.2.1"}
+	exit := model.GostNode{Name: "exit", Port: 39111, IPv6: "2001:db8::2"}
+	noIP := model.GostNode{Name: "pending registration", Port: 39112}
+	for _, node := range []*model.GostNode{&entry, &exit, &noIP} {
+		if err := f.db.Create(node).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := fmt.Sprintf(`{"name":"first","entry_node_id":%d,"exit_node_id":%d,"protocol":"tcp","relay_port":8443,"allowlist_node_ids":[%d,%d]}`, entry.ID, exit.ID, entry.ID, entry.ID)
+	first := handlerData[model.GostTunnel](t, f.request(t, "POST", "/tunnels", body, 200))
+	if !slices.Equal(first.AllowlistNodeIDs, []uint{entry.ID}) {
+		t.Fatalf("created allowlist = %v", first.AllowlistNodeIDs)
+	}
+	body = fmt.Sprintf(`{"name":"second","entry_node_id":%d,"exit_node_id":%d,"protocol":"tcp","relay_port":8444}`, entry.ID, exit.ID)
+	second := handlerData[model.GostTunnel](t, f.request(t, "POST", "/tunnels", body, 200))
+	secondPath := fmt.Sprintf("/tunnels/%d", second.ID)
+	if second.AllowlistNodeIDs == nil || len(second.AllowlistNodeIDs) != 0 {
+		t.Fatalf("new tunnel did not start with an empty allowlist: %#v", second.AllowlistNodeIDs)
+	}
+	body = fmt.Sprintf(`{"name":"second","protocol":"tcp","relay_port":8444,"allowlist_node_ids":[%d]}`, entry.ID)
+	f.request(t, "PUT", secondPath, body, 200)
+	path := fmt.Sprintf("/tunnels/%d", first.ID)
+	f.request(t, "PUT", path, `{"name":"renamed","protocol":"tcp","relay_port":8443}`, 200)
+	if got := handlerData[model.GostTunnel](t, f.request(t, "GET", path, "", 200)); !slices.Equal(got.AllowlistNodeIDs, []uint{entry.ID}) {
+		t.Fatalf("ordinary edit changed the allowlist: %v", got.AllowlistNodeIDs)
+	}
+	if err := f.db.Model(&first).Update("status", model.TunnelStatusRunning).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{`{}`, `{"allowlist_node_ids":null}`, `{"allowlist_node_ids":[0]}`, `{"allowlist_node_ids":[999]}`, fmt.Sprintf(`{"allowlist_node_ids":[%d]}`, noIP.ID)} {
+		f.request(t, "PUT", path+"/allowlist", invalid, 400)
+	}
+	body = fmt.Sprintf(`{"allowlist_node_ids":[%d]}`, exit.ID)
+	got := handlerData[model.GostTunnel](t, f.request(t, "PUT", path+"/allowlist", body, 200))
+	if got.Status != model.TunnelStatusRunning || got.Name != "renamed" || !slices.Equal(got.AllowlistNodeIDs, []uint{exit.ID}) {
+		t.Fatalf("updated running tunnel: %+v", got)
+	}
+	f.request(t, "PUT", path+"/allowlist", `{"allowlist_node_ids":[]}`, 200)
+	if got := handlerData[model.GostTunnel](t, f.request(t, "GET", path, "", 200)); got.AllowlistNodeIDs == nil || len(got.AllowlistNodeIDs) != 0 {
+		t.Fatalf("cleared allowlist = %v", got.AllowlistNodeIDs)
+	}
+	if got := handlerData[model.GostTunnel](t, f.request(t, "GET", secondPath, "", 200)); !slices.Equal(got.AllowlistNodeIDs, []uint{entry.ID}) {
+		t.Fatalf("other tunnel's allowlist changed: %v", got.AllowlistNodeIDs)
 	}
 }

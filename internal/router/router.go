@@ -74,7 +74,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 	logHandler := handler.NewLogHandler(logService)
 	systemConfigHandler := handler.NewSystemConfigHandler(systemConfigService, backupService)
 	gostRulesetHandler := handler.NewGostRulesetHandler(service.NewGostRulesetService(r.db))
-	gostAllowlistHandler := handler.NewGostAllowlistHandler(service.NewGostAllowlistService(r.db))
 
 	// 管理员路由
 	authRoutes := apiV1.Group("")
@@ -119,6 +118,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.GET("/tunnels/:id", tunnelHandler.GetByID)
 		authRoutes.POST("/tunnels", tunnelHandler.Create)
 		authRoutes.PUT("/tunnels/:id", tunnelHandler.Update)
+		authRoutes.PUT("/tunnels/:id/allowlist", tunnelHandler.UpdateAllowlist)
 		authRoutes.DELETE("/tunnels/:id", tunnelHandler.Delete)
 		authRoutes.POST("/tunnels/:id/start", tunnelHandler.Start)
 		authRoutes.POST("/tunnels/:id/stop", tunnelHandler.Stop)
@@ -130,8 +130,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.GET("/system/public-config", systemConfigHandler.GetPublicConfig)
 		authRoutes.GET("/system/config", systemConfigHandler.GetConfig)
 		authRoutes.PUT("/system/config", systemConfigHandler.UpdateConfig)
-		authRoutes.GET("/system/gost-allowlist", gostAllowlistHandler.Get)
-		authRoutes.PUT("/system/gost-allowlist", gostAllowlistHandler.Update)
 		authRoutes.GET("/system/gost-ruleset", gostRulesetHandler.Get)
 		authRoutes.PUT("/system/gost-ruleset", gostRulesetHandler.Update)
 		authRoutes.POST("/system/email/test", systemConfigHandler.TestEmail)

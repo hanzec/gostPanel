@@ -43,6 +43,10 @@ export function updateTunnel(id, data) {
     })
 }
 
+export function updateTunnelAllowlist(id, nodeIds) {
+    return request.put(`/tunnels/${id}/allowlist`, { allowlist_node_ids: nodeIds }, { silentError: true })
+}
+
 /**
  * 删除隧道
  */

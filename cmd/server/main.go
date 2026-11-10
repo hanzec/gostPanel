@@ -175,12 +175,10 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 // autoMigrate 自动迁移数据库表结构
 func autoMigrate(db *gorm.DB) error {
-	// 1. 执行自动迁移（添加新字段）
 	if err := db.AutoMigrate(
 		&model.GostNode{},
 		&model.GostRule{},
 		&model.GostTunnel{},
-		&model.GostAllowlist{},
 		&model.GostRuleset{},
 		&model.OperationLog{},
 		&model.SystemConfig{},
@@ -188,7 +186,19 @@ func autoMigrate(db *gorm.DB) error {
 		return err
 	}
 
-	return nil
+	return migrateTunnelAllowlists(db)
+}
+
+func migrateTunnelAllowlists(db *gorm.DB) error {
+	const legacyTable = "gost_allowlists"
+	if !db.Migrator().HasTable(legacyTable) {
+		return nil
+	}
+
+	// An explicit empty list also marks a tunnel as migrated.
+	legacySelection := db.Table(legacyTable).Select("node_ids").Where("id = ?", 1)
+	return db.Model(&model.GostTunnel{}).Where("allowlist_node_ids IS NULL").
+		UpdateColumn("allowlist_node_ids", gorm.Expr("COALESCE((?), ?)", legacySelection, "[]")).Error
 }
 
 // initSystemConfig 初始化系统配置

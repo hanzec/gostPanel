@@ -80,8 +80,10 @@ func TestObserverChangesOnlyWhenPluginChanges(t *testing.T) {
 
 func TestGostAllowlistAndBypassUpdates(t *testing.T) {
 	client, calls := controlFixture(t)
-	admission := AdmissionConfig{Name: RelayAllowlistName, Whitelist: true, Matchers: []string{"192.0.2.1"}}
-	const admissionJSON = `{"name":"yagp-relay-allowlist","whitelist":true,"matchers":["192.0.2.1"]}`
+	const relayName = "relay-tunnel-7"
+	const admissionName = "yagp-relay-tunnel-7-allowlist"
+	admission := AdmissionConfig{Name: TunnelRelayAllowlistName(relayName), Whitelist: true, Matchers: []string{"192.0.2.1"}}
+	const admissionJSON = `{"name":"` + admissionName + `","whitelist":true,"matchers":["192.0.2.1"]}`
 	calls <- gostCommand("POST", "/config/admissions", admissionJSON, http.StatusCreated, "{}")
 	if changed, err := client.EnsureAdmission(admission, []AdmissionConfig{{Name: "unrelated"}}); err != nil || !changed {
 		t.Fatalf("create admission = %t, %v", changed, err)
@@ -89,7 +91,7 @@ func TestGostAllowlistAndBypassUpdates(t *testing.T) {
 	if changed, err := client.EnsureAdmission(admission, []AdmissionConfig{admission}); err != nil || changed {
 		t.Fatalf("unchanged admission = %t, %v", changed, err)
 	}
-	const admissionPath = "/config/admissions/" + RelayAllowlistName
+	const admissionPath = "/config/admissions/" + admissionName
 	for _, code := range []int{http.StatusOK, http.StatusBadRequest} {
 		calls <- gostCommand("PUT", admissionPath, admissionJSON, code, "invalid allowlist")
 		changed, err := client.EnsureAdmission(admission, []AdmissionConfig{{Name: admission.Name}})
@@ -97,25 +99,38 @@ func TestGostAllowlistAndBypassUpdates(t *testing.T) {
 			t.Fatalf("update admission with HTTP %d = %t, %v", code, changed, err)
 		}
 	}
-	const relayPath = "/config/services/relay"
-	calls <- gostCommand("GET", relayPath, "", 200, `{"data":{"name":"relay","handler":{"type":"relay","extra":true},"admissions":["custom"],"status":{"state":"ready"},"private":"preserve"}}`)
-	calls <- gostCommand("PUT", relayPath, `{"name":"relay","handler":{"type":"relay","extra":true},"admissions":["custom","yagp-relay-allowlist"],"private":"preserve"}`, 200, "{}")
-	if changed, err := client.AttachRelayAllowlist("relay"); err != nil || !changed {
-		t.Fatalf("attach relay admission = %t, %v", changed, err)
-	}
-	for _, body := range []string{
-		`{"data":null}`,
-		`{"data":{"name":"relay","handler":{"type":"forward"}}}`,
-		`{"data":{"name":"relay","handler":{"type":"relay"},"admission":"yagp-relay-allowlist"}}`,
+	const relayPath = "/config/services/" + relayName
+	const relay = `{"name":"` + relayName + `","handler":{"type":"relay"}`
+	for _, scenario := range []struct {
+		name, current, updated string
+		enabled, fail          bool
+	}{
+		{"migrate legacy", relay + `,"admission":"yagp-relay-allowlist","admissions":["custom","yagp-relay-allowlist"],"status":{"state":"ready"},"private":"preserve"}`,
+			relay + `,"admissions":["custom","` + admissionName + `"],"private":"preserve"}`, true, false},
+		{"attach alongside custom admission", relay + `,"admission":"custom"}`,
+			relay + `,"admission":"custom","admissions":["` + admissionName + `"]}`, true, false},
+		{"detach managed bindings", relay + `,"admission":"` + admissionName + `","admissions":["yagp-relay-allowlist"]}`, relay + `}`, false, false},
+		{"missing relay", `null`, "", true, false},
+		{"different handler", `{"name":"` + relayName + `","handler":{"type":"forward"}}`, "", true, false},
+		{"already attached", relay + `,"admission":"` + admissionName + `"}`, "", true, false},
+		{"already detached", relay + `}`, "", false, false},
+		{"wrong shape", `[]`, "", true, true},
+		{"rejected update", relay + `}`, relay + `,"admissions":["` + admissionName + `"]}`, true, true},
 	} {
-		calls <- gostCommand("GET", relayPath, "", 200, body)
-		if changed, err := client.AttachRelayAllowlist("relay"); err != nil || changed {
-			t.Fatalf("no-op admission = %t, %v for %s", changed, err, body)
-		}
-	}
-	calls <- gostCommand("GET", relayPath, "", 200, `{"data":[]}`)
-	if _, err := client.AttachRelayAllowlist("relay"); err == nil {
-		t.Fatal("accepted an invalid relay service response")
+		t.Run(scenario.name, func(t *testing.T) {
+			calls <- gostCommand("GET", relayPath, "", 200, `{"data":`+scenario.current+`}`)
+			if scenario.updated != "" {
+				code := http.StatusOK
+				if scenario.fail {
+					code = http.StatusBadRequest
+				}
+				calls <- gostCommand("PUT", relayPath, scenario.updated, code, "{}")
+			}
+			changed, err := client.SetRelayAllowlist(relayName, scenario.enabled)
+			if changed != (scenario.updated != "" && !scenario.fail) || (err != nil) != scenario.fail {
+				t.Fatalf("set relay allowlist = %t, %v", changed, err)
+			}
+		})
 	}
 
 	const bypassPath = "/config/bypasses/" + TransparentBypassName

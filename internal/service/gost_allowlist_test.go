@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"slices"
 	"testing"
 
@@ -11,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestGostAllowlistPersistsValidNodeSelection(t *testing.T) {
+func TestGostAllowlistValidatesNodeSelection(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -21,7 +20,7 @@ func TestGostAllowlistPersistsValidNodeSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err = db.AutoMigrate(&model.GostNode{}, &model.GostAllowlist{}); err != nil {
+	if err = db.AutoMigrate(&model.GostNode{}); err != nil {
 		t.Fatal(err)
 	}
 	nodes := []model.GostNode{
@@ -33,48 +32,24 @@ func TestGostAllowlistPersistsValidNodeSelection(t *testing.T) {
 	if err = db.Create(&nodes).Error; err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	service := NewGostAllowlistService(db)
-	if _, err = service.Update(ctx, []uint{nodes[1].ID, nodes[0].ID}); err != nil {
-		t.Fatal(err)
+	ids, err := service.validateNodeIDs(ctx, []uint{nodes[1].ID, nodes[0].ID, nodes[1].ID})
+	if err != nil || !slices.Equal(ids, []uint{nodes[0].ID, nodes[1].ID}) {
+		t.Fatalf("validated node IDs = %v, err = %v", ids, err)
 	}
-	if _, err = service.Update(ctx, []uint{nodes[2].ID}); err == nil {
+	if _, err = service.validateNodeIDs(ctx, []uint{nodes[2].ID}); err == nil {
 		t.Fatal("accepted a node without a registered IP address")
 	}
-	config, err := service.Get(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if _, err = service.validateNodeIDs(ctx, []uint{0}); err == nil {
+		t.Fatal("accepted an unknown node ID")
 	}
-	if !slices.Equal(config.NodeIDs, []uint{nodes[0].ID, nodes[1].ID}) ||
-		!slices.Equal(config.Addresses, []string{"192.0.2.1", "2001:db8::1"}) {
-		t.Fatalf("saved policy = %+v", config)
+	addresses, err := service.resolveAddresses(ctx, []uint{nodes[3].ID}, false)
+	if err != nil || !slices.Equal(addresses, []string{"192.0.2.2", "2001:db8::2"}) {
+		t.Fatalf("resolved addresses = %v, err = %v", addresses, err)
 	}
-	if _, err = service.Update(ctx, []uint{nodes[3].ID}); err != nil {
-		t.Fatal(err)
-	}
-	config, err = service.Get(ctx)
-	if err != nil || !slices.Equal(config.Addresses, []string{"192.0.2.2", "2001:db8::2"}) {
-		t.Fatalf("detected policy = %+v, err = %v", config, err)
-	}
-	if err = db.Model(&nodes[3]).Updates(map[string]any{"ipv4": "", "ipv6": "2001:db8::3"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	config, err = service.Get(ctx)
-	if err != nil || !slices.Equal(config.Addresses, []string{"2001:db8::3"}) {
-		t.Fatalf("refreshed policy = %+v, err = %v", config, err)
-	}
-	if err = db.Delete(&nodes[3]).Error; err != nil {
-		t.Fatal(err)
-	}
-	config, err = service.Get(ctx)
-	if err != nil || !slices.Equal(config.NodeIDs, []uint{nodes[3].ID}) || len(config.Addresses) != 0 || !relayAdmission(config).Whitelist {
-		t.Fatalf("policy after node deletion = %+v, err = %v", config, err)
-	}
-	if _, err = service.Update(ctx, nil); err != nil {
-		t.Fatal(err)
-	}
-	config, err = service.Get(ctx)
-	if err != nil || config.NodeIDs == nil || len(config.NodeIDs) != 0 || config.Addresses == nil || len(config.Addresses) != 0 {
-		t.Fatalf("cleared policy = %+v, err = %v", config, err)
+	ids, err = service.validateNodeIDs(ctx, nil)
+	if err != nil || ids == nil || len(ids) != 0 {
+		t.Fatalf("cleared selection = %v, err = %v", ids, err)
 	}
 }

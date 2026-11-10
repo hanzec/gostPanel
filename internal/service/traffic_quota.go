@@ -123,17 +123,17 @@ func isQuotaService(svc gost.ServiceConfig) bool {
 	return ok && err == nil && value != 0
 }
 
-func createServiceWithTrafficQuota(repo *repository.NodeRepository, client *gost.Client, node model.GostNode, service *gost.ServiceConfig) error {
+func createServiceWithTrafficQuota(repo *repository.NodeRepository, client *gost.Client, node model.GostNode, service *gost.ServiceConfig) (bool, error) {
 	if node.TrafficLimitBytes > 0 {
 		unlock := lockTrafficQuota(node.ID)
 		defer unlock()
 	}
 	created, err := client.EnsureService(service)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if node.TrafficLimitBytes == 0 {
-		return nil
+		return created, nil
 	}
 	current, err := client.GetConfig()
 	if err == nil {
@@ -147,7 +147,7 @@ func createServiceWithTrafficQuota(repo *repository.NodeRepository, client *gost
 			}
 		}
 		logger.Warnf("配置节点 %d 的转发流量配额失败: %v", node.ID, err)
-		return errors.ErrNodeTrafficQuotaUnavailable
+		return false, errors.ErrNodeTrafficQuotaUnavailable
 	}
-	return nil
+	return created, nil
 }

@@ -170,9 +170,8 @@ func TestTunnelAndRuleLifecycle(t *testing.T) {
 	requireServiceError(t, rules.Start(rule.ID, testAdmin, testIP, testAgent), bizerrors.ErrTunnelNotRunning)
 	requireServiceError(t, tunnels.Delete(tunnel.ID, testAdmin, testIP, testAgent), bizerrors.ErrTunnelHasRules)
 	requireServiceError(t, tunnels.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
-	if _, err := NewGostAllowlistService(db).Update(context.Background(), []uint{entry.ID}); err != nil {
-		t.Fatal(err)
-	}
+	_, err = tunnels.UpdateAllowlist(context.Background(), tunnel.ID, []uint{entry.ID}, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, nil)
 
 	requireServiceError(t, tunnels.Start(tunnel.ID, testAdmin, testIP, testAgent), nil)
 	requireServiceError(t, tunnels.Start(tunnel.ID, testAdmin, testIP, testAgent), nil)
@@ -192,10 +191,10 @@ func TestTunnelAndRuleLifecycle(t *testing.T) {
 		t.Fatalf("relay chain target = %+v", relayNode)
 	}
 	relay := exitRemote.service(running.ServiceID)
-	if relay.Name == "" || relay.Handler.Type != "relay" || relay.Listener.Type != "udp" || !relay.HasRelayAllowlist() {
+	if relay.Name == "" || relay.Handler.Type != "relay" || relay.Listener.Type != "udp" || relay.Admission != gost.TunnelRelayAllowlistName(relay.Name) {
 		t.Fatalf("exit relay = %+v", relay)
 	}
-	allowlist := exitRemote.admission(gost.RelayAllowlistName)
+	allowlist := exitRemote.admission(relay.Admission)
 	if !allowlist.Whitelist || !reflect.DeepEqual(allowlist.Matchers, []string{entry.IPv4}) {
 		t.Fatalf("relay allowlist = %+v", allowlist)
 	}
@@ -297,7 +296,7 @@ func newServiceTestDB(t *testing.T) *gorm.DB {
 	requireServiceError(t, err, nil)
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	requireServiceError(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.GostAllowlist{}, &model.SystemConfig{}, &model.GostRuleset{}), nil)
+	requireServiceError(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.SystemConfig{}, &model.GostRuleset{}), nil)
 	return db
 }
 

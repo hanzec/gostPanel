@@ -3,8 +3,8 @@ import ElementPlus, { ElMessage, ElMessageBox, ElOption, ElSelect } from 'elemen
 import { createPinia } from 'pinia'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getRoutingNodes } from '@/api/node'
 import * as api from '@/api/system'
-import GostAllowlistSettings from '@/components/GostAllowlistSettings.vue'
 import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
 import System from '@/views/System.vue'
 
@@ -21,12 +21,10 @@ vi.mock('@/api/system', () => ({
   sendTestBark: vi.fn(),
   sendTestEmail: vi.fn(),
   updateSystemConfig: vi.fn(),
-  getGostAllowlist: vi.fn(),
   getGostRuleset: vi.fn(),
-  getRoutingNodes: vi.fn(),
-  updateGostAllowlist: vi.fn(),
   updateGostRuleset: vi.fn()
 }))
+vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
 
 const mounted = []
 const settings = {
@@ -94,8 +92,7 @@ beforeEach(() => {
   api.getSystemConfig.mockResolvedValue({ data: settings })
   api.getPublicSystemConfig.mockResolvedValue({ data: settings.config })
   api.updateSystemConfig.mockResolvedValue({ data: {} })
-  api.getRoutingNodes.mockResolvedValue(nodes)
-  api.getGostAllowlist.mockResolvedValue({ data: { node_ids: [], addresses: [] } })
+  getRoutingNodes.mockResolvedValue(nodes)
   api.getGostRuleset.mockResolvedValue({ data: {} })
 })
 
@@ -325,68 +322,15 @@ describe('System settings', () => {
     expect(wrapper.get('aside').text()).toContain('管理方式数据库服务')
     expect(wrapper.findAll('button').some((item) => item.text() === '立即备份')).toBe(false)
 
-    await selectTab(wrapper, 'Gost IP 白名单')
-    expect(wrapper.get('aside').text()).toContain('白名单同步')
-    expect(api.getGostAllowlist).toHaveBeenCalledTimes(1)
-    expect(wrapper.findAll('button').some((item) => item.text() === '保存设置')).toBe(false)
+    expect(wrapper.findAll('[role="tab"]').map(tab => tab.text())).not.toContain('Gost IP 白名单')
     await selectTab(wrapper, 'Clash 规则集')
     expect(wrapper.get('aside').text()).toContain('bypass: yagp-transparent-proxy')
     expect(api.getGostRuleset).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('button').some((item) => item.text() === '保存设置')).toBe(false)
   })
 })
 
 describe('Gost routing settings', () => {
-  it('renders saved IPs, disables new nodes without addresses and clears the allowlist', async () => {
-    const initial = deferred()
-    api.getGostAllowlist.mockReturnValueOnce(initial.promise)
-    const wrapper = mountPage(GostAllowlistSettings)
-    expect(wrapper.get('[aria-label="正在读取 Gost IP 白名单"]').attributes('role')).toBe('status')
-    initial.resolve({ data: { node_ids: [1, 2], addresses: ['192.0.2.1', '2001:db8::1'] } })
-    await flushPromises()
-    expect(wrapper.findAll('code').map((item) => item.text())).toEqual(['192.0.2.1', '2001:db8::1'])
-    const options = wrapper.findAllComponents(ElOption)
-    expect(options.map((option) => [option.props('value'), option.props('label'), option.props('disabled')])).toEqual([
-      [1, 'Dual stack（192.0.2.1 / 2001:db8::1）', false],
-      [2, 'Lost IP（未获取 IP）', false],
-      [3, 'Unregistered（未获取 IP）', true],
-      [4, 'IPv4 only（192.0.2.4）', false]
-    ])
-    wrapper.getComponent(ElSelect).vm.$emit('update:modelValue', [])
-    await nextTick()
-    const saving = deferred()
-    api.updateGostAllowlist.mockReturnValueOnce(saving.promise)
-    await wrapper.get('form').trigger('submit')
-    await wrapper.get('form').trigger('submit')
-    expect(api.updateGostAllowlist).toHaveBeenCalledExactlyOnceWith([])
-    saving.resolve({ data: {} })
-    await flushPromises()
-    expect(wrapper.text()).toContain('未限制来源 IP')
-    expect(ElMessage.success).toHaveBeenCalledWith('IP 白名单已保存，面板将同步到 Gost Relay')
-  })
-
-  it('retries allowlist loading and focuses a server error after submission', async () => {
-    api.getGostAllowlist.mockRejectedValueOnce(new Error('unavailable'))
-    const wrapper = mountPage(GostAllowlistSettings)
-    await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toContain('无法读取白名单或节点列表')
-    await button(wrapper, '重试').trigger('click')
-    await flushPromises()
-    wrapper.getComponent(ElSelect).vm.$emit('update:modelValue', [4])
-    await nextTick()
-    api.updateGostAllowlist
-      .mockRejectedValueOnce({ response: { data: { message: 'IP 地址已失效' } } })
-      .mockResolvedValueOnce({ data: { node_ids: [4], addresses: ['192.0.2.4'] } })
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    const alert = wrapper.get('[role="alert"]')
-    expect(alert.text()).toContain('IP 地址已失效')
-    expect(document.activeElement).toBe(alert.element)
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    expect(api.updateGostAllowlist).toHaveBeenLastCalledWith([4])
-    expect(wrapper.get('code').text()).toBe('192.0.2.4')
-  })
-
   it('caps the Clash preview and saves the trimmed URL and selected nodes', async () => {
     const matchers = Array.from({ length: 22 }, (_, index) => `domain-${index}.test`)
     api.getGostRuleset.mockResolvedValueOnce({

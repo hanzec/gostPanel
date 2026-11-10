@@ -7,7 +7,6 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -63,21 +62,6 @@ func TestSystemHTTPSettingsAndRulesets(t *testing.T) {
 	if err := f.db.Create(&node).Error; err != nil {
 		t.Fatal(err)
 	}
-	f.request(t, "GET", "/system/gost-allowlist", "", 200)
-	f.request(t, "PUT", "/system/gost-allowlist", `{"node_ids":[0]}`, 400)
-	f.request(t, "PUT", "/system/gost-allowlist", `{"node_ids":[999]}`, 400)
-	allowlist := handlerData[model.GostAllowlist](t, f.request(t, "PUT", "/system/gost-allowlist", fmt.Sprintf(`{"node_ids":[%d,%d]}`, node.ID, node.ID), 200))
-	if !slices.Equal(allowlist.NodeIDs, []uint{node.ID}) || !slices.Equal(allowlist.Addresses, []string{"198.51.100.10", "2001:db8::5"}) {
-		t.Fatalf("resolved allowlist: %+v", allowlist)
-	}
-	if err := f.db.Model(&node).Update("ipv4", "198.51.100.11").Error; err != nil {
-		t.Fatal(err)
-	}
-	updated := handlerData[model.GostAllowlist](t, f.request(t, "GET", "/system/gost-allowlist", "", 200))
-	if !slices.Contains(updated.Addresses, "198.51.100.11") || slices.Contains(updated.Addresses, "198.51.100.10") {
-		t.Fatalf("allowlist contains stale node addresses: %+v", updated)
-	}
-
 	f.request(t, "PUT", "/system/gost-ruleset", "{", 400)
 	f.request(t, "PUT", "/system/gost-ruleset", fmt.Sprintf(`{"url":"","node_ids":[%d]}`, node.ID), 400)
 	f.request(t, "PUT", "/system/gost-ruleset", `{"url":"http://example.org/rules.yaml","node_ids":[]}`, 400)

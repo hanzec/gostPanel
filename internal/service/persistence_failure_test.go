@@ -27,7 +27,7 @@ func TestServicePropagatesDatabaseReadFailures(t *testing.T) {
 		id := uint(1)
 		_, ruleErr := NewRuleService(db).Create(&dto.CreateRuleReq{Type: "forward", NodeID: &id}, testAdmin, testIP, testAgent)
 		_, tunnelErr := NewTunnelService(db).Create(&dto.CreateTunnelReq{EntryNodeID: 1, ExitNodeID: 2}, testAdmin, testIP, testAgent)
-		_, allowlistErr := NewGostAllowlistService(db).Update(ctx, []uint{id})
+		_, allowlistErr := NewGostAllowlistService(db).validateNodeIDs(ctx, []uint{id})
 		_, rulesetErr := NewGostRulesetService(db).Update(ctx, "https://rules.test", []uint{id})
 		for _, err := range []error{createErr, getErr, updateErr, deleteErr, tokenErr, statsErr, upgradeErr, ruleErr, tunnelErr, allowlistErr, rulesetErr} {
 			requireMissingTableError(t, err, "nodes")
