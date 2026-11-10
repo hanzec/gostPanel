@@ -68,9 +68,9 @@ curl -fsSL "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/${version}/s
 在本项目根目录创建 `.env`，将域名、网络名和 Outpost 地址换成实际值。Outpost 地址包含协议和端口，末尾不加 `/`；`websecure` 是 Traefik 的 HTTPS 入口名。
 
 ```dotenv
-YAGP_HOST=panel.example.com
-TRAEFIK_NETWORK=traefik
-TRAEFIK_HTTPS_ENTRYPOINT=websecure
+YAGP_PUBLIC_HOST=panel.example.com
+TRAEFIK_PUBLIC_NETWORK=traefik
+TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT=websecure
 AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
 ```
 
@@ -98,7 +98,9 @@ sudo ./yagp-depoly-linux-amd64 install /opt/yagp-panel traefik
 
 安装程序将接收器和部署命令装到同一个 `/usr/local/sbin/yagp-depoly`，并将实际面板路径写入 `/etc/yagp-depoly/project-dir`。它会迁移旧部署布局并保留镜像版本。首次安装时，shell 使用系统随机源分别生成 HMAC 密钥和 Bearer Token，在交互终端显示，并写入 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`。重装时复用现有凭据。
 
-安装程序从面板部署目录的 `.env` 读取 `YAGP_HOST`，用它生成 Traefik 路由和 `DEPLOY_WEBHOOK_URL`。为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到 Traefik file provider 加载的动态目录。迁移时先运行上面的 `install` 命令，然后替换旧路由配置，并从动态目录移除旧的独立升级路由。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
+安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。使用独立的公网和私网 Traefik 时，安装命令的最后一个参数填公网 Traefik 容器名。
+
+安装程序用公网域名生成 Traefik 路由和 `DEPLOY_WEBHOOK_URL`。为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到公网 Traefik file provider 加载的动态目录。迁移时先运行上面的 `install` 命令，然后替换旧路由配置，并从动态目录移除旧的独立升级路由。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
 
 在 GitHub 的 `production` Environment 中限制 `master` 部署，将安装输出的 `DEPLOY_WEBHOOK_SECRET`、`DEPLOY_WEBHOOK_TOKEN` 和 `DEPLOY_WEBHOOK_URL` 配为 Secret。最后将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
 
@@ -112,7 +114,7 @@ sudo ./yagp-depoly-linux-amd64 install /opt/yagp-panel traefik
 sudo /usr/local/sbin/yagp-depoly install-upgrade traefik
 ```
 
-安装程序同样读取 `.env` 的 `YAGP_HOST`，为 `POST /api/deploy/deploy-tool` 生成 `UPGRADE_WEBHOOK_URL`。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET`、`UPGRADE_WEBHOOK_TOKEN` 和 `UPGRADE_WEBHOOK_URL`。
+安装程序同样使用公网域名，为 `POST /api/deploy/deploy-tool` 生成 `UPGRADE_WEBHOOK_URL`。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET`、`UPGRADE_WEBHOOK_TOKEN` 和 `UPGRADE_WEBHOOK_URL`。
 
 在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务查询最新 Release，只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
 
@@ -170,7 +172,7 @@ database:
 
 顶级 `host` 填节点能访问的面板域名或 IP。`report.listen` 是节点接口监听地址，留空时停用节点接入。节点在 `443` 端口通过 HTTPS POST 注册和刷新凭据，通过 `GET /api/node/v2/session` 建立 WebSocket 会话。流量和 IP 上报、配置请求、管理命令及执行结果使用同一条会话。注册、刷新和 WebSocket 消息采用 Protobuf。
 
-**Docker Compose：** Traefik 在 `443` 终止 TLS，将 `/api/node/v2/register`、`/api/node/v2/refresh` 和 `/api/node/v2/session` 转发到 Docker 网络内的 HTTP 端口 `39101`。面板按节点凭据验证这三个接口。Compose 通过 `.env` 中的 `YAGP_HOST` 同时配置面板 `host` 和 Traefik 的路由域名。 [Traefik 的 WebSocket 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-websocket-services)
+**Docker Compose：** Traefik 在 `443` 终止 TLS，将 `/api/node/v2/register`、`/api/node/v2/refresh` 和 `/api/node/v2/session` 转发到 Docker 网络内的 HTTP 端口 `39101`。面板按节点凭据验证这三个接口。Compose 通过 `.env` 中的 `YAGP_PUBLIC_HOST` 同时配置面板 `host` 和 Traefik 的路由域名。 [Traefik 的 WebSocket 配置](https://doc.traefik.io/traefik/expose/overview/#exposing-websocket-services)
 
 Compose 按真实客户端 IP 对注册、刷新和建连分别限速。注册平均每分钟 6 次、突发 5 次。刷新和建连各默认平均每分钟 60 次、突发 30 次，每次 WebSocket 握手只计一次。多个节点共用出口 IP 时，可以在 `.env` 调整 `YAGP_REFRESH_RATE_PER_MINUTE`、`YAGP_REFRESH_RATE_BURST`、`YAGP_CONNECT_RATE_PER_MINUTE` 和 `YAGP_CONNECT_RATE_BURST`。
 

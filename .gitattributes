@@ -1,1 +1,2 @@
 scripts/version.sh text eol=lf
+scripts/setup_deploy.sh text eol=lf
