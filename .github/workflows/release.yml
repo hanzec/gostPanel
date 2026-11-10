@@ -243,6 +243,9 @@ jobs:
           check_master_head
           if [[ "$WEBHOOK_PATH" == /api/deploy/panel ]]; then
             [[ "$WEBHOOK_PAYLOAD" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Missing or invalid image digest.' >&2; exit 1; }
+          elif [[ "$GITHUB_EVENT_NAME" == push && ( -z "$WEBHOOK_URL" || -z "$WEBHOOK_SECRET" || -z "$WEBHOOK_TOKEN" ) ]]; then
+            echo 'Skipping automatic tool upgrade until the production-tool webhook URL and credentials are configured.'
+            exit 0
           fi
           : "${WEBHOOK_URL:?Missing webhook URL}"
           : "${WEBHOOK_SECRET:?Missing webhook signing secret}"
@@ -256,6 +259,12 @@ jobs:
           webhook_token=$WEBHOOK_TOKEN
           webhook_secret=$WEBHOOK_SECRET
           unset WEBHOOK_TOKEN WEBHOOK_SECRET
+
+          if [[ "$GITHUB_EVENT_NAME" == push && "$WEBHOOK_PATH" == /api/deploy/deploy-tool ]]; then
+            echo 'Waiting 60 seconds for the latest release cache to expire.'
+            sleep 60
+            check_master_head
+          fi
 
           for attempt in 1 2 3; do
             timestamp=$(date +%s)
@@ -306,7 +315,7 @@ jobs:
         github.ref == 'refs/heads/master' &&
         (
           (github.event_name == 'workflow_dispatch' && inputs.upgrade_depoly) ||
-          (github.event_name == 'push' && vars.YAGP_TOOL_AUTO_UPGRADE == 'true' &&
+          (github.event_name == 'push' &&
             needs.build.result == 'success' &&
             (needs.deploy.result == 'success' ||
               (vars.YAGP_DEPLOY_ENABLED != 'true' && needs.deploy.result == 'skipped')))
@@ -320,9 +329,6 @@ jobs:
       queue: max
       cancel-in-progress: false
     steps:
-      - name: Let the latest release cache expire
-        if: github.event_name == 'push'
-        run: sleep 60
       - name: Notify the tool upgrade webhook
         shell: bash
         env:
