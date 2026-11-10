@@ -176,8 +176,10 @@ func TestDeployHandler(t *testing.T) {
 		full                                           bool
 		status                                         int
 	}{
-		{"accept", "POST", deployPath, digest, timestamp, signature, false, http.StatusAccepted},
-		{"wrong path", "POST", "/deploy", digest, timestamp, signature, false, http.StatusNotFound},
+		{"accept", "POST", "/api/depoly", digest, timestamp, signature, false, http.StatusAccepted},
+		{"old path", "POST", "/_yagp/deploy", digest, timestamp, signature, false, http.StatusNotFound},
+		{"upgrade path", "POST", "/api/depoly/upgrade", digest, timestamp, signature, false, http.StatusNotFound},
+		{"trailing slash", "POST", "/api/depoly/", digest, timestamp, signature, false, http.StatusNotFound},
 		{"wrong method", "GET", deployPath, digest, timestamp, signature, false, http.StatusMethodNotAllowed},
 		{"oversized body", "POST", deployPath, digest + "\n", timestamp, signature, false, http.StatusBadRequest},
 		{"invalid digest", "POST", deployPath, strings.ToUpper(digest), timestamp, signature, false, http.StatusBadRequest},
@@ -283,10 +285,12 @@ func TestUpgradeHook(t *testing.T) {
 		path, body string
 		status     int
 	}{
-		{deployPath, "upgrade", http.StatusNotFound},
+		{"/api/depoly", "upgrade", http.StatusNotFound},
+		{"/_yagp/upgrade", "upgrade", http.StatusNotFound},
+		{"/api/depoly/upgrade/", "upgrade", http.StatusNotFound},
 		{upgradePath, "0.1.2-abcdef0", http.StatusBadRequest},
 		{upgradePath, "upgrade\n", http.StatusBadRequest},
-		{upgradePath, "upgrade", http.StatusAccepted},
+		{"/api/depoly/upgrade", "upgrade", http.StatusAccepted},
 	} {
 		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
 		req.RemoteAddr = "172.18.0.2:12345"

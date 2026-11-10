@@ -93,7 +93,7 @@ jobs:
             "golang:${toolchain#go}-alpine" sh -ec '
               apk add --no-cache bash curl git nftables
               mkdir -p /run/systemd/system
-              go test -count=1 -coverprofile=/coverage/go-coverage.out ./...
+              go test -count=1 -timeout=2m -coverprofile=/coverage/go-coverage.out ./...
             '
           total=$(go tool cover -func "$output/go-coverage.out" | awk '/^total:/ {print $NF}')
           printf '### Go test coverage\n\nStatement coverage: **%s**\n' "$total" >> "$GITHUB_STEP_SUMMARY"
@@ -242,10 +242,13 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
           WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
           WEBHOOK_PAYLOAD: ${{ needs.docker.outputs.digest }}
+          WEBHOOK_PATH: /api/depoly
         run: &notify_depoly |
           set -euo pipefail
           : "${WEBHOOK_URL:?Missing webhook URL}"
           : "${WEBHOOK_SECRET:?Missing webhook signing secret}"
+          [[ "$WEBHOOK_URL" =~ ^https://[A-Za-z0-9.-]+${WEBHOOK_PATH}$ ]] ||
+            { echo "Webhook URL must use HTTPS and the path $WEBHOOK_PATH." >&2; exit 1; }
           [[ "$WEBHOOK_TOKEN" =~ ^[0-9a-f]{64}$ ]] ||
             { echo 'Webhook token must be 64 lowercase hexadecimal characters.' >&2; exit 1; }
           webhook_token=$WEBHOOK_TOKEN
@@ -304,4 +307,5 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.UPGRADE_WEBHOOK_SECRET }}
           WEBHOOK_TOKEN: ${{ secrets.UPGRADE_WEBHOOK_TOKEN }}
           WEBHOOK_PAYLOAD: upgrade
+          WEBHOOK_PATH: /api/depoly/upgrade
         run: *notify_depoly

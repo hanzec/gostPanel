@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	deployPath       = "/_yagp/deploy"
-	upgradePath      = "/_yagp/upgrade"
+	deployPath       = "/api/depoly"
+	upgradePath      = "/api/depoly/upgrade"
 	digestPrefix     = "sha256:"
 	signaturePrefix  = "sha256="
 	digestLength     = int64(len(digestPrefix) + 2*sha256.Size)

@@ -13,6 +13,8 @@ readonly managed_override="$managed_dir/compose.yml"
 readonly previous_override_name=.yagp-depoly.yml
 readonly docker_socket=/var/run/docker.sock
 readonly image_repo=ghcr.io/hanzec/yagp
+readonly panel_endpoint=/api/depoly
+readonly upgrade_endpoint=/api/depoly/upgrade
 
 main() {
     case ${1:-} in
@@ -48,11 +50,12 @@ log() {
 install_webhook() {
     [[ $# -eq 2 || $# -eq 3 ]] || usage
     check_systemd
-    local project_dir binary traefik secret token old_secret old_token
+    local project_dir project binary traefik secret token old_secret old_token
     project_dir=$(resolve_project_dir "$1")
     binary=$(realpath -e -- "$2")
     [[ -f $binary ]] || fail '请提供 yagp-depoly ELF 二进制。'
-    traefik=$(inspect_traefik "${3:-traefik}")
+    project=$(inspect_project "$project_dir")
+    traefik=$(inspect_traefik "$project_dir" "$project" "${3:-traefik}")
     prepare_managed_dir
     lock_deploy
     old_secret="$project_dir/.yagp-webhook-secret"
@@ -61,11 +64,11 @@ install_webhook() {
     token=$(prepare_credential "$managed_dir/panel.token" "$old_token")
     check_distinct_credentials "$secret" "$token" "$managed_dir/upgrade.secret" "$managed_dir/upgrade.token"
 
-    setup_account "$project_dir" "$binary"
+    setup_account "$project_dir" "$project" "$binary"
     printf '%s\n' "$secret" | write_file "$managed_dir/panel.secret" 0600
     printf '%s\n' "$token" | write_file "$managed_dir/panel.token" 0600
     write_hook_unit panel "$deploy_user" yagp-depoly.service yagp-depoly-panel 39102 "$traefik"
-    write_traefik_route deploy yagp-deploy-webhook traefik-panel.yml 39102 "$traefik"
+    write_traefik_route "$panel_endpoint" yagp-deploy-webhook traefik-panel.yml 39102 "$traefik"
 
     systemctl daemon-reload
     systemctl enable yagp-depoly.service
@@ -77,7 +80,7 @@ install_webhook() {
     log '配置完成。部署账号已禁用登录，本次未更新容器。'
     log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
     log '查看部署日志：journalctl -u yagp-depoly.service -f'
-    show_credentials DEPLOY_WEBHOOK panel "$secret" "$token"
+    show_credentials DEPLOY_WEBHOOK panel "$panel_endpoint" "$traefik" "$secret" "$token"
 }
 
 install_upgrade() {
@@ -88,9 +91,10 @@ install_upgrade() {
     check_managed_file "$install_path"
     require_root_owned "$managed_dir"
     check_managed_file "$managed_project"
-    local project_dir traefik secret token
+    local project_dir project traefik secret token
     project_dir=$(resolve_project_dir "$(<"$managed_project")")
-    traefik=$(inspect_traefik "${1:-traefik}")
+    project=$(inspect_project "$project_dir")
+    traefik=$(inspect_traefik "$project_dir" "$project" "${1:-traefik}")
     lock_deploy
     secret=$(prepare_credential "$managed_dir/upgrade.secret")
     token=$(prepare_credential "$managed_dir/upgrade.token")
@@ -112,14 +116,14 @@ ExecStart=$install_path self-upgrade
 TimeoutStartSec=10min
 EOF
     write_hook_unit upgrade "$deploy_user" yagp-depoly-upgrade-webhook.service yagp-depoly-upgrade-hook 39103 "$traefik"
-    write_traefik_route upgrade yagp-deploy-upgrade-webhook traefik-upgrade.yml 39103 "$traefik"
+    write_traefik_route "$upgrade_endpoint" yagp-deploy-upgrade-webhook traefik-upgrade.yml 39103 "$traefik"
 
     systemctl daemon-reload
     systemctl enable yagp-depoly-upgrade-webhook.service
     systemctl restart yagp-depoly-upgrade-webhook.service
     log "请将 $managed_dir/traefik-upgrade.yml 加入 Traefik 的动态配置目录。"
     log '查看工具升级日志：journalctl -u yagp-depoly-upgrade.service -f'
-    show_credentials UPGRADE_WEBHOOK upgrade "$secret" "$token"
+    show_credentials UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$secret" "$token"
 }
 
 check_systemd() {
@@ -164,8 +168,8 @@ prepare_managed_dir() {
 }
 
 setup_account() {
-    local project_dir=$1 binary=$2
-    local project compose_help legacy=false previous_override="$1/$previous_override_name"
+    local project_dir=$1 project=$2 binary=$3
+    local compose_help legacy=false previous_override="$1/$previous_override_name"
     log "检查部署目录与 Compose 配置：$project_dir"
     cd "$project_dir"
 
@@ -186,7 +190,6 @@ setup_account() {
         legacy=true
     fi
 
-    project=$(inspect_project "$project_dir")
     if [[ $legacy == true ]]; then
         check_legacy_install "$project_dir" "$project"
     fi
@@ -302,22 +305,28 @@ check_distinct_credentials() {
 }
 
 show_credentials() {
+    local prefix=$1 role=$2 endpoint=$3 hostname=${4%%|*} secret=$5 token=$6
+    printf '%s_URL=https://%s%s\n' "$prefix" "$hostname" "$endpoint"
     if [[ -t 1 ]]; then
-        printf '%s_SECRET=%s\n%s_TOKEN=%s\n' "$1" "$3" "$1" "$4"
+        printf '%s_SECRET=%s\n%s_TOKEN=%s\n' "$prefix" "$secret" "$prefix" "$token"
     else
-        log "凭据保存在 $managed_dir/$2.secret 和 $managed_dir/$2.token，可在可信终端用 sudo cat 读取。"
+        log "凭据保存在 $managed_dir/$role.secret 和 $managed_dir/$role.token，可在可信终端用 sudo cat 读取。"
     fi
 }
 
 inspect_traefik() {
-    local proxy_container=$1 metadata host_rule entrypoint network gateway proxy_ip
-    local host_pattern='^Host\(`([A-Za-z0-9.-]+)`\)$'
+    local project_dir=$1 project=$2 proxy_container=$3 hostname metadata entrypoint network gateway proxy_ip
+    local host_pattern='^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$'
+    hostname=$(compose "$project_dir" "$project" config --environment | awk 'sub(/^YAGP_HOST=/, "")') ||
+        fail "无法读取 $project_dir/.env 中的 YAGP_HOST。"
+    [[ $hostname =~ $host_pattern && ${#hostname} -le 253 ]] ||
+        fail "$project_dir/.env 的 YAGP_HOST 须为有效域名，不能包含协议、端口或路径。"
     metadata=$(docker_local inspect --type container --format \
-        '{{index .Config.Labels "traefik.http.routers.yagp.rule"}}|{{index .Config.Labels "traefik.http.routers.yagp.entrypoints"}}|{{index .Config.Labels "traefik.docker.network"}}' yagp) ||
+        '{{index .Config.Labels "traefik.http.routers.yagp.entrypoints"}}|{{index .Config.Labels "traefik.docker.network"}}' yagp) ||
         fail '无法读取 yagp 容器的 Traefik 配置。'
-    IFS='|' read -r host_rule entrypoint network <<< "$metadata"
-    [[ $host_rule =~ $host_pattern && $entrypoint =~ ^[A-Za-z0-9_-]+$ && $network =~ ^[A-Za-z0-9_.-]+$ ]] ||
-        fail '无法识别当前 yagp 的 Traefik 域名、HTTPS 入口和 Docker 网络。'
+    IFS='|' read -r entrypoint network <<< "$metadata"
+    [[ $entrypoint =~ ^[A-Za-z0-9_-]+$ && $network =~ ^[A-Za-z0-9_.-]+$ ]] ||
+        fail '无法识别当前 yagp 的 Traefik HTTPS 入口和 Docker 网络。'
     gateway=$(docker_local network inspect --format \
         '{{if eq .Driver "bridge"}}{{range .IPAM.Config}}{{println .Gateway}}{{end}}{{end}}' -- "$network" |
         awk '/^[0-9]+\./ && !found {print; found=1}') ||
@@ -331,14 +340,14 @@ inspect_traefik() {
         fail "找不到 Traefik 容器 ${proxy_container}。"
     [[ $proxy_ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ && $proxy_ip != "$gateway" ]] ||
         fail "Traefik 容器 $proxy_container 没有在 $network 上配置 IPv4 地址。"
-    log "Webhook 仅信任 Traefik 容器 $proxy_container 的内网地址 ${proxy_ip}。"
-    printf '%s|%s|%s|%s\n' "$host_rule" "$entrypoint" "$gateway" "$proxy_ip"
+    log "Webhook 使用 $project_dir/.env 的域名 ${hostname}，仅信任 Traefik 容器 $proxy_container 的内网地址 ${proxy_ip}。"
+    printf '%s|%s|%s|%s\n' "$hostname" "$entrypoint" "$gateway" "$proxy_ip"
 }
 
 write_hook_unit() {
     local role=$1 user=$2 service=$3 state=$4 port=$5
-    local host_rule entrypoint gateway proxy_ip
-    IFS='|' read -r host_rule entrypoint gateway proxy_ip <<< "$6"
+    local hostname entrypoint gateway proxy_ip
+    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$6"
     log "安装 ${service}，监听 Docker 内网 $gateway:${port}。"
     write_file "/etc/systemd/system/$service" 0644 <<EOF
 [Unit]
@@ -365,14 +374,14 @@ EOF
 
 write_traefik_route() {
     local endpoint=$1 name=$2 file=$3 port=$4
-    local host_rule entrypoint gateway proxy_ip hook_rule
-    IFS='|' read -r host_rule entrypoint gateway proxy_ip <<< "$5"
-    printf -v hook_rule 'Path(`/_yagp/%s`) && Method(`POST`)' "$endpoint"
+    local hostname entrypoint gateway proxy_ip hook_rule
+    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$5"
+    printf -v hook_rule 'Host(`%s`) && Path(`%s`) && Method(`POST`)' "$hostname" "$endpoint"
     write_file "$managed_dir/$file" 0644 <<EOF
 http:
   routers:
     $name:
-      rule: '$host_rule && $hook_rule'
+      rule: '$hook_rule'
       entryPoints: ['$entrypoint']
       priority: 90
       tls: {}
