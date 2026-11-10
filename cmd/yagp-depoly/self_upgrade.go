@@ -147,7 +147,7 @@ func (env selfUpgradeEnvironment) install(ctx context.Context, executable, curre
 		return err
 	}
 	if err := replaceSelfUpgradeBinary(executable, candidate, func(rollback bool) error {
-		return restartSelfUpgradeServices(env.systemctl, rollback)
+		return restartSelfUpgradeService(env.systemctl, rollback)
 	}); err != nil {
 		return err
 	}
@@ -441,23 +441,20 @@ func replaceSelfUpgradeBinary(executable, candidate string, restart func(rollbac
 	return nil
 }
 
-func restartSelfUpgradeServices(systemctl string, rollback bool) error {
+func restartSelfUpgradeService(systemctl string, rollback bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	const deployUnit = "yagp-depoly.service"
-	const upgradeUnit = "yagp-depoly-upgrade-webhook.service"
 	if rollback {
 		// A bad release may have hit systemd's start rate limit.
-		_ = selfUpgradeCommand(ctx, "/", systemctl, "reset-failed", deployUnit, upgradeUnit).Run()
+		_ = selfUpgradeCommand(ctx, "/", systemctl, "reset-failed", deployUnit).Run()
 	}
-	cmd := selfUpgradeCommand(ctx, "/", systemctl, "restart", deployUnit, upgradeUnit)
+	cmd := selfUpgradeCommand(ctx, "/", systemctl, "restart", deployUnit)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("restart tool services: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("restart %s: %w: %s", deployUnit, err, strings.TrimSpace(string(output)))
 	}
-	for _, unit := range []string{deployUnit, upgradeUnit} {
-		if err := selfUpgradeCommand(ctx, "/", systemctl, "is-active", "--quiet", unit).Run(); err != nil {
-			return fmt.Errorf("%s did not remain active: %w", unit, err)
-		}
+	if err := selfUpgradeCommand(ctx, "/", systemctl, "is-active", "--quiet", deployUnit).Run(); err != nil {
+		return fmt.Errorf("%s did not remain active: %w", deployUnit, err)
 	}
 	return nil
 }

@@ -20,10 +20,8 @@ func TestCLIEntry(t *testing.T) {
 	if err := run([]string{"version", "unexpected"}); err == nil || !strings.Contains(err.Error(), "invalid yagp-depoly command") {
 		t.Fatalf("run with unexpected version arguments: %v", err)
 	}
-	for _, mode := range []string{"serve-panel", "serve-upgrade"} {
-		if err := run([]string{mode}); err == nil || !strings.Contains(err.Error(), "set -listen") {
-			t.Fatalf("run(%q) = %v, want webhook flag validation", mode, err)
-		}
+	if err := run([]string{"serve"}); err == nil || !strings.Contains(err.Error(), "set -listen") {
+		t.Fatalf("run serve = %v, want webhook flag validation", err)
 	}
 
 	oldArgs := os.Args

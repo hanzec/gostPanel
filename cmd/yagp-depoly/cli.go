@@ -42,8 +42,8 @@ func run(args []string) error {
 
 func dispatch(args []string, executable string, root bool, execute func(string, ...string) error) error {
 	switch args[0] {
-	case "serve-panel", "serve-upgrade":
-		return serve(args[0][len("serve-"):], executable, args[1:])
+	case "serve":
+		return serve(executable, args[1:])
 	case "deploy", "self-upgrade":
 		if !root || len(args) != 1 || executable != installedExecutable {
 			return errors.New("the installed deployment command requires root and takes no arguments")

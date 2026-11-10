@@ -583,16 +583,24 @@ esac
 				t.Fatalf("installed executable = %q, %v; want %s", live, err, tt.want)
 			}
 			log, err := os.ReadFile(filepath.Join(dir, "systemctl.log"))
-			if tt.failure == "restart" || tt.failure == "is-active" {
-				if err != nil || !strings.Contains(string(log), "reset-failed yagp-depoly.service yagp-depoly-upgrade-webhook.service") {
-					t.Fatalf("rollback did not reset/restart systemd units: %q, %v", log, err)
+			const restart = "restart yagp-depoly.service\n"
+			const active = "is-active --quiet yagp-depoly.service\n"
+			const reset = "reset-failed yagp-depoly.service\n"
+			var wantLog string
+			switch {
+			case tt.failure == "restart":
+				wantLog = restart + reset + restart + active
+			case tt.failure == "is-active":
+				wantLog = restart + active + reset + restart + active
+			case tt.failure == "" && tt.want == newer:
+				wantLog = restart + active
+			}
+			if wantLog == "" {
+				if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("service restarted without an installed release: %q, %v", log, err)
 				}
-			} else if tt.failure == "" && tt.want == newer {
-				if err != nil || !strings.Contains(string(log), "is-active --quiet yagp-depoly-upgrade-webhook.service") {
-					t.Fatalf("tool did not check both services: %q, %v", log, err)
-				}
-			} else if !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("services restarted without an installed release: %q, %v", log, err)
+			} else if err != nil || string(log) != wantLog {
+				t.Fatalf("systemctl commands = %q, %v; want %q", log, err, wantLog)
 			}
 		})
 	}

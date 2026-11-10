@@ -242,7 +242,7 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
           WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
           WEBHOOK_PAYLOAD: ${{ needs.docker.outputs.digest }}
-          WEBHOOK_PATH: /api/depoly
+          WEBHOOK_PATH: /api/deploy/panel
         run: &notify_depoly |
           set -euo pipefail
           : "${WEBHOOK_URL:?Missing webhook URL}"
@@ -307,5 +307,5 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.UPGRADE_WEBHOOK_SECRET }}
           WEBHOOK_TOKEN: ${{ secrets.UPGRADE_WEBHOOK_TOKEN }}
           WEBHOOK_PAYLOAD: upgrade
-          WEBHOOK_PATH: /api/depoly/upgrade
+          WEBHOOK_PATH: /api/deploy/deploy-tool
         run: *notify_depoly

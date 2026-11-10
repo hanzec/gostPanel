@@ -20,12 +20,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 const (
-	deployPath       = "/api/depoly"
-	upgradePath      = "/api/depoly/upgrade"
+	deployPath       = "/api/deploy/panel"
+	upgradePath      = "/api/deploy/deploy-tool"
 	digestPrefix     = "sha256:"
 	signaturePrefix  = "sha256="
 	digestLength     = int64(len(digestPrefix) + 2*sha256.Size)
@@ -43,38 +44,31 @@ var (
 	errReplay    = errors.New("webhook timestamp was already accepted or is older")
 	errQueueFull = errors.New("deployment queue is full")
 
-	panelProtocol   = hookProtocol{deployPath, digestLength, validDigest}
+	panelProtocol   = hookProtocol{digestLength, validDigest}
 	upgradeProtocol = hookProtocol{
-		upgradePath, int64(len("upgrade")), func(value string) bool { return value == "upgrade" },
+		int64(len("upgrade")), func(value string) bool { return value == "upgrade" },
 	}
 )
 
 type hookProtocol struct {
-	path      string
 	bodyLimit int64
 	validate  func(string) bool
 }
 
-func serve(mode, executable string, args []string) error {
-	return serveWebhook(mode, executable, args, (*http.Server).Serve)
+func serve(executable string, args []string) error {
+	return serveWebhook(executable, args, (*http.Server).Serve)
 }
 
-func serveWebhook(mode, executable string, args []string, runServer func(*http.Server, net.Listener) error) error {
-	var protocol hookProtocol
-	switch mode {
-	case "panel":
-		protocol = panelProtocol
-	case "upgrade":
-		protocol = upgradeProtocol
-	default:
-		return fmt.Errorf("unknown webhook mode %q", mode)
-	}
-	flags := flag.NewFlagSet("serve "+mode, flag.ContinueOnError)
+func serveWebhook(executable string, args []string, runServer func(*http.Server, net.Listener) error) error {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listen := flags.String("listen", "", "HTTP listen address")
-	secretFile := flags.String("secret-file", "", "path to the webhook secret file")
-	tokenFile := flags.String("token-file", "", "path to the webhook bearer token file")
+	secretFile := flags.String("secret-file", "", "path to the panel webhook signing secret file")
+	tokenFile := flags.String("token-file", "", "path to the panel webhook bearer token file")
 	proxy := flags.String("trusted-proxy", "", "IPv4 address of the Traefik container")
-	stateFile := flags.String("state-file", "", "absolute path to the webhook acceptance state file")
+	stateFile := flags.String("state-file", "", "absolute path to the panel webhook acceptance state file")
+	upgradeSecret := flags.String("upgrade-secret-file", "", "path to the tool upgrade webhook signing secret file")
+	upgradeToken := flags.String("upgrade-token-file", "", "path to the tool upgrade webhook bearer token file")
+	upgradeState := flags.String("upgrade-state-file", "", "absolute path to the tool upgrade webhook acceptance state file")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -84,20 +78,26 @@ func serveWebhook(mode, executable string, args []string, runServer func(*http.S
 		trustedProxy.IsUnspecified() || flags.NArg() != 0 {
 		return fmt.Errorf("set -listen, -secret-file, -token-file, -trusted-proxy (IPv4), and -state-file (absolute path)")
 	}
-	secret, err := readCredential(*secretFile)
+	panel, err := loadDeployHook(panelProtocol, *secretFile, *tokenFile, *stateFile)
 	if err != nil {
-		return fmt.Errorf("webhook signing secret: %w", err)
+		return fmt.Errorf("panel webhook: %w", err)
 	}
-	token, err := readCredential(*tokenFile)
-	if err != nil {
-		return fmt.Errorf("webhook token: %w", err)
-	}
-	if hmac.Equal(secret, token) {
-		return fmt.Errorf("webhook token and signing secret must differ")
-	}
-	limits, err := loadRequestLimits(*stateFile)
-	if err != nil {
-		return fmt.Errorf("load webhook acceptance state: %w", err)
+	var upgrade *deployHook
+	if *upgradeSecret != "" || *upgradeToken != "" || *upgradeState != "" {
+		if *upgradeSecret == "" || *upgradeToken == "" || !filepath.IsAbs(*upgradeState) {
+			return fmt.Errorf("set all of -upgrade-secret-file, -upgrade-token-file, and -upgrade-state-file (absolute path)")
+		}
+		if filepath.Clean(*stateFile) == filepath.Clean(*upgradeState) {
+			return fmt.Errorf("panel and tool upgrade webhook state files must differ")
+		}
+		upgrade, err = loadDeployHook(upgradeProtocol, *upgradeSecret, *upgradeToken, *upgradeState)
+		if err != nil {
+			return fmt.Errorf("tool upgrade webhook: %w", err)
+		}
+		if hmac.Equal(panel.secret, upgrade.secret) || hmac.Equal(panel.secret, upgrade.token) ||
+			hmac.Equal(panel.token, upgrade.secret) || hmac.Equal(panel.token, upgrade.token) {
+			return fmt.Errorf("panel and tool upgrade webhook credentials must differ")
+		}
 	}
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -108,16 +108,20 @@ func serveWebhook(mode, executable string, args []string, runServer func(*http.S
 		return fmt.Errorf("notify systemd: %w", err)
 	}
 
-	queue := make(chan string, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go runDeployments(ctx, queue, mode, func(value string) error {
-		return hookCommand(mode, executable, value).Run()
+	go runDeployments(ctx, panel.queue, "panel", func(value string) error {
+		return hookCommand("panel", executable, value).Run()
 	})
+	if upgrade != nil {
+		go runDeployments(ctx, upgrade.queue, "upgrade", func(value string) error {
+			return hookCommand("upgrade", executable, value).Run()
+		})
+	}
 	server := &http.Server{
 		Handler: deployHandler{
-			protocol: protocol, secret: secret, token: token, trustedProxy: trustedProxy,
-			queue: queue, limits: limits,
+			panel: panel, upgrade: upgrade, trustedProxy: trustedProxy,
+			limits: &requestLimits{clients: make(map[netip.Addr]*clientLimits)},
 		},
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -125,24 +129,42 @@ func serveWebhook(mode, executable string, args []string, runServer func(*http.S
 		IdleTimeout:       15 * time.Second,
 		MaxHeaderBytes:    4096,
 	}
-	log.Printf("%s webhook listening on %s", mode, listener.Addr())
+	log.Printf("deployment webhook listening on %s", listener.Addr())
 	return runServer(server, listener)
+}
+
+func loadDeployHook(protocol hookProtocol, secretFile, tokenFile, stateFile string) (*deployHook, error) {
+	secret, err := readCredential(secretFile)
+	if err != nil {
+		return nil, fmt.Errorf("webhook signing secret: %w", err)
+	}
+	token, err := readCredential(tokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("webhook token: %w", err)
+	}
+	if hmac.Equal(secret, token) {
+		return nil, fmt.Errorf("webhook token and signing secret must differ")
+	}
+	state, err := loadHookState(stateFile)
+	if err != nil {
+		return nil, fmt.Errorf("load webhook acceptance state: %w", err)
+	}
+	return &deployHook{
+		protocol: protocol, secret: secret, token: token, queue: make(chan string, 1), state: state,
+	}, nil
 }
 
 func notifyReady(socket string) error {
 	if socket == "" {
 		return nil
 	}
-	if strings.HasPrefix(socket, "@") {
-		socket = "\x00" + socket[1:]
-	}
-	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: socket, Net: "unixgram"})
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_DGRAM, 0)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	_, err = conn.Write([]byte("READY=1"))
-	return err
+	syscall.CloseOnExec(fd)
+	defer syscall.Close(fd)
+	return syscall.Sendto(fd, []byte("READY=1"), syscall.MSG_DONTWAIT, &syscall.SockaddrUnix{Name: socket})
 }
 
 func readCredential(path string) ([]byte, error) {
@@ -157,56 +179,69 @@ func readCredential(path string) ([]byte, error) {
 	return []byte(secret), nil
 }
 
-type deployHandler struct {
+type deployHook struct {
 	protocol      hookProtocol
 	secret, token []byte
-	trustedProxy  netip.Addr
-	queue         chan<- string
-	limits        *requestLimits
+	queue         chan string
+	state         *hookState
+}
+
+type deployHandler struct {
+	panel, upgrade *deployHook
+	trustedProxy   netip.Addr
+	limits         *requestLimits
 }
 
 func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.EscapedPath() != h.protocol.path {
+	var hook *deployHook
+	if r.Method == http.MethodPost {
+		switch r.URL.EscapedPath() {
+		case deployPath:
+			hook = h.panel
+		case upgradePath:
+			hook = h.upgrade
+		}
+	}
+	ip, ok := h.clientIP(r)
+	now := time.Now()
+	if hook == nil {
+		if ok {
+			h.limits.allowRequest(ip, now)
+			h.limits.authFailed(ip, now)
+		}
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	ip, ok := h.clientIP(r)
 	if !ok {
 		http.Error(w, "invalid webhook source", http.StatusForbidden)
 		return
 	}
-	now := time.Now()
 	if retry := h.limits.allowRequest(ip, now); retry > 0 {
 		rateLimited(w, retry)
 		return
 	}
 	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || !hmac.Equal([]byte(bearer), h.token) {
+	if !ok || !hmac.Equal([]byte(bearer), hook.token) {
 		h.rejectAuth(w, ip, now)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.protocol.bodyLimit))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, hook.protocol.bodyLimit))
 	if err != nil {
 		http.Error(w, "invalid webhook body", http.StatusBadRequest)
 		return
 	}
 	value := string(body)
-	if !h.protocol.validate(value) {
+	if !hook.protocol.validate(value) {
 		http.Error(w, "invalid webhook body", http.StatusBadRequest)
 		return
 	}
 	now = time.Now()
-	timestamp, ok := validSignature(h.secret, r.Header.Get("X-Yagp-Timestamp"), r.Header.Get("X-Yagp-Signature"), body, now)
+	timestamp, ok := validSignature(hook.secret, r.Header.Get("X-Yagp-Timestamp"), r.Header.Get("X-Yagp-Signature"), body, now)
 	if !ok {
 		h.rejectAuth(w, ip, now)
 		return
 	}
-	switch retry, err := h.limits.enqueue(h.queue, value, timestamp, now); {
+	switch retry, err := hook.state.enqueue(hook.queue, value, timestamp, now); {
 	case retry > 0:
 		rateLimited(w, retry)
 	case err == nil:
@@ -265,16 +300,20 @@ type clientLimits struct {
 }
 
 type requestLimits struct {
+	mu        sync.Mutex
+	clients   map[netip.Addr]*clientLimits
+	nextSweep time.Time
+}
+
+type hookState struct {
 	mu           sync.Mutex
-	clients      map[netip.Addr]*clientLimits
-	nextSweep    time.Time
 	stateFile    string
 	lastAccepted int64
 	nextDeploy   time.Time
 }
 
-func loadRequestLimits(path string) (*requestLimits, error) {
-	limits := &requestLimits{stateFile: path, clients: make(map[netip.Addr]*clientLimits)}
+func loadHookState(path string) (*hookState, error) {
+	state := &hookState{stateFile: path}
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if dir, err := os.Stat(filepath.Dir(path)); err != nil {
@@ -282,7 +321,7 @@ func loadRequestLimits(path string) (*requestLimits, error) {
 		} else if !dir.IsDir() {
 			return nil, fmt.Errorf("acceptance state parent is not a directory")
 		}
-		return limits, nil
+		return state, nil
 	}
 	if err != nil {
 		return nil, err
@@ -303,9 +342,9 @@ func loadRequestLimits(path string) (*requestLimits, error) {
 	if lastErr != nil || nextErr != nil || last <= 0 || next <= 0 {
 		return nil, fmt.Errorf("invalid acceptance state")
 	}
-	limits.lastAccepted = last
-	limits.nextDeploy = time.Unix(0, next)
-	return limits, nil
+	state.lastAccepted = last
+	state.nextDeploy = time.Unix(0, next)
+	return state, nil
 }
 
 func persistAcceptance(path string, timestamp int64, nextDeploy time.Time) error {
@@ -382,29 +421,29 @@ func (l *requestLimits) authFailed(ip netip.Addr, now time.Time) time.Duration {
 		return 0
 	}
 	client.bannedUntil = now.Add(banDuration)
-	log.Printf("blocked webhook client %s for %s after repeated authentication failures", ip, banDuration)
+	log.Printf("blocked webhook client %s for %s after repeated route misses or authentication failures", ip, banDuration)
 	return banDuration
 }
 
-func (l *requestLimits) enqueue(queue chan<- string, value string, timestamp int64, now time.Time) (time.Duration, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if timestamp <= l.lastAccepted {
+func (s *hookState) enqueue(queue chan<- string, value string, timestamp int64, now time.Time) (time.Duration, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if timestamp <= s.lastAccepted {
 		return 0, errReplay
 	}
-	if l.nextDeploy.After(now) {
-		return l.nextDeploy.Sub(now), nil
+	if s.nextDeploy.After(now) {
+		return s.nextDeploy.Sub(now), nil
 	}
 	if len(queue) >= cap(queue) {
 		return 0, errQueueFull
 	}
 	nextDeploy := now.Add(deployCooldown)
-	if err := persistAcceptance(l.stateFile, timestamp, nextDeploy); err != nil {
+	if err := persistAcceptance(s.stateFile, timestamp, nextDeploy); err != nil {
 		return 0, err
 	}
 	// Handlers produce work under this lock. The worker can only free queue slots.
-	l.lastAccepted = timestamp
-	l.nextDeploy = nextDeploy
+	s.lastAccepted = timestamp
+	s.nextDeploy = nextDeploy
 	queue <- value
 	return 0, nil
 }

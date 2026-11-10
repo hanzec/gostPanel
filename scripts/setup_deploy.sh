@@ -6,6 +6,9 @@ readonly deploy_home=/var/lib/yagp-deploy
 readonly authorized_keys="$deploy_home/.ssh/authorized_keys"
 readonly legacy_dir=/etc/yagp-deploy
 readonly legacy_receiver_unit=/etc/systemd/system/yagp-deploy-webhook.service
+readonly legacy_upgrade_receiver_unit=/etc/systemd/system/yagp-depoly-upgrade-webhook.service
+readonly listener_unit=/etc/systemd/system/yagp-depoly.service
+readonly upgrade_unit=/etc/systemd/system/yagp-depoly-upgrade.service
 readonly install_path=/usr/local/sbin/yagp-depoly
 readonly managed_dir=/etc/yagp-depoly
 readonly managed_project="$managed_dir/project-dir"
@@ -13,8 +16,8 @@ readonly managed_override="$managed_dir/compose.yml"
 readonly previous_override_name=.yagp-depoly.yml
 readonly docker_socket=/var/run/docker.sock
 readonly image_repo=ghcr.io/hanzec/yagp
-readonly panel_endpoint=/api/depoly
-readonly upgrade_endpoint=/api/depoly/upgrade
+readonly panel_endpoint=/api/deploy/panel
+readonly upgrade_endpoint=/api/deploy/deploy-tool
 
 main() {
     case ${1:-} in
@@ -50,7 +53,7 @@ log() {
 install_webhook() {
     [[ $# -eq 2 || $# -eq 3 ]] || usage
     check_systemd
-    local project_dir project binary traefik secret token old_secret old_token
+    local project_dir project binary traefik secret token old_secret old_token with_upgrade=false
     project_dir=$(resolve_project_dir "$1")
     binary=$(realpath -e -- "$2")
     [[ -f $binary ]] || fail '请提供 yagp-depoly ELF 二进制。'
@@ -63,20 +66,25 @@ install_webhook() {
     secret=$(prepare_credential "$managed_dir/panel.secret" "$old_secret")
     token=$(prepare_credential "$managed_dir/panel.token" "$old_token")
     check_distinct_credentials "$secret" "$token" "$managed_dir/upgrade.secret" "$managed_dir/upgrade.token"
+    if [[ -e $upgrade_unit || -L $upgrade_unit ]]; then
+        check_managed_file "$upgrade_unit"
+        check_managed_file "$managed_dir/upgrade.secret"
+        check_managed_file "$managed_dir/upgrade.token"
+        with_upgrade=true
+    fi
 
+    stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
     setup_account "$project_dir" "$project" "$binary"
     printf '%s\n' "$secret" | write_file "$managed_dir/panel.secret" 0600
     printf '%s\n' "$token" | write_file "$managed_dir/panel.token" 0600
-    write_hook_unit panel "$deploy_user" yagp-depoly.service yagp-depoly-panel 39102 "$traefik"
-    write_traefik_route "$panel_endpoint" yagp-deploy-webhook traefik-panel.yml 39102 "$traefik"
+    write_hook_unit "$traefik" "$with_upgrade"
+    write_traefik_route "$traefik"
 
     systemctl daemon-reload
     systemctl enable yagp-depoly.service
     systemctl restart yagp-depoly.service
-    if [[ -f /etc/systemd/system/yagp-depoly-upgrade-webhook.service ]]; then
-        systemctl restart yagp-depoly-upgrade-webhook.service
-    fi
     retire_legacy_receiver "$project_dir" "$old_secret" "$old_token"
+    retire_legacy_upgrade_receiver
     log '配置完成。部署账号已禁用登录，本次未更新容器。'
     log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
     log '查看部署日志：journalctl -u yagp-depoly.service -f'
@@ -87,7 +95,7 @@ install_upgrade() {
     [[ $# -le 1 ]] || usage
     check_systemd
     check_upgrade_cli
-    check_managed_file /etc/systemd/system/yagp-depoly.service
+    check_managed_file "$listener_unit"
     check_managed_file "$install_path"
     require_root_owned "$managed_dir"
     check_managed_file "$managed_project"
@@ -98,13 +106,16 @@ install_upgrade() {
     lock_deploy
     secret=$(prepare_credential "$managed_dir/upgrade.secret")
     token=$(prepare_credential "$managed_dir/upgrade.token")
+    check_managed_file "$managed_dir/panel.secret"
+    check_managed_file "$managed_dir/panel.token"
     check_distinct_credentials "$secret" "$token" "$managed_dir/panel.secret" "$managed_dir/panel.token"
 
+    stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
     install_account "$deploy_user" "$deploy_home"
     install_sudo_rule "$deploy_user" yagp-deploy-tool /usr/bin/systemctl --no-block start yagp-depoly-upgrade.service
     printf '%s\n' "$secret" | write_file "$managed_dir/upgrade.secret" 0600
     printf '%s\n' "$token" | write_file "$managed_dir/upgrade.token" 0600
-    write_file /etc/systemd/system/yagp-depoly-upgrade.service 0644 <<EOF
+    write_file "$upgrade_unit" 0644 <<EOF
 [Unit]
 Description=yagp deployment tool upgrade
 After=network-online.target
@@ -115,13 +126,13 @@ Type=oneshot
 ExecStart=$install_path self-upgrade
 TimeoutStartSec=10min
 EOF
-    write_hook_unit upgrade "$deploy_user" yagp-depoly-upgrade-webhook.service yagp-depoly-upgrade-hook 39103 "$traefik"
-    write_traefik_route "$upgrade_endpoint" yagp-deploy-upgrade-webhook traefik-upgrade.yml 39103 "$traefik"
+    write_hook_unit "$traefik" true
+    write_traefik_route "$traefik"
 
     systemctl daemon-reload
-    systemctl enable yagp-depoly-upgrade-webhook.service
-    systemctl restart yagp-depoly-upgrade-webhook.service
-    log "请将 $managed_dir/traefik-upgrade.yml 加入 Traefik 的动态配置目录。"
+    systemctl restart yagp-depoly.service
+    retire_legacy_upgrade_receiver
+    log "Webhook 共用 Traefik 配置：$managed_dir/traefik-panel.yml"
     log '查看工具升级日志：journalctl -u yagp-depoly-upgrade.service -f'
     show_credentials UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$secret" "$token"
 }
@@ -225,7 +236,7 @@ setup_account() {
         check_managed_file "$authorized_keys"
     fi
     check_install_parent
-    stop_legacy_receiver "$project_dir"
+    stop_legacy_receiver "$legacy_receiver_unit" "$project_dir/yagp-deploy-webhook"
     log "写入部署入口：$install_path"
     write_file "$install_path" 0755 < "$binary"
     log '校验并安装 sudo 规则。'
@@ -243,13 +254,14 @@ check_install_parent() {
 }
 
 stop_legacy_receiver() {
-    [[ -e $legacy_receiver_unit || -L $legacy_receiver_unit ]] || return 0
-    check_managed_file "$legacy_receiver_unit"
-    grep -Fxq "User=$deploy_user" "$legacy_receiver_unit" &&
-        grep -Fq "ExecStart=$1/yagp-deploy-webhook " "$legacy_receiver_unit" ||
+    local unit=$1 expected_command=$2
+    [[ -e $unit || -L $unit ]] || return 0
+    check_managed_file "$unit"
+    grep -Fxq "User=$deploy_user" "$unit" &&
+        grep -Fq "ExecStart=$expected_command " "$unit" ||
         fail '发现非本安装器管理的旧 Webhook 服务，未修改该服务。'
-    log '停止旧 Webhook 接收器。'
-    systemctl disable --now yagp-deploy-webhook.service
+    log "停止旧 Webhook 接收器：${unit##*/}"
+    systemctl disable --now "${unit##*/}"
 }
 
 retire_legacy_receiver() {
@@ -266,6 +278,17 @@ retire_legacy_receiver() {
     done
     if [[ -f $legacy_dir/project ]]; then
         retire_legacy_install
+    fi
+}
+
+retire_legacy_upgrade_receiver() {
+    if [[ -f $legacy_upgrade_receiver_unit ]]; then
+        rm -f -- "$legacy_upgrade_receiver_unit"
+        systemctl daemon-reload
+    fi
+    if [[ -e $managed_dir/traefik-upgrade.yml || -L $managed_dir/traefik-upgrade.yml ]]; then
+        check_managed_file "$managed_dir/traefik-upgrade.yml"
+        rm -f -- "$managed_dir/traefik-upgrade.yml"
     fi
 }
 
@@ -345,24 +368,30 @@ inspect_traefik() {
 }
 
 write_hook_unit() {
-    local role=$1 user=$2 service=$3 state=$4 port=$5
-    local hostname entrypoint gateway proxy_ip
-    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$6"
-    log "安装 ${service}，监听 Docker 内网 $gateway:${port}。"
-    write_file "/etc/systemd/system/$service" 0644 <<EOF
+    local traefik=$1 with_upgrade=$2 state_directories=yagp-depoly-panel
+    local hostname entrypoint gateway proxy_ip upgrade_credentials='' upgrade_args=''
+    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$traefik"
+    if [[ $with_upgrade == true ]]; then
+        state_directories+=' yagp-depoly-upgrade-hook'
+        printf -v upgrade_credentials 'LoadCredential=upgrade-secret:%s/upgrade.secret\nLoadCredential=upgrade-token:%s/upgrade.token' "$managed_dir" "$managed_dir"
+        upgrade_args=' -upgrade-secret-file ${CREDENTIALS_DIRECTORY}/upgrade-secret -upgrade-token-file ${CREDENTIALS_DIRECTORY}/upgrade-token -upgrade-state-file /var/lib/yagp-depoly-upgrade-hook/replay'
+    fi
+    log "安装 yagp-depoly.service，监听 Docker 内网 $gateway:39102。"
+    write_file "$listener_unit" 0644 <<EOF
 [Unit]
-Description=yagp $role webhook
+Description=yagp deployment webhook
 After=docker.service
 Wants=docker.service
 
 [Service]
 Type=notify
-User=$user
-StateDirectory=$state
+User=$deploy_user
+StateDirectory=$state_directories
 StateDirectoryMode=0700
-LoadCredential=webhook-secret:$managed_dir/$role.secret
-LoadCredential=webhook-token:$managed_dir/$role.token
-ExecStart=$install_path serve-$role -listen $gateway:$port -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file \${STATE_DIRECTORY}/replay
+LoadCredential=webhook-secret:$managed_dir/panel.secret
+LoadCredential=webhook-token:$managed_dir/panel.token
+$upgrade_credentials
+ExecStart=$install_path serve -listen $gateway:39102 -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file /var/lib/yagp-depoly-panel/replay$upgrade_args
 TimeoutStartSec=20s
 Restart=on-failure
 RestartSec=5
@@ -373,33 +402,23 @@ EOF
 }
 
 write_traefik_route() {
-    local endpoint=$1 name=$2 file=$3 port=$4
     local hostname entrypoint gateway proxy_ip hook_rule
-    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$5"
-    printf -v hook_rule 'Host(`%s`) && Path(`%s`) && Method(`POST`)' "$hostname" "$endpoint"
-    write_file "$managed_dir/$file" 0644 <<EOF
+    IFS='|' read -r hostname entrypoint gateway proxy_ip <<< "$1"
+    printf -v hook_rule 'Host(`%s`) && (Path(`/api/deploy`) || PathPrefix(`/api/deploy/`))' "$hostname"
+    write_file "$managed_dir/traefik-panel.yml" 0644 <<EOF
 http:
   routers:
-    $name:
+    yagp-deploy-webhook:
       rule: '$hook_rule'
       entryPoints: ['$entrypoint']
       priority: 90
       tls: {}
-      service: $name
-      middlewares: [$name-limit]
-  middlewares:
-    $name-limit:
-      rateLimit:
-        average: 20
-        period: 1m
-        burst: 5
-        sourceCriterion:
-          requestHeaderName: X-Real-IP
+      service: yagp-deploy-webhook
   services:
-    $name:
+    yagp-deploy-webhook:
       loadBalancer:
         servers:
-          - url: 'http://$gateway:$port'
+          - url: 'http://$gateway:39102'
 EOF
 }
 
