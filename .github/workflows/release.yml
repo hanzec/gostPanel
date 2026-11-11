@@ -215,7 +215,7 @@ jobs:
         )
       }}
     runs-on: ubuntu-24.04
-    environment: production-tool
+    environment: production
     permissions:
       contents: read
     concurrency:
@@ -239,9 +239,9 @@ jobs:
 
       - name: Notify the tool upgrade webhook
         env:
-          WEBHOOK_URL: ${{ secrets.UPGRADE_WEBHOOK_URL || secrets.DEPLOY_WEBHOOK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.UPGRADE_WEBHOOK_SECRET }}
-          WEBHOOK_TOKEN: ${{ secrets.UPGRADE_WEBHOOK_TOKEN }}
+          WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+          WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
           WEBHOOK_PAYLOAD: upgrade
         run: node .github/scripts/notify-deploy.mjs depoly
 

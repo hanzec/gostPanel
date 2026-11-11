@@ -73,12 +73,13 @@ func serve(args []string) error {
 func serveWebhook(args []string, runServer func(*http.Server, net.Listener) error) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listen := flags.String("listen", "", "HTTP listen address")
-	secretFile := flags.String("secret-file", "", "path to the panel webhook signing secret file")
-	tokenFile := flags.String("token-file", "", "path to the panel webhook bearer token file")
+	secretFile := flags.String("secret-file", "", "path to the shared webhook signing secret file")
+	tokenFile := flags.String("token-file", "", "path to the shared webhook bearer token file")
 	proxy := flags.String("trusted-proxy", "", "IPv4 address of the Traefik container")
 	stateFile := flags.String("state-file", "", "absolute path to the panel webhook acceptance state file")
-	upgradeSecret := flags.String("upgrade-secret-file", "", "path to the tool upgrade webhook signing secret file")
-	upgradeToken := flags.String("upgrade-token-file", "", "path to the tool upgrade webhook bearer token file")
+	// Keep these flags so a binary upgrade can restart an older systemd unit.
+	flags.String("upgrade-secret-file", "", "deprecated (ignored)")
+	flags.String("upgrade-token-file", "", "deprecated (ignored)")
 	upgradeState := flags.String("upgrade-state-file", "", "absolute path to the tool upgrade webhook acceptance state file")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -89,25 +90,25 @@ func serveWebhook(args []string, runServer func(*http.Server, net.Listener) erro
 		trustedProxy.IsUnspecified() || flags.NArg() != 0 {
 		return fmt.Errorf("set -listen, -secret-file, -token-file, -trusted-proxy (IPv4), and -state-file (absolute path)")
 	}
-	panel, err := loadDeployHook(panelProtocol, *secretFile, *tokenFile, *stateFile)
+	secret, token, err := loadDeployCredentials(*secretFile, *tokenFile)
+	if err != nil {
+		return err
+	}
+	panel, err := loadDeployHook(panelProtocol, *stateFile)
 	if err != nil {
 		return fmt.Errorf("panel webhook: %w", err)
 	}
 	var upgrade *deployHook
-	if *upgradeSecret != "" || *upgradeToken != "" || *upgradeState != "" {
-		if *upgradeSecret == "" || *upgradeToken == "" || !filepath.IsAbs(*upgradeState) {
-			return fmt.Errorf("set all of -upgrade-secret-file, -upgrade-token-file, and -upgrade-state-file (absolute path)")
+	if *upgradeState != "" {
+		if !filepath.IsAbs(*upgradeState) {
+			return fmt.Errorf("-upgrade-state-file must be an absolute path")
 		}
 		if filepath.Clean(*stateFile) == filepath.Clean(*upgradeState) {
 			return fmt.Errorf("panel and tool upgrade webhook state files must differ")
 		}
-		upgrade, err = loadDeployHook(upgradeProtocol, *upgradeSecret, *upgradeToken, *upgradeState)
+		upgrade, err = loadDeployHook(upgradeProtocol, *upgradeState)
 		if err != nil {
 			return fmt.Errorf("tool upgrade webhook: %w", err)
-		}
-		if hmac.Equal(panel.secret, upgrade.secret) || hmac.Equal(panel.secret, upgrade.token) ||
-			hmac.Equal(panel.token, upgrade.secret) || hmac.Equal(panel.token, upgrade.token) {
-			return fmt.Errorf("panel and tool upgrade webhook credentials must differ")
 		}
 	}
 	listener, err := net.Listen("tcp", *listen)
@@ -122,6 +123,7 @@ func serveWebhook(args []string, runServer func(*http.Server, net.Listener) erro
 	server := &http.Server{
 		Handler: deployHandler{
 			panel: panel, upgrade: upgrade, trustedProxy: trustedProxy,
+			secret: secret, token: token,
 			limits:    &requestLimits{clients: make(map[netip.Addr]*clientLimits)},
 			submit:    submitUpdate,
 			directory: deployjob.Directory,
@@ -136,25 +138,27 @@ func serveWebhook(args []string, runServer func(*http.Server, net.Listener) erro
 	return runServer(server, listener)
 }
 
-func loadDeployHook(protocol hookProtocol, secretFile, tokenFile, stateFile string) (*deployHook, error) {
+func loadDeployCredentials(secretFile, tokenFile string) ([]byte, []byte, error) {
 	secret, err := readCredential(secretFile)
 	if err != nil {
-		return nil, fmt.Errorf("webhook signing secret: %w", err)
+		return nil, nil, fmt.Errorf("webhook signing secret: %w", err)
 	}
 	token, err := readCredential(tokenFile)
 	if err != nil {
-		return nil, fmt.Errorf("webhook token: %w", err)
+		return nil, nil, fmt.Errorf("webhook token: %w", err)
 	}
 	if hmac.Equal(secret, token) {
-		return nil, fmt.Errorf("webhook token and signing secret must differ")
+		return nil, nil, fmt.Errorf("webhook token and signing secret must differ")
 	}
+	return secret, token, nil
+}
+
+func loadDeployHook(protocol hookProtocol, stateFile string) (*deployHook, error) {
 	state, err := loadHookState(stateFile)
 	if err != nil {
 		return nil, fmt.Errorf("load webhook acceptance state: %w", err)
 	}
-	return &deployHook{
-		protocol: protocol, secret: secret, token: token, state: state,
-	}, nil
+	return &deployHook{protocol: protocol, state: state}, nil
 }
 
 func notifyReady(socket string) error {
@@ -183,13 +187,13 @@ func readCredential(path string) ([]byte, error) {
 }
 
 type deployHook struct {
-	protocol      hookProtocol
-	secret, token []byte
-	state         *hookState
+	protocol hookProtocol
+	state    *hookState
 }
 
 type deployHandler struct {
 	panel, upgrade *deployHook
+	secret, token  []byte
 	trustedProxy   netip.Addr
 	limits         *requestLimits
 	submit         func(deployjob.Request) error
@@ -231,7 +235,7 @@ func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !ok || !hmac.Equal([]byte(bearer), hook.token) {
+	if !ok || !hmac.Equal([]byte(bearer), h.token) {
 		h.rejectAuth(w, ip, now)
 		return
 	}
@@ -246,7 +250,7 @@ func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now = time.Now()
-	timestamp, ok := validSignature(hook.secret, r.Header.Get("X-Yagp-Timestamp"), r.Header.Get("X-Yagp-Signature"), body, now)
+	timestamp, ok := validSignature(h.secret, r.Header.Get("X-Yagp-Timestamp"), r.Header.Get("X-Yagp-Signature"), body, now)
 	if !ok {
 		h.rejectAuth(w, ip, now)
 		return
@@ -268,18 +272,18 @@ func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("could not persist webhook acceptance state: %v", err)
 		http.Error(w, "could not record webhook acceptance", http.StatusInternalServerError)
 	default:
-		h.submitJob(w, hook, job)
+		h.submitJob(w, job)
 	}
 }
 
-func (h deployHandler) submitJob(w http.ResponseWriter, hook *deployHook, job deployjob.Request) {
+func (h deployHandler) submitJob(w http.ResponseWriter, job deployjob.Request) {
 	if err := h.submit(job); err != nil {
 		log.Printf("could not submit %s job %s: %v", job.Mode, job.ID, err)
 		http.Error(w, "could not submit update", http.StatusServiceUnavailable)
 		return
 	}
 	log.Printf("submitted %s job %s", job.Mode, job.ID)
-	link := signedStatusURL(hook.secret, job, time.Now().Add(statusLinkLifetime))
+	link := signedStatusURL(h.secret, job, time.Now().Add(statusLinkLifetime))
 	w.Header().Set("Location", link)
 	writeStatusJSON(w, http.StatusAccepted, struct {
 		StatusURL       string `json:"status_url"`

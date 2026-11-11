@@ -22,7 +22,6 @@ readonly docker_socket=/var/run/docker.sock
 readonly image_repo=ghcr.io/hanzec/yagp
 readonly release_cache=https://release.hanzec-overseas.cn/yagp
 readonly webhook_base_path=/api/deploy
-readonly upgrade_endpoint=/api/deploy/deploy-tool
 
 main() {
     case ${1:-} in
@@ -58,7 +57,7 @@ install_webhook() (
     [[ $# -ge 1 ]] || usage
     check_systemd
     local project_dir project proxy stage cosign arch receiver updater traefik
-    local panel_secret panel_token upgrade_secret upgrade_token old_secret old_token
+    local secret token old_secret old_token
     cosign=$(find_cosign)
     project_dir=$(resolve_project_dir "$1")
     shift
@@ -76,18 +75,14 @@ install_webhook() (
     lock_deploy
     old_secret="$project_dir/.yagp-webhook-secret"
     old_token="$project_dir/.yagp-webhook-token"
-    panel_secret=$(prepare_credential "$managed_dir/panel.secret" "$old_secret")
-    panel_token=$(prepare_credential "$managed_dir/panel.token" "$old_token")
-    upgrade_secret=$(prepare_credential "$managed_dir/upgrade.secret")
-    upgrade_token=$(prepare_credential "$managed_dir/upgrade.token")
-    check_distinct_credentials "$panel_secret" "$panel_token" "$upgrade_secret" "$upgrade_token"
+    secret=$(prepare_credential "$managed_dir/panel.secret" "$old_secret")
+    token=$(prepare_credential "$managed_dir/panel.token" "$old_token")
+    [[ $secret != "$token" ]] || fail 'Webhook 签名密钥和 Token 须使用不同的值。'
 
     stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
     setup_account "$project_dir" "$project" "$stage/$receiver" "$stage/$updater"
-    printf '%s\n' "$panel_secret" | write_file "$managed_dir/panel.secret" 0600
-    printf '%s\n' "$panel_token" | write_file "$managed_dir/panel.token" 0600
-    printf '%s\n' "$upgrade_secret" | write_file "$managed_dir/upgrade.secret" 0600
-    printf '%s\n' "$upgrade_token" | write_file "$managed_dir/upgrade.token" 0600
+    printf '%s\n' "$secret" | write_file "$managed_dir/panel.secret" 0600
+    printf '%s\n' "$token" | write_file "$managed_dir/panel.token" 0600
     write_hook_unit "$traefik"
     write_traefik_route "$traefik"
 
@@ -99,8 +94,7 @@ install_webhook() (
     log '配置完成。部署账号已禁用登录，本次未更新容器。'
     log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
     log "查看部署日志：$log_query"
-    show_install_result DEPLOY_WEBHOOK panel "$webhook_base_path" "$traefik" "$panel_secret" "$panel_token"
-    show_install_result UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$upgrade_secret" "$upgrade_token"
+    show_install_result "$traefik" "$secret" "$token"
 )
 
 check_systemd() {
@@ -365,24 +359,16 @@ read_credential() {
     printf '%s\n' "$value"
 }
 
-check_distinct_credentials() {
-    local panel_secret=$1 panel_token=$2 upgrade_secret=$3 upgrade_token=$4
-    [[ $panel_secret != "$panel_token" && $upgrade_secret != "$upgrade_token" &&
-       $panel_secret != "$upgrade_secret" && $panel_secret != "$upgrade_token" &&
-       $panel_token != "$upgrade_secret" && $panel_token != "$upgrade_token" ]] ||
-        fail '面板部署和工具升级须各用一对不同的签名密钥和 Token，四份凭据不能重复。'
-}
-
 show_install_result() {
-    local prefix=$1 role=$2 endpoint=$3 secret=$5 token=$6
+    local traefik=$1 secret=$2 token=$3
     local hostname proxy_ip proxy_name
-    IFS='|' read -r hostname _ _ proxy_ip proxy_name <<< "$4"
+    IFS='|' read -r hostname _ _ proxy_ip proxy_name <<< "$traefik"
     log "Webhook 信任的公网 Traefik 容器为 ${proxy_name}（${proxy_ip}）。"
-    printf '%s_URL=https://%s%s\n' "$prefix" "$hostname" "$endpoint"
+    printf 'DEPLOY_WEBHOOK_URL=https://%s%s\n' "$hostname" "$webhook_base_path"
     if [[ -t 1 ]]; then
-        printf '%s_SECRET=%s\n%s_TOKEN=%s\n' "$prefix" "$secret" "$prefix" "$token"
+        printf 'DEPLOY_WEBHOOK_SECRET=%s\nDEPLOY_WEBHOOK_TOKEN=%s\n' "$secret" "$token"
     else
-        log "凭据保存在 $managed_dir/$role.secret 和 $managed_dir/$role.token，可在可信终端用 sudo cat 读取。"
+        log "凭据保存在 $managed_dir/panel.secret 和 $managed_dir/panel.token，可在可信终端用 sudo cat 读取。"
     fi
 }
 
@@ -454,9 +440,7 @@ StateDirectory=yagp-depoly-panel yagp-depoly-upgrade-hook
 StateDirectoryMode=0700
 LoadCredential=webhook-secret:$managed_dir/panel.secret
 LoadCredential=webhook-token:$managed_dir/panel.token
-LoadCredential=upgrade-secret:$managed_dir/upgrade.secret
-LoadCredential=upgrade-token:$managed_dir/upgrade.token
-ExecStart=$install_path serve -listen $gateway:39102 -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file /var/lib/yagp-depoly-panel/replay -upgrade-secret-file \${CREDENTIALS_DIRECTORY}/upgrade-secret -upgrade-token-file \${CREDENTIALS_DIRECTORY}/upgrade-token -upgrade-state-file /var/lib/yagp-depoly-upgrade-hook/replay
+ExecStart=$install_path serve -listen $gateway:39102 -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file /var/lib/yagp-depoly-panel/replay -upgrade-state-file /var/lib/yagp-depoly-upgrade-hook/replay
 TimeoutStartSec=20s
 Restart=on-failure
 RestartSec=5
