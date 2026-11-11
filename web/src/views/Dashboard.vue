@@ -164,7 +164,7 @@
       </div>
       <div v-if="recentLogs?.length" class="ops-table-scroll overview-table" tabindex="0" role="region" aria-label="最近操作列表">
         <table>
-          <thead><tr><th scope="col">时间</th><th scope="col">管理员</th><th scope="col">操作</th><th scope="col">详情</th></tr></thead>
+          <thead><tr><th scope="col">时间</th><th scope="col">执行者</th><th scope="col">操作</th><th scope="col">详情</th></tr></thead>
           <tbody>
             <tr v-for="row in recentLogs" :key="row.id">
               <td class="ops-mono"><time :datetime="row.created_at">{{ formatTime(row.created_at) }}</time></td>
@@ -181,7 +181,7 @@
       <div v-else-if="!logsError" class="overview-activity-state overview-empty">
         <el-icon aria-hidden="true"><Document /></el-icon>
         <strong>暂无操作记录</strong>
-        <span>节点、规则或隧道的管理活动会显示在这里。</span>
+        <span>节点、规则、隧道的管理活动和自动升级事件会显示在这里。</span>
       </div>
     </section>
   </div>
@@ -210,7 +210,8 @@ const actionLabels = {
   update: ['更新', 'is-warning'],
   delete: ['删除', 'is-danger'],
   start: ['启动', 'is-success'],
-  stop: ['停止', 'is-muted']
+  stop: ['停止', 'is-muted'],
+  auto_upgrade: ['自动升级', 'is-muted']
 }
 const countFormat = new Intl.NumberFormat('zh-CN')
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false })
@@ -317,10 +318,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 <style scoped>
 .overview-banner {
   align-items: center;
-  padding: 24px;
-  background-image: linear-gradient(90deg, var(--ops-panel) 50%, transparent),
-    radial-gradient(circle, color-mix(in srgb, var(--ops-accent) 24%, transparent) 1px, transparent 1px);
-  background-size: 100% 100%, 16px 16px;
+  padding: var(--ops-card-padding);
 }
 
 .overview-primary,
@@ -329,14 +327,14 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   align-items: center;
   gap: 8px;
   min-height: 44px;
-  font-weight: 650;
+  font-weight: var(--ops-weight-semibold);
   text-decoration: none;
   white-space: nowrap;
 }
 
 .overview-primary {
   padding: 0 16px;
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-accent);
   color: var(--ops-bg);
 }
@@ -348,7 +346,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 .overview-kpis,
 .overview-details {
   display: grid;
-  gap: 16px;
+  gap: var(--ops-section-gap);
   min-width: 0;
 }
 
@@ -356,7 +354,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 .overview-details { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
 
 .kpi-card,
-.overview-panel { padding: 20px; }
+.overview-panel { padding: var(--ops-card-padding); }
 
 .kpi-header {
   display: flex;
@@ -365,7 +363,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   gap: 12px;
 }
 
-.kpi-header h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.kpi-header h2 { margin: 0; font-size: var(--ops-text-title); font-weight: var(--ops-weight-semibold); }
 
 .kpi-symbol {
   display: grid;
@@ -374,24 +372,24 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   height: 36px;
   place-items: center;
   border: 1px solid var(--ops-border);
-  border-radius: 9px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   color: var(--ops-accent);
-  font-size: 18px;
+  font-size: var(--ops-text-title);
 }
 
 .kpi-value {
   margin: 16px 0 12px;
   color: var(--ops-text);
-  font-size: clamp(2rem, 3vw, 2.75rem);
-  font-weight: 650;
-  line-height: 1;
+  font-size: var(--ops-text-metric);
+  font-weight: var(--ops-weight-semibold);
+  line-height: var(--ops-leading-heading);
   overflow-wrap: anywhere;
 }
 
 .kpi-labels { display: flex; flex-wrap: wrap; gap: 8px; }
 .kpi-track { margin: 0 0 12px; }
-.kpi-labels b { font-weight: 600; }
+.kpi-labels b { font-weight: var(--ops-weight-semibold); }
 .kpi-loading { display: grid; gap: 12px; margin-top: 20px; }
 .kpi-loading > :first-child { width: 35%; height: 32px; }
 .kpi-loading > :last-child { width: 65%; }
@@ -410,12 +408,12 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   margin: 0 0 4px;
   color: var(--ops-muted);
   font-family: var(--ops-mono);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semibold);
   letter-spacing: .12em;
 }
 
-.overview-panel-header h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.overview-panel-header h2 { margin: 0; font-size: var(--ops-text-title); font-weight: var(--ops-weight-semibold); }
 .traffic-totals {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
@@ -425,15 +423,15 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 
 .traffic-metric {
   min-width: 0;
-  padding: 14px;
+  padding: var(--ops-inset-padding);
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
 }
 
 .traffic-metric dt, .traffic-note {
   color: var(--ops-muted);
-  font-size: 13px;
+  font-size: var(--ops-text-sm);
 }
 
 .traffic-metric .traffic-note { margin: 0; }
@@ -441,18 +439,18 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 .traffic-metric dd:not(.traffic-note) {
   margin: 6px 0;
   color: var(--ops-text);
-  font-size: clamp(1.25rem, 3vw, 1.75rem);
-  font-weight: 650;
+  font-size: var(--ops-text-metric);
+  font-weight: var(--ops-weight-semibold);
   overflow-wrap: anywhere;
 }
 
 .traffic-exits { margin-top: 20px; }
-.traffic-exits h3 { margin: 0; font-size: 15px; }
+.traffic-exits h3 { margin: 0; font-size: var(--ops-text-base); }
 .traffic-exits p { margin: 6px 0 0; }
 .traffic-table {
   margin: 12px 0 0;
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
 }
 
 .traffic-table .ops-status { margin-inline-start: 8px; }
@@ -464,7 +462,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   align-items: center;
   gap: 8px;
   min-height: 36px;
-  font-size: 14px;
+  font-size: var(--ops-text-body);
 }
 
 .distribution-row dd {
@@ -483,7 +481,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 }
 
 .distribution-fill { height: 100%; border-radius: inherit; background: var(--ops-accent); }
-.distribution-count { min-width: 64px; text-align: end; font-size: 12px; }
+.distribution-count { min-width: 64px; text-align: end; font-size: var(--ops-text-xs); }
 
 .distribution-types {
   display: flex;
@@ -493,7 +491,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   padding-top: 12px;
   border-top: 1px solid var(--ops-border);
   color: var(--ops-muted);
-  font-size: 13px;
+  font-size: var(--ops-text-sm);
 }
 
 .distribution-types b { margin-inline-start: 4px; color: var(--ops-text); }
@@ -505,7 +503,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   gap: 8px 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--ops-border);
-  font-size: 14px;
+  font-size: var(--ops-text-body);
 }
 
 .runtime-list > div:last-child { border-bottom: 0; }
@@ -513,14 +511,14 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 .runtime-list dd { margin: 0; text-align: end; overflow-wrap: anywhere; }
 
 .overview-activity { min-width: 0; }
-.overview-activity > .overview-panel-header { padding: 16px 20px; }
+.overview-activity > .overview-panel-header { padding: var(--ops-inset-padding) var(--ops-card-padding); }
 
 .overview-table table {
   width: 100%;
   min-width: 580px;
   border-collapse: collapse;
   text-align: start;
-  font-size: 14px;
+  font-size: var(--ops-text-body);
 }
 
 .overview-table th,
@@ -530,8 +528,8 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   text-align: start;
 }
 
-.overview-table th { color: var(--ops-muted); font-size: 13px; font-weight: 600; background: var(--ops-inset); }
-.overview-table th:first-child, .overview-table td:first-child { padding-inline-start: 20px; white-space: nowrap; }
+.overview-table th { color: var(--ops-muted); font-size: var(--ops-text-xs); font-weight: var(--ops-weight-semibold); background: var(--ops-inset); }
+.overview-table th:first-child, .overview-table td:first-child { padding-inline-start: var(--ops-card-padding); white-space: nowrap; }
 .overview-table td:nth-child(3) { white-space: nowrap; }
 .traffic-table th { border-top: 0; }
 .traffic-table td:first-child { white-space: normal; }
@@ -543,7 +541,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 20px;
+  padding: 12px var(--ops-card-padding);
   color: var(--ops-warning);
 }
 
@@ -551,7 +549,7 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 .overview-empty { display: grid; justify-items: center; gap: 8px; color: var(--ops-muted); text-align: center; }
 .overview-empty > .el-icon { color: var(--ops-accent); font-size: 22px; }
 .overview-empty strong { color: var(--ops-text); }
-.overview-empty span { font-size: 14px; }
+.overview-empty span { font-size: var(--ops-text-body); }
 
 .overview-sr-only {
   position: absolute;

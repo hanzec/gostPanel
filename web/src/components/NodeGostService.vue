@@ -1,9 +1,8 @@
 <template>
-  <section id="node-gost-service" class="ops-panel gost-service" aria-labelledby="node-gost-title">
+  <section id="node-gost-service" class="gost-service" aria-labelledby="node-gost-title">
     <header class="gost-service-header">
       <div class="gost-title">
-        <el-icon class="gost-icon" aria-hidden="true"><Monitor /></el-icon>
-        <h2 id="node-gost-title" tabindex="-1">Gost 服务</h2>
+        <h2 class="ops-section-title" id="node-gost-title" tabindex="-1"><el-icon aria-hidden="true"><Monitor /></el-icon>Gost 服务</h2>
         <span v-if="service && !statusError" class="ops-status" :class="'is-' + statusTone">{{ statusLabel }}</span>
       </div>
       <div class="gost-actions">
@@ -150,8 +149,8 @@ watch(() => props.node.status, (status) => {
 <style scoped>
 .gost-service {
   display: grid;
-  gap: 14px;
-  padding: 20px;
+  gap: var(--ops-section-gap);
+  min-width: 0;
 }
 
 .gost-service-header, .gost-title, .gost-actions {
@@ -161,17 +160,9 @@ watch(() => props.node.status, (status) => {
   gap: 8px;
 }
 
+.gost-title h2 { display: flex; align-items: center; gap: 8px; }
+.gost-title h2 .el-icon { color: var(--ops-accent); }
 .gost-service-header { justify-content: space-between; gap: 12px; }
-.gost-title h2 { font-size: 1rem; }
-.gost-icon {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--ops-accent-line);
-  border-radius: 8px;
-  background: var(--ops-accent-bg);
-  color: var(--ops-accent);
-  font-size: 17px;
-}
 
 .gost-actions .el-button { min-height: 44px; margin: 0; }
 .gost-status { display: grid; gap: 8px; min-width: 0; }
@@ -180,12 +171,8 @@ watch(() => props.node.status, (status) => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin: 0;
-  padding: 12px;
-  border: 1px solid var(--ops-border);
-  border-radius: 8px;
-  background: var(--ops-inset);
 }
-.gost-service-info dt { color: var(--ops-muted); font-size: 13px; }
+.gost-service-info dt { color: var(--ops-muted); font-size: var(--ops-text-sm); }
 .gost-service-info dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .gost-error { color: var(--ops-danger); white-space: pre-wrap; overflow-wrap: anywhere; }
 
@@ -202,10 +189,10 @@ watch(() => props.node.status, (status) => {
   background: transparent;
   color: var(--ops-text);
   text-align: start;
-  font-weight: 600;
+  font-weight: var(--ops-weight-semibold);
 }
 .gost-log-toggle:hover { color: var(--ops-accent); }
-.gost-log-toggle small { font-size: 13px; font-weight: 400; }
+.gost-log-toggle small { font-size: var(--ops-text-sm); font-weight: var(--ops-weight-normal); }
 .gost-log-chevron { margin-inline-start: auto; }
 .gost-log-toggle[aria-expanded="true"] .gost-log-chevron { transform: rotate(180deg); }
 .gost-log-content { padding-top: 4px; }
@@ -215,17 +202,16 @@ watch(() => props.node.status, (status) => {
   padding: 0 12px;
   overflow-y: auto;
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   list-style: none;
 }
 .gost-logs li { padding: 8px 0; }
 .gost-logs li + li { border-top: 1px solid var(--ops-border); }
-.gost-log-meta { font-size: 12px; }
-.gost-log-message { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gost-log-meta { font-size: var(--ops-text-xs); }
+.gost-log-message { font-size: var(--ops-text-sm); margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 760px) {
-  .gost-service { padding: 14px; }
   .gost-service-info { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

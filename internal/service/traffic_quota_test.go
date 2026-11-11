@@ -77,7 +77,7 @@ func TestTrafficQuotaSync(t *testing.T) {
 	}
 	sync(100, 40, 100, 0, model.TrafficQuotaBlocked)
 	daily := "daily"
-	if err := repo.Update(&node, nil, &daily); err != nil {
+	if err := repo.Update(&node, nil, &daily, nil); err != nil {
 		t.Fatal(err)
 	}
 	sync(100, 0, 100, model.TrafficQuotaWindow(daily, now), model.TrafficQuotaBlocked)
@@ -85,7 +85,7 @@ func TestTrafficQuotaSync(t *testing.T) {
 	sync(100, 0, 2, model.TrafficQuotaWindow(daily, now), model.TrafficQuotaActive)
 	sync(100, 2, 12, model.TrafficQuotaWindow(daily, now), model.TrafficQuotaActive)
 	zero := int64(0)
-	if err := repo.Update(&node, &zero, nil); err != nil {
+	if err := repo.Update(&node, &zero, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	sync(0, 0, 0, model.TrafficQuotaWindowUnset, "")

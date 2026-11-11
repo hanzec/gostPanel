@@ -38,7 +38,7 @@
       </el-select>
       <p id="gost-ruleset-nodes-help" class="ops-muted field-help">取消选中并保存后，该节点按最后一次同步的规则分流。</p>
     </el-form-item>
-    <div class="ruleset-preview">
+    <div class="ops-inset ruleset-preview">
       <p v-if="matchers.length" role="status">
         最近一次转换生成 {{ matchers.length }} 条 Gost 匹配规则<span v-if="updatedAt">，更新时间 {{ updatedAt }}</span>。
       </p>
@@ -114,8 +114,8 @@ onMounted(load)
 
 <style scoped>
 .node-select { width: 100%; }
-.field-help { margin: 8px 0 0; line-height: 1.5; }
-.ruleset-preview { margin: 0 0 16px; padding: 12px; background: var(--ops-inset); border-radius: 8px; }
+.field-help { margin: 8px 0 0; font-size: var(--ops-text-sm); line-height: var(--ops-leading-body); }
+.ruleset-preview { margin: 0 0 var(--ops-section-gap); }
 .ruleset-preview p { margin: 0; }
 .ruleset-preview details { margin-top: 8px; }
 .ruleset-preview summary { cursor: pointer; }

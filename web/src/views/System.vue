@@ -420,17 +420,17 @@ onMounted(loadSettings)
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
   align-items: start;
-  gap: 16px;
+  gap: var(--ops-section-gap);
   min-width: 0;
 }
 
-.settings-workspace { min-width: 0; padding: 4px 24px 24px; }
+.settings-workspace { min-width: 0; padding: 4px var(--ops-card-padding) var(--ops-card-padding); }
 .settings-tabs :deep(.el-tabs__header) { margin-bottom: 24px; }
-.settings-tabs :deep(.el-tabs__item) { min-height: 48px; font-weight: 600; }
+.settings-tabs :deep(.el-tabs__item) { min-height: 48px; font-weight: var(--ops-weight-semibold); }
 
 .settings-section-heading { margin-bottom: 24px; }
-.settings-section-heading h2 { margin: 0 0 8px; font-size: 20px; font-weight: 650; }
-.settings-section-heading p { margin: 0; color: var(--ops-muted); font-size: 14px; }
+.settings-section-heading h2 { margin: 0 0 8px; font-size: var(--ops-text-title); font-weight: var(--ops-weight-semibold); }
+.settings-section-heading p { margin: 0; color: var(--ops-muted); font-size: var(--ops-text-body); }
 
 .settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
 .settings-full-field { grid-column: 1 / -1; }
@@ -442,7 +442,7 @@ onMounted(loadSettings)
 .settings-section-actions .settings-inline-error { margin-top: 12px; }
 .settings-notification-channel { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--ops-border); }
 
-.settings-context { padding: 20px; }
+.settings-context { padding: var(--ops-card-padding); }
 
 .settings-context-icon {
   display: grid;
@@ -450,26 +450,26 @@ onMounted(loadSettings)
   height: 40px;
   place-items: center;
   border: 1px solid var(--ops-border);
-  border-radius: 10px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   color: var(--ops-accent);
-  font-size: 18px;
+  font-size: var(--ops-text-title);
 }
 
 .settings-context .settings-context-label {
   margin: 16px 0 4px;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semibold);
   letter-spacing: .12em;
 }
 
-.settings-context h2 { margin: 0; font-size: 18px; font-weight: 650; }
-.settings-context p { margin: 8px 0 0; color: var(--ops-muted); font-size: 14px; }
+.settings-context h2 { margin: 0; font-size: var(--ops-text-title); font-weight: var(--ops-weight-semibold); }
+.settings-context p { margin: 8px 0 0; color: var(--ops-muted); font-size: var(--ops-text-body); }
 .settings-context dl { margin: 20px 0 0; padding-top: 16px; border-top: 1px solid var(--ops-border); }
-.settings-context dt { color: var(--ops-muted); font-size: 12px; }
-.settings-context dd { margin: 4px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.settings-context dt { color: var(--ops-muted); font-size: var(--ops-text-xs); }
+.settings-context dd { margin: 4px 0 0; font-weight: var(--ops-weight-semibold); overflow-wrap: anywhere; }
 
-.settings-state { padding: 20px 24px; }
+.settings-state { padding: var(--ops-card-padding); }
 
 .settings-feedback {
   display: flex;
@@ -488,7 +488,7 @@ onMounted(loadSettings)
   gap: 12px;
   padding: 16px;
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
 }
 

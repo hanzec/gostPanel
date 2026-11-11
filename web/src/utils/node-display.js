@@ -20,9 +20,11 @@ export const formatTime = (value) => dateFormatter.format(new Date(value))
 const regionNames = new Intl.DisplayNames(['zh-CN'], { type: 'region' })
 export const formatRegion = (code) => regionNames.of(code)
 
-export const nodeAddresses = (node) => node.addresses?.length ? node.addresses : [node.ipv4, node.ipv6].filter(Boolean)
+const reportedNodeAddresses = (node) => node.addresses?.length ? node.addresses : [node.ipv4, node.ipv6].filter(Boolean)
 
-export const nodeIPs = (node, family) => nodeAddresses(node).filter(address => address.includes(':') === (family === 6))
+export const nodeAddresses = (node) => [...new Set([...reportedNodeAddresses(node), ...(node.manual_addresses || [])])]
+
+export const nodeIPs = (node, family) => reportedNodeAddresses(node).filter(address => address.includes(':') === (family === 6))
 
 export const formatBytes = (bytes) => {
   if (!bytes) return '0 B'

@@ -48,6 +48,28 @@ describe('audit logs', () => {
     expect(wrapper.get('[role="dialog"] pre').text()).toBe('—')
   })
 
+  it('displays and filters system automatic upgrade events', async () => {
+    const event = {
+      id: 40, username: '系统', action: 'auto_upgrade', resource_type: 'node', resource_id: 7,
+      details: '节点 东京 (#7)：Gost 自动升级失败：checksum mismatch（v3.2.5 → v3.2.6）'
+    }
+    getLogList.mockResolvedValue(result([event], 1))
+    const wrapper = mountInventory(Logs)
+    await flushPromises()
+    expect(wrapper.get('thead').text()).toContain('执行者 / 来源')
+    expect(wrapper.get('tbody').text()).toContain('系统')
+    expect(wrapper.get('tbody .ops-status').text()).toBe('自动升级')
+    await choose(select(wrapper, 'audit-action'), 'auto_upgrade')
+    await wrapper.get('form[aria-label="日志筛选"]').trigger('submit')
+    await flushPromises()
+    expect(getLogList).toHaveBeenLastCalledWith({
+      page: 1, pageSize: 10, username: '', action: 'auto_upgrade', resource_type: ''
+    })
+    await wrapper.get('[aria-label="查看操作记录 40"]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('自动升级')
+    expect(wrapper.get('[role="dialog"] pre').text()).toBe(event.details)
+  })
+
   it('keeps the last page on failure, retries, and filters from page one', async () => {
     getLogList.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(result(auditRecords, 15))
     const wrapper = mountInventory(Logs)

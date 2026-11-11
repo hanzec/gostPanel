@@ -80,7 +80,7 @@
                 </span>
                 <span class="inventory-secondary ops-muted"><span class="ops-mono">#{{ tunnel.id }}</span><span v-if="tunnel.remark"> · {{ tunnel.remark }}</span></span>
               </td>
-              <td role="cell">
+              <td class="tunnel-route-cell" role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">转发路径</span>
                 <div class="tunnel-route">
                   <span>
@@ -224,7 +224,7 @@
             clearable
             collapse-tags
             collapse-tags-tooltip
-            placeholder="选择已获取 IP 的来源节点"
+            placeholder="选择有可用 IP 的来源节点"
             no-data-text="请先在节点管理中添加节点"
           >
             <el-option
@@ -236,7 +236,7 @@
             />
             <el-option v-for="id in missingAllowlistNodes" :key="id" :label="`节点 #${id}（未找到）`" :value="id" />
           </el-select>
-          <span id="tunnel-allowlist-help" class="tunnel-form-hint ops-muted">仅允许所选节点上报的 IPv4 和 IPv6 连接此隧道的出口 Relay。清空选择并保存可解除来源 IP 限制。</span>
+          <span id="tunnel-allowlist-help" class="tunnel-form-hint ops-muted">仅允许所选节点自动上报及手动补充的 IP 连接此隧道的出口 Relay。清空选择并保存可解除来源 IP 限制。</span>
         </el-form-item>
         <div v-if="nodeOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
           <span>无法加载来源节点选项。</span>
@@ -539,17 +539,19 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-panel .inventory-field { flex-basis: 145px; }
 .tunnel-panel .inventory-field:first-child { flex-basis: 200px; }
 .tunnel-route { display: flex; align-items: center; gap: 8px; }
-.tunnel-route-label { display: block; color: var(--ops-muted); font-size: 11px; margin-bottom: 2px; }
+.tunnel-route-label { display: block; color: var(--ops-muted); font-size: var(--ops-text-xs); margin-bottom: 2px; }
 .tunnel-route-arrow { color: var(--ops-accent); flex: none; }
 .tunnel-dialog-error { margin: 0 0 12px; }
 .tunnel-dialog-hint { margin: 0 0 12px; }
 .tunnel-link { color: var(--ops-accent); }
-.tunnel-form-hint { font-size: 12px; line-height: 1.5; margin-top: 4px; }
-.tunnel-allowlist-preview { margin: 0; padding: 12px; background: var(--ops-inset); border-radius: 8px; }
+.tunnel-form-hint { font-size: var(--ops-text-xs); line-height: 1.5; margin-top: 4px; }
+.tunnel-allowlist-preview { margin: 0; padding: 12px; background: var(--ops-inset); border-radius: var(--ops-radius-inset); }
 .tunnel-allowlist-preview dd { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
 .tunnel-allowlist-error { color: var(--ops-danger); overflow-wrap: anywhere; }
 
 @media (max-width: 700px) {
+  .tunnel-route-cell { grid-column: 1 / -1; }
+  .tunnel-route > span { flex: 1; min-width: 0; }
   .tunnel-panel .inventory-field { flex-basis: 118px; }
   .tunnel-panel .inventory-field:first-child { flex-basis: 100%; }
   .tunnel-route { gap: 6px; }

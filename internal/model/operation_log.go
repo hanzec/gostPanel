@@ -7,7 +7,7 @@ import (
 // OperationLog 操作日志模型
 type OperationLog struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
-	Username     string    `gorm:"type:text" json:"username"`      // Authentik 用户名
+	Username     string    `gorm:"type:text" json:"username"`      // 执行者（Authentik 用户名或系统）
 	Action       string    `gorm:"size:50;not null" json:"action"` // 操作类型
 	ResourceType string    `gorm:"size:50" json:"resource_type"`   // 资源类型
 	ResourceID   uint      `json:"resource_id"`                    // 资源ID
@@ -24,11 +24,12 @@ func (OperationLog) TableName() string {
 
 // 操作类型常量
 const (
-	ActionCreate = "create" // 创建
-	ActionUpdate = "update" // 更新
-	ActionDelete = "delete" // 删除
-	ActionStart  = "start"  // 启动
-	ActionStop   = "stop"   // 停止
+	ActionCreate      = "create"       // 创建
+	ActionUpdate      = "update"       // 更新
+	ActionDelete      = "delete"       // 删除
+	ActionStart       = "start"        // 启动
+	ActionStop        = "stop"         // 停止
+	ActionAutoUpgrade = "auto_upgrade" // 自动升级
 )
 
 // 资源类型常量

@@ -95,6 +95,21 @@ describe('Dashboard overview', () => {
     expect(page.get('a[href="/logs"]').text()).toContain('查看全部')
   })
 
+  it('includes system automatic upgrades in recent operations', async () => {
+    getDashboardStats.mockResolvedValue({ data: resources })
+    getLogList.mockResolvedValue({ data: { list: [{
+      id: 40, username: '系统', action: 'auto_upgrade', resource_type: 'node', resource_id: 7,
+      details: '节点 东京 (#7)：Gost 自动升级成功（v3.2.5 → v3.2.6）'
+    }] } })
+    const page = await mountOverview()
+    await flushPromises()
+    const activity = page.get('.overview-activity')
+    expect(activity.get('thead').text()).toContain('执行者')
+    expect(activity.get('tbody').text()).toContain('系统')
+    expect(activity.get('tbody .ops-status').text()).toBe('自动升级')
+    expect(activity.get('.overview-log-detail').text()).toContain('Gost 自动升级成功（v3.2.5 → v3.2.6）')
+  })
+
   it('keeps the last successful stats and log entries on failure and retries on the next poll', async () => {
     getDashboardStats.mockResolvedValueOnce({ data: resources }).mockRejectedValueOnce(new Error('stats offline'))
       .mockResolvedValue({ data: { ...resources, database: 'mysql', version: '2.0.0' } })

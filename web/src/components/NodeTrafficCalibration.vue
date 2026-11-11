@@ -1,8 +1,8 @@
 <template>
   <div class="calibration">
-    <p class="calibration-note ops-muted">输入校准后的字节数。后续上报会从新值继续累计。</p>
-    <form class="ops-panel calibration-card" aria-labelledby="node-calibrate-totals" @submit.prevent="saveTotals">
-      <h3 id="node-calibrate-totals">累计流量</h3>
+    <p class="ops-inset calibration-note ops-muted">输入校准后的字节数。后续上报会从新值继续累计。</p>
+    <form class="ops-inset calibration-card" aria-labelledby="node-calibrate-totals" @submit.prevent="saveTotals">
+      <h3 class="ops-subsection-title" id="node-calibrate-totals">累计流量</h3>
       <div class="calibration-grid">
         <div class="calibration-field">
           <label for="calibrate-input">累计入站（字节）</label>
@@ -17,8 +17,8 @@
       </div>
       <el-button native-type="submit" type="primary" :loading="saving === 'totals'" :disabled="!totalsValid || !!saving">保存累计流量</el-button>
     </form>
-    <form class="ops-panel calibration-card" aria-labelledby="node-calibrate-quota" @submit.prevent="saveQuota">
-      <h3 id="node-calibrate-quota">当前周期配额用量</h3>
+    <form class="ops-inset calibration-card" aria-labelledby="node-calibrate-quota" @submit.prevent="saveQuota">
+      <h3 class="ops-subsection-title" id="node-calibrate-quota">当前周期配额用量</h3>
       <p class="ops-muted">节点会从新用量继续计量，并按流量上限执行限流。</p>
       <div class="calibration-field">
         <label for="calibrate-quota">配额用量（字节）</label>
@@ -76,10 +76,9 @@ const saveQuota = () => quotaAvailable.value && isBytes(quota.value) && save('qu
 
 <style scoped>
 .calibration, .calibration-card, .calibration-grid, .calibration-field { display: grid; gap: 12px; }
-.calibration-note, .calibration-card { padding: 14px; }
-.calibration-note { border: 1px solid var(--ops-border); border-radius: 8px; background: var(--ops-inset); }
 .calibration-card { justify-items: start; }
-.calibration-card h3 { font-size: 1rem; }
+.calibration-field label { font-size: var(--ops-text-body); font-weight: var(--ops-weight-medium); }
+.calibration-field small { font-size: var(--ops-text-sm); }
 .calibration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
 .calibration-field { gap: 5px; width: 100%; }
 .calibration-card .el-button { min-height: 44px; }

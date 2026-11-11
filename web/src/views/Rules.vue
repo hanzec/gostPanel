@@ -724,21 +724,20 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-section-head {
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 20px 20px 16px;
+  padding: var(--ops-card-padding);
 }
 
-.rule-section-head h2,
-.rule-form-section h3 {
+.rule-section-head h2 {
   margin: 0;
   color: var(--ops-text);
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: var(--ops-text-title);
+  font-weight: var(--ops-weight-semibold);
 }
 
 .rule-section-head p,
 .rule-form-section header p {
   margin: 4px 0 0;
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .rule-filters {
@@ -746,7 +745,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   grid-template-columns: minmax(140px, 1.5fr) repeat(2, minmax(110px, 1fr)) auto;
   gap: 12px;
   align-items: end;
-  padding: 16px 20px;
+  padding: var(--ops-inset-padding) var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
   border-bottom: 0;
 }
@@ -759,8 +758,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-filter label {
   color: var(--ops-muted);
-  font-size: .8125rem;
-  font-weight: 550;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-medium);
 }
 
 .rule-filter-actions {
@@ -781,7 +780,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   min-width: 830px;
   border-collapse: collapse;
   text-align: left;
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .rule-table th,
@@ -792,12 +791,12 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-table th:first-child,
 .rule-table td:first-child {
-  padding-left: 20px;
+  padding-left: var(--ops-card-padding);
 }
 
 .rule-table th:last-child,
 .rule-table td:last-child {
-  padding-right: 20px;
+  padding-right: var(--ops-card-padding);
 }
 
 .rule-table thead {
@@ -806,8 +805,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 }
 
 .rule-table thead th {
-  font-size: .75rem;
-  font-weight: 650;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semibold);
   white-space: nowrap;
 }
 
@@ -829,7 +828,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-traffic-total {
   display: block;
   color: var(--ops-text);
-  font-weight: 650;
+  font-weight: var(--ops-weight-semibold);
 }
 
 .rule-secondary {
@@ -838,8 +837,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   gap: 4px 8px;
   margin-top: 4px;
   color: var(--ops-muted);
-  font-size: .75rem;
-  font-weight: 450;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-normal);
 }
 
 .rule-path {
@@ -849,7 +848,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 }
 
 .rule-path-entry {
-  font-weight: 550;
+  font-weight: var(--ops-weight-medium);
 }
 
 .rule-path-target {
@@ -868,7 +867,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-target-details {
   margin-top: 4px;
   color: var(--ops-muted);
-  font-size: .75rem;
+  font-size: var(--ops-text-xs);
 }
 
 .rule-target-details summary {
@@ -890,7 +889,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   border: 1px solid var(--ops-border);
   border-radius: 4px;
   color: var(--ops-muted);
-  font-size: .6875rem;
+  font-size: var(--ops-text-xs);
 }
 
 .rule-row-actions {
@@ -911,9 +910,9 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 16px;
-  padding: 12px 20px;
+  padding: 12px var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
-  font-size: .8125rem;
+  font-size: var(--ops-text-sm);
 }
 
 .rule-pagination :deep(.el-pagination) {
@@ -951,10 +950,10 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 12px 20px;
+  padding: 12px var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
   color: var(--ops-warning);
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .rule-editor {
@@ -964,11 +963,13 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-form-section {
   min-width: 0;
-  padding: 14px 16px 2px;
+  padding: var(--ops-inset-padding) var(--ops-inset-padding) 2px;
   border: 1px solid var(--ops-border);
-  border-radius: var(--ops-radius);
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
 }
+
+.rule-form-section h3 { font-size: var(--ops-text-base); }
 
 .rule-form-section header {
   margin-bottom: 12px;
@@ -987,7 +988,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-form-hint {
   margin: 4px 0 0;
   line-height: 1.45;
-  font-size: .75rem;
+  font-size: var(--ops-text-xs);
 }
 
 .rule-form-link { color: var(--ops-accent); }
@@ -1038,8 +1039,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   .rule-filters,
   .rule-pagination,
   .rule-error {
-    padding-left: 14px;
-    padding-right: 14px;
+    padding-left: var(--ops-card-padding);
+    padding-right: var(--ops-card-padding);
   }
 
   .rule-table {
@@ -1084,7 +1085,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
     display: block;
     margin-bottom: 4px;
     color: var(--ops-muted);
-    font-size: .75rem;
+    font-size: var(--ops-text-xs);
     content: attr(data-label);
   }
 

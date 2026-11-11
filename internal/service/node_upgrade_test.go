@@ -3,15 +3,19 @@ package service
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"yagp/internal/dto"
 	"yagp/internal/model"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
 
 	"github.com/glebarez/sqlite"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"gorm.io/gorm"
 )
@@ -29,7 +33,7 @@ func TestAutomaticNodeUpgradeUsesStoredComponentPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.GostNode{}); err != nil {
+	if err := db.AutoMigrate(&model.GostNode{}, &model.OperationLog{}); err != nil {
 		t.Fatal(err)
 	}
 	var nodes [2]model.GostNode
@@ -50,6 +54,11 @@ func TestAutomaticNodeUpgradeUsesStoredComponentPolicy(t *testing.T) {
 	service.runAutomatic(ctx)
 	if len(fixtures[0].started)+len(fixtures[1].started) != 0 {
 		t.Fatal("new nodes must not be upgraded until an administrator enables their policy")
+	}
+	logs, total, err := NewLogService(db).List(&dto.LogListReq{Action: model.ActionAutoUpgrade})
+	requireServiceError(t, err, nil)
+	if total != 0 {
+		t.Fatalf("disabled policies emitted audit events: %+v", logs)
 	}
 	if err := service.SetPolicy(ctx, nodes[0].ID, model.NodeUpgradePolicy{AutoUpgradeGost: true, AutoUpgradeDaemon: true}); err != nil {
 		t.Fatal(err)
@@ -80,6 +89,87 @@ func TestAutomaticNodeUpgradeUsesStoredComponentPolicy(t *testing.T) {
 			t.Errorf("node %d upgrade requests = %v; want %q", nodes[i].ID, started, want)
 		}
 	}
+
+	logs, total, err = NewLogService(db).List(&dto.LogListReq{Action: model.ActionAutoUpgrade, ResourceType: model.ResourceTypeNode})
+	requireServiceError(t, err, nil)
+	if total != 4 {
+		t.Fatalf("expected start and result for two upgrades, without duplicate events on the next pass; got %+v", logs)
+	}
+	for i, component := range []string{"Gost", "yagp-daemon"} {
+		var details []string
+		for _, entry := range logs {
+			if entry.ResourceID == nodes[i].ID {
+				if entry.Username != "系统" || entry.IPAddress != "" || entry.UserAgent != "" ||
+					!strings.Contains(entry.Details, nodes[i].Name) || !strings.Contains(entry.Details, component) {
+					t.Fatalf("automatic event missing attribution or node/component: %+v", entry)
+				}
+				details = append(details, entry.Details)
+			}
+		}
+		if len(details) != 2 || !strings.Contains(details[0], "自动升级成功") || !strings.Contains(details[1], "自动升级已启动") {
+			t.Fatalf("automatic event sequence = %v", details)
+		}
+	}
+}
+
+func TestAutomaticNodeUpgradeRecordsFailuresAndPendingConfirmation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		start      *nodegrpc.NodeUpgradeStatus
+		startError error
+		want       string
+		wantCount  int64
+		wait       bool
+	}{
+		{"start rejected", nil, status.Error(codes.Unavailable, "node offline"), "自动升级启动失败", 1, false},
+		{"worker failed", &nodegrpc.NodeUpgradeStatus{State: "failed", Error: "checksum mismatch"}, nil, "自动升级失败：checksum mismatch", 2, false},
+		{"confirmation unavailable", &nodegrpc.NodeUpgradeStatus{State: "queued", Component: "gost", TargetVersion: "v3.2.6"}, nil, "自动升级结果待确认", 2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newServiceTestDB(t)
+			remote := &automaticUpgradeAuditNode{
+				nodeUpgradeFixture: nodeUpgradeFixture{gost: "v3.2.5"},
+				start:              tc.start, startError: tc.startError,
+			}
+			node := startServiceTestNode(t, remote)
+			node.UpgradePolicy.AutoUpgradeGost = true
+			saveServiceFixtures(t, db, &node)
+			s := NewNodeUpgradeService(db)
+			ctx := context.Background()
+			if tc.wait {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, time.Second)
+				defer cancel()
+			}
+			err := s.upgradeAutomatically(ctx, node.ID, "gost", map[string]string{"gost": "v3.2.6"})
+			if tc.wait {
+				requireServiceError(t, err, context.DeadlineExceeded)
+			} else {
+				requireServiceError(t, err, nil)
+			}
+			logs, total, err := NewLogService(db).List(&dto.LogListReq{Action: model.ActionAutoUpgrade})
+			requireServiceError(t, err, nil)
+			if total != tc.wantCount || !strings.Contains(logs[0].Details, tc.want) ||
+				!strings.Contains(logs[0].Details, "v3.2.5 → v3.2.6") || logs[0].ResourceID != node.ID {
+				t.Fatalf("automatic audit events = %+v", logs)
+			}
+			for _, entry := range logs {
+				if strings.Contains(entry.Details, "自动升级成功") {
+					t.Fatalf("unconfirmed or failed upgrade reported success: %+v", entry)
+				}
+			}
+		})
+	}
+}
+
+type automaticUpgradeAuditNode struct {
+	nodeUpgradeFixture
+	start      *nodegrpc.NodeUpgradeStatus
+	startError error
+}
+
+func (n *automaticUpgradeAuditNode) StartUpgrade(context.Context, *nodegrpc.NodeUpgradeRequest) (*nodegrpc.NodeUpgradeStatus, error) {
+	return n.start, n.startError
 }
 
 type nodeUpgradeFixture struct {

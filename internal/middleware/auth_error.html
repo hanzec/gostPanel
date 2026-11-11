@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{or .Title .Message}} · YAGP</title>
+  <title>{{or .Title .Message}} · yagp</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg">
   <style>
     :root {
@@ -11,7 +11,7 @@
       --background: #0b1019;
       --grid: #141c29;
       --panel: #121b29;
-      --inset: #0f1723;
+      --inset: #101824;
       --border: #29374a;
       --text: #edf4fa;
       --muted: #aebdd0;
@@ -20,15 +20,30 @@
       --warning: #f3cb79;
       --warning-bg: #33291c;
       --warning-border: #725c33;
-      --mono: 'Cascadia Code', Consolas, monospace;
-      font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Noto Sans CJK SC', system-ui, sans-serif;
+      --ops-font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Noto Sans CJK SC', sans-serif;
+      --ops-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+      --ops-text-xs: .75rem;
+      --ops-text-body: .875rem;
+      --ops-text-base: 1rem;
+      --ops-text-title: 1.125rem;
+      --ops-text-page: clamp(1.5rem, 2.4vw, 2rem);
+      --ops-weight-semibold: 600;
+      --ops-weight-bold: 700;
+      --ops-leading-body: 1.6;
+      --ops-leading-heading: 1.4;
+      --ops-radius: 12px;
+      --ops-radius-inset: 8px;
+      --ops-card-padding: 20px;
+      --ops-inset-padding: 16px;
+      font-family: var(--ops-font-sans);
+      font-size: 100%;
     }
 
     * { box-sizing: border-box; }
     body {
       display: grid;
       place-items: center;
-      min-height: 100vh;
+      min-height: 100dvh;
       margin: 0;
       padding: 24px 16px;
       color: var(--text);
@@ -36,8 +51,8 @@
       background-image: linear-gradient(var(--grid) 1px, transparent 1px),
                         linear-gradient(90deg, var(--grid) 1px, transparent 1px);
       background-size: 32px 32px;
-      font-size: 1rem;
-      line-height: 1.6;
+      font-size: var(--ops-text-body);
+      line-height: var(--ops-leading-body);
     }
 
     main { width: min(100%, 640px); min-width: 0; }
@@ -48,30 +63,29 @@
       align-items: center;
       gap: 8px;
     }
-    .brand { margin-bottom: 20px; font-weight: 700; letter-spacing: .08em; }
+    .brand { margin-bottom: 20px; font-size: var(--ops-text-title); font-weight: var(--ops-weight-bold); }
     .brand-caption, .status-code {
       padding: 2px 8px;
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: var(--ops-radius-inset);
       background: var(--inset);
       color: var(--muted);
-      font: .8125rem/1.6 var(--mono);
+      font: var(--ops-weight-semibold) var(--ops-text-xs)/var(--ops-leading-body) var(--ops-mono);
       letter-spacing: 0;
     }
     .card {
-      padding: clamp(20px, 6vw, 40px);
+      padding: var(--ops-card-padding);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: var(--ops-radius);
       background: var(--panel);
-      box-shadow: 0 16px 40px #05080e73;
       overflow-wrap: anywhere;
     }
     .status { justify-content: space-between; margin-bottom: 20px; }
-    .category { color: var(--muted); font-weight: 600; }
+    .category { color: var(--muted); font-weight: var(--ops-weight-semibold); }
     .category svg { color: var(--warning); }
     .status-code { border-color: var(--warning-border); background: var(--warning-bg); color: var(--warning); }
-    h1 { margin-bottom: 8px; font-size: clamp(1.375rem, 4.5vw, 1.75rem); line-height: 1.35; }
-    h2 { margin-bottom: 8px; color: var(--muted); font-size: 1rem; }
+    h1 { margin-bottom: 8px; font-size: var(--ops-text-page); font-weight: var(--ops-weight-bold); line-height: var(--ops-leading-heading); text-wrap: balance; }
+    h2 { margin-bottom: 8px; color: var(--text); font-size: var(--ops-text-base); font-weight: var(--ops-weight-semibold); line-height: var(--ops-leading-heading); }
     .description { color: var(--muted); }
     .next { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
     .diagnostic {
@@ -80,37 +94,40 @@
       justify-content: space-between;
       gap: 4px 16px;
       margin-top: 16px;
-      padding: 12px 14px;
+      padding: var(--ops-inset-padding);
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: var(--ops-radius-inset);
       background: var(--inset);
       color: var(--muted);
-      font-size: .875rem;
+      font-size: var(--ops-text-body);
     }
-    code { color: var(--warning); font-family: var(--mono); }
+    code { color: var(--warning); font-family: var(--ops-mono); font-variant-numeric: tabular-nums; }
     .action {
       display: grid;
       place-items: center;
       min-height: 48px;
       margin-top: 24px;
       padding: 8px 16px;
-      border-radius: 4px;
+      border-radius: var(--ops-radius-inset);
       background: var(--accent);
       color: var(--on-accent);
-      font-weight: 700;
+      font-weight: var(--ops-weight-semibold);
       text-align: center;
       text-decoration: none;
     }
     .action:hover { background: #83edc3; }
     .action:active { background: #45c995; }
     .action:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    @media (max-width: 700px) {
+      :root { --ops-card-padding: 16px; --ops-text-body: 1rem; }
+    }
   </style>
 </head>
 <body>
   <main>
     <header class="brand">
       <img src="/favicon.svg" width="24" height="24" alt="">
-      <span>YAGP</span>
+      <span>yagp</span>
       <span class="brand-caption">GOST CONTROL</span>
     </header>
     <section class="card" aria-labelledby="auth-title">
