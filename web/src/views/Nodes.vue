@@ -92,10 +92,6 @@
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">节点 IP</span>
                 <strong class="ops-mono">{{ node.address || '待获取地址' }}</strong>
-                <span v-for="ip in nodeIPs(node, 4)" :key="ip" class="inventory-secondary ops-muted">IPv4 · <span class="ops-mono">{{ ip }}</span></span>
-                <span v-for="ip in nodeIPs(node, 6)" :key="ip" class="inventory-secondary ops-muted">IPv6 · <span class="ops-mono">{{ ip }}</span></span>
-                <span v-if="!nodeIPs(node, 6).length" class="inventory-secondary ops-muted">IPv6 · 不支持</span>
-                <span class="inventory-secondary ops-muted">检查 · {{ node.last_check_at ? formatTime(node.last_check_at) : '待检查' }}</span>
               </td>
               <td class="inventory-status" role="cell">
                 <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">
@@ -176,10 +172,10 @@
       :show-close="!submitLoading"
       @closed="openCreatedNodeInstall"
     >
-      <NodeSettingsForm v-if="!isEdit" ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" @submit="handleSubmit" />
+      <NodeSettingsForm v-if="!isEdit" ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" :error="submitError" @submit="handleSubmit" />
       <el-tabs v-else v-model="settingsTab" class="node-settings-tabs">
         <el-tab-pane label="基本设置" name="basic">
-          <NodeSettingsForm ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" @submit="handleSubmit" />
+          <NodeSettingsForm ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" :error="submitError" @submit="handleSubmit" />
         </el-tab-pane>
         <el-tab-pane label="Gost 配置" name="gost" lazy>
           <div v-if="configLoading" class="inventory-state" role="status">
@@ -278,7 +274,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
-import { formatBytes, formatRegion, formatTime, nodeIPs, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
+import { formatBytes, formatRegion, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
@@ -334,11 +330,13 @@ const liveEditingNode = computed(() => {
 })
 const settingsTab = ref('basic')
 const submitLoading = ref(false)
+const submitError = ref('')
 const deleting = ref(false)
 const formRef = ref(null)
-const form = reactive({ name: '', remark: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const form = reactive({ name: '', remark: '', manualAddresses: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
+let originalManualAddresses = []
 const originalTrafficLimitGiB = computed(() => {
   const bytes = originalTrafficLimitBytes.value
   return bytes > 0 ? (bytes / GIB).toFixed(10).replace(/\.?0+$/, '') : ''
@@ -580,9 +578,12 @@ const openDialog = (row = null) => {
   configError.value = false
   originalTrafficLimitBytes.value = row?.traffic_limit_bytes ?? 0
   originalTrafficResetPeriod = row?.traffic_reset_period || 'none'
+  originalManualAddresses = row?.manual_addresses || []
+  submitError.value = ''
   Object.assign(form, {
     name: row?.name ?? '',
     remark: row?.remark || '',
+    manualAddresses: originalManualAddresses.join('\n'),
     trafficLimitGiB: originalTrafficLimitGiB.value,
     trafficResetPeriod: originalTrafficResetPeriod
   })
@@ -593,11 +594,17 @@ const openDialog = (row = null) => {
 const handleSubmit = async () => {
   if (!formRef.value || submitLoading.value) return
   submitLoading.value = true
+  submitError.value = ''
   try {
     const valid = await formRef.value.validate().catch(() => false)
     if (!valid) return
 
     const node = { name: form.name, remark: form.remark }
+    const manualAddresses = form.manualAddresses.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
+    if (manualAddresses.length !== originalManualAddresses.length ||
+      manualAddresses.some((value, index) => value !== originalManualAddresses[index])) {
+      node.manual_addresses = manualAddresses
+    }
     if (!isEdit.value || trafficLimitBytes.value !== originalTrafficLimitBytes.value) {
       node.traffic_limit_bytes = trafficLimitBytes.value
     }
@@ -615,6 +622,7 @@ const handleSubmit = async () => {
     dialogVisible.value = false
     refreshCurrentView()
   } catch (error) {
+    submitError.value = error.response?.data?.message || error.message || '无法保存节点，请重试。'
     console.error('保存节点失败:', error)
   } finally {
     submitLoading.value = false
@@ -722,7 +730,6 @@ onBeforeUnmount(() => {
 .inventory-filters { width: min(100%, 380px); gap: 8px; padding: 0; }
 .inventory-filters .inventory-field { flex-basis: 180px; }
 .inventory-filters .inventory-field + .inventory-field { flex-basis: 120px; }
-.inventory-page-size { width: 108px; }
 .inventory-scroll { container-type: inline-size; }
 .node-list-row { cursor: pointer; }
 .inventory-table .node-list-row:focus-within { background: var(--ops-raised); }
@@ -734,13 +741,13 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   min-height: 36px;
-  font-weight: 600;
+  font-weight: var(--ops-weight-semibold);
   text-decoration: none;
   white-space: nowrap;
 }
 .inventory-service-link:hover, .inventory-service-link:focus-visible { text-decoration: underline; }
 .node-detail-crumb, .node-detail-back { display: flex; align-items: center; gap: 8px; }
-.node-detail-crumb { color: var(--ops-muted); font-size: 13px; }
+.node-detail-crumb { color: var(--ops-muted); font-size: var(--ops-text-sm); }
 .node-detail-back { min-height: 44px; color: var(--ops-text); text-decoration: none; }
 .node-detail-back:hover { color: var(--ops-accent); text-decoration: underline; }
 @media (min-width: 701px) {
@@ -763,54 +770,54 @@ onBeforeUnmount(() => {
 }
 .node-settings-tabs :deep(.el-tabs__item) { min-height: 44px; }
 @media (max-width: 480px) {
-  .node-settings-tabs > :deep(.el-tabs__header .el-tabs__item) { padding-inline: 6px; font-size: 13px; }
+  .node-settings-tabs > :deep(.el-tabs__header .el-tabs__item) { padding-inline: 6px; font-size: var(--ops-text-sm); }
 }
 .node-settings-danger { display: grid; justify-items: start; gap: 12px; padding: 16px; }
-.node-settings-danger h3 { color: var(--ops-danger); font-size: 1rem; }
+.node-settings-danger h3 { color: var(--ops-danger); font-size: var(--ops-text-base); }
 .node-settings-danger .el-button { min-height: 44px; }
 .node-traffic-status { margin-top: 4px; }
 .config-empty { text-align: center; padding: 24px 12px; }
-.config-entry { border: 1px solid var(--ops-border); border-radius: 8px; margin-bottom: 8px; min-width: 0; }
+.config-entry { border: 1px solid var(--ops-border); border-radius: var(--ops-radius-inset); margin-bottom: 8px; min-width: 0; }
 .config-entry summary { padding: 10px 12px; cursor: pointer; overflow-wrap: anywhere; }
-.config-entry summary > span { margin-left: 8px; font-size: 12px; }
+.config-entry summary > span { margin-left: 8px; font-size: var(--ops-text-xs); }
 .config-code {
-  border-radius: 6px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   color: var(--ops-text);
   margin: 0;
   padding: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: 12px/1.6 var(--ops-mono);
+  font: var(--ops-text-sm)/var(--ops-leading-body) var(--ops-mono);
 }
 .config-entry .config-code { margin: 0 8px 8px; }
 .install-content { display: grid; gap: 16px; min-width: 0; }
 .install-field { display: grid; min-width: 0; gap: 8px; }
-.install-field h3, .install-field label { margin: 0; color: var(--ops-text); font-size: 14px; font-weight: 650; }
+.install-field h3, .install-field label { margin: 0; color: var(--ops-text); font-size: var(--ops-text-body); font-weight: var(--ops-weight-semibold); }
 .install-token, .install-command {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   color: var(--ops-text);
   overflow-wrap: anywhere;
-  font: 13px/1.6 var(--ops-mono);
+  font: var(--ops-text-sm)/var(--ops-leading-body) var(--ops-mono);
 }
 .install-token { color: var(--ops-accent); user-select: all; }
 .install-command { resize: vertical; white-space: pre-wrap; }
 .install-feedback { margin: 0; padding: 12px 0; }
 .install-error { color: var(--ops-danger); }
-.install-hint { margin: 0; font-size: 12px; }
+.install-hint { margin: 0; font-size: var(--ops-text-xs); }
 .install-replace-note {
   margin: 0;
   padding: 8px 12px;
   border-inline-start: 2px solid var(--ops-warning);
-  border-radius: 6px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   color: var(--ops-warning);
-  font-size: 13px;
+  font-size: var(--ops-text-sm);
 }
 </style>

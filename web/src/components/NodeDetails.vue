@@ -15,56 +15,57 @@
     </div>
   </header>
 
-  <div class="detail-overview">
-    <section class="ops-panel overview-section" aria-labelledby="node-network-title">
-      <h2 id="node-network-title"><el-icon aria-hidden="true"><Connection /></el-icon>网络与连接信息</h2>
-      <dl class="detail-endpoints">
-        <div v-for="item in endpoints" :key="item.label">
-          <dt>{{ item.label }}</dt>
-          <dd class="ops-mono">{{ item.value }}</dd>
-        </div>
-      </dl>
-      <dl class="detail-check">
-        <dt>最近检查</dt>
-        <dd><time v-if="node.last_check_at" :datetime="node.last_check_at" class="ops-mono">{{ formatTime(node.last_check_at) }}</time><span v-else>待检查</span></dd>
-      </dl>
-    </section>
-
-    <section class="ops-panel overview-section" aria-labelledby="node-traffic-title">
-      <div class="section-title">
-        <h2 id="node-traffic-title"><el-icon aria-hidden="true"><PieChart /></el-icon>流量统计与配额</h2>
-        <span v-if="hasQuota" class="detail-chip">{{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}</span>
-      </div>
-      <dl class="detail-transfer">
-        <div><dt>累计流量</dt><dd class="ops-mono">{{ formatBytes(node.total_bytes) }}</dd></div>
-        <div><dt>入站</dt><dd class="ops-mono">{{ formatBytes(node.input_bytes) }}</dd></div>
-        <div><dt>出站</dt><dd class="ops-mono">{{ formatBytes(node.output_bytes) }}</dd></div>
-      </dl>
-      <div class="detail-quota">
-        <div class="quota-line">
-          <span class="ops-muted">{{ hasQuota && quotaSynced ? '配额用量' : '流量上限' }}</span>
-          <span v-if="hasQuota" class="ops-mono">
-            <template v-if="quotaSynced">{{ formatBytes(node.traffic_quota_used_bytes) }} / </template>{{ formatBytes(node.traffic_limit_bytes) }}
-          </span>
-          <span v-else>未设上限</span>
-        </div>
-        <progress
-          v-if="hasQuota && quotaSynced"
-          aria-label="流量配额用量"
-          :class="{ 'quota-blocked': node.traffic_quota_state === 'blocked' }"
-          :max="node.traffic_limit_bytes"
-          :value="Math.min(node.traffic_quota_used_bytes || 0, node.traffic_limit_bytes)"
-        ></progress>
-        <span v-if="hasQuota" class="ops-status" :class="quotaState.tone">{{ quotaState.label }}</span>
-        <span v-else-if="node.traffic_quota_state" class="ops-muted">解除限制待同步</span>
+  <div class="detail-cards">
+    <section class="ops-panel ops-panel-body detail-overview" aria-labelledby="node-network-title">
+      <h2 class="ops-section-title" id="node-network-title"><el-icon aria-hidden="true"><Connection /></el-icon>IP 信息</h2>
+      <div class="detail-network">
+        <dl class="detail-endpoints">
+          <div v-for="item in endpoints" :key="item.label">
+            <dt>{{ item.label }}</dt>
+            <dd class="ops-mono">{{ item.value }}</dd>
+          </div>
+        </dl>
+        <dl class="detail-check">
+          <dt>最近检查</dt>
+          <dd><time v-if="node.last_check_at" :datetime="node.last_check_at" class="ops-mono">{{ formatTime(node.last_check_at) }}</time><span v-else>待检查</span></dd>
+        </dl>
       </div>
     </section>
+    <NodeGostService :key="node.id" :node="node" class="ops-panel ops-panel-body" />
   </div>
 
-  <NodeGostService :key="node.id" :node="node" />
+  <section class="ops-panel ops-panel-body detail-traffic" aria-labelledby="node-traffic-title">
+    <div class="section-title">
+      <h2 class="ops-section-title" id="node-traffic-title"><el-icon aria-hidden="true"><PieChart /></el-icon>流量统计与配额</h2>
+      <span v-if="hasQuota" class="detail-chip">{{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}</span>
+    </div>
+    <dl class="ops-inset detail-transfer">
+      <div><dt>累计流量</dt><dd class="ops-mono">{{ formatBytes(node.total_bytes) }}</dd></div>
+      <div><dt>入站</dt><dd class="ops-mono">{{ formatBytes(node.input_bytes) }}</dd></div>
+      <div><dt>出站</dt><dd class="ops-mono">{{ formatBytes(node.output_bytes) }}</dd></div>
+    </dl>
+    <div class="detail-quota">
+      <div class="quota-line">
+        <span class="ops-muted">{{ hasQuota && quotaSynced ? '配额用量' : '流量上限' }}</span>
+        <span v-if="hasQuota" class="ops-mono">
+          <template v-if="quotaSynced">{{ formatBytes(node.traffic_quota_used_bytes) }} / </template>{{ formatBytes(node.traffic_limit_bytes) }}
+        </span>
+        <span v-else>未设上限</span>
+      </div>
+      <progress
+        v-if="hasQuota && quotaSynced"
+        aria-label="流量配额用量"
+        :class="{ 'quota-blocked': node.traffic_quota_state === 'blocked' }"
+        :max="node.traffic_limit_bytes"
+        :value="Math.min(node.traffic_quota_used_bytes || 0, node.traffic_limit_bytes)"
+      ></progress>
+      <span v-if="hasQuota" class="ops-status" :class="quotaState.tone">{{ quotaState.label }}</span>
+      <span v-else-if="node.traffic_quota_state" class="ops-muted">解除限制待同步</span>
+    </div>
+  </section>
 
-  <section class="ops-panel detail-upgrade" aria-labelledby="node-upgrade-title">
-    <h2 id="node-upgrade-title"><el-icon aria-hidden="true"><Download /></el-icon>版本与升级</h2>
+  <section class="ops-panel ops-panel-body detail-upgrade" aria-labelledby="node-upgrade-title">
+    <h2 class="ops-section-title" id="node-upgrade-title"><el-icon aria-hidden="true"><Download /></el-icon>版本与升级</h2>
     <el-button @click="$emit('action', 'upgrade')">管理升级</el-button>
   </section>
 </template>
@@ -81,7 +82,8 @@ defineEmits(['action'])
 const endpoints = computed(() => [
   { label: '节点 IP', value: props.node.address || '待获取地址' },
   { label: 'IPv4', value: nodeIPs(props.node, 4).join(' · ') || '未上报' },
-  { label: 'IPv6', value: nodeIPs(props.node, 6).join(' · ') || '不支持' }
+  { label: 'IPv6', value: nodeIPs(props.node, 6).join(' · ') || '不支持' },
+  ...(props.node.manual_addresses?.length ? [{ label: '补充 IP', value: props.node.manual_addresses.join(' · ') }] : [])
 ])
 const hasQuota = computed(() => props.node.traffic_limit_bytes > 0)
 const quotaSynced = computed(() => ['active', 'blocked'].includes(props.node.traffic_quota_state))
@@ -104,32 +106,32 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .detail-identity { min-width: 0; }
 .detail-identity p { margin-top: 6px; overflow-wrap: anywhere; }
 .detail-title { gap: 8px 12px; }
-.detail-title h1 { font-size: clamp(25px, 3vw, 36px); line-height: 1.2; overflow-wrap: anywhere; }
+.detail-title h1 { font-size: var(--ops-text-page); font-weight: var(--ops-weight-bold); line-height: var(--ops-leading-heading); overflow-wrap: anywhere; }
 .detail-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 7px;
   border: 1px solid var(--ops-border-strong);
-  border-radius: 5px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   color: var(--ops-muted);
-  font-size: 12px;
+  font-size: var(--ops-text-xs);
 }
 .detail-buttons .el-button { min-height: 44px; margin: 0; }
-.detail-overview { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; }
-.overview-section { display: flex; flex-direction: column; gap: 12px; padding: 20px; }
+.detail-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--ops-section-gap); }
+.detail-overview { display: grid; min-width: 0; gap: var(--ops-section-gap); }
+.detail-network, .detail-traffic { display: grid; min-width: 0; gap: var(--ops-section-gap); }
 .section-title { justify-content: space-between; }
-.detail-overview h2, .detail-upgrade h2 {
+.detail-overview h2, .detail-traffic h2, .detail-upgrade h2 {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 1rem;
 }
-.detail-overview h2 .el-icon, .detail-upgrade h2 .el-icon { color: var(--ops-accent); }
-.detail-overview dl { margin: 0; min-width: 0; }
-.detail-overview dt { color: var(--ops-muted); font-size: 13px; }
-.detail-overview dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.detail-overview h2 .el-icon, .detail-traffic h2 .el-icon, .detail-upgrade h2 .el-icon { color: var(--ops-accent); }
+.detail-network dl, .detail-traffic dl { margin: 0; min-width: 0; }
+.detail-network dt, .detail-traffic dt { color: var(--ops-muted); font-size: var(--ops-text-sm); }
+.detail-network dd, .detail-traffic dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .detail-endpoints { display: grid; gap: 6px; }
 .detail-endpoints > div, .detail-check, .quota-line {
   display: flex;
@@ -138,25 +140,19 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
   gap: 8px;
 }
 .detail-endpoints > div {
-  border: 1px solid var(--ops-border);
-  border-radius: 7px;
-  background: var(--ops-inset);
-  padding: 7px 10px;
+  padding-block: 8px;
+  border-bottom: 1px solid var(--ops-border);
 }
 .detail-endpoints dt, .detail-check dt { flex: none; }
 .detail-endpoints dd, .detail-check dd { text-align: end; }
-.detail-check { padding: 4px 10px 0; }
+.detail-check { padding-top: 4px; }
 .detail-transfer {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--ops-border);
-  border-radius: 8px;
-  background: var(--ops-inset);
 }
-.detail-transfer dd { margin-top: 4px; font-weight: 650; }
-.detail-quota { display: grid; justify-items: start; gap: 7px; font-size: 13px; }
+.detail-transfer dd { margin-top: 4px; font-weight: var(--ops-weight-semibold); }
+.detail-quota { display: grid; justify-items: start; gap: 7px; font-size: var(--ops-text-sm); }
 .quota-line { flex-wrap: wrap; width: 100%; }
 .detail-quota progress {
   display: block;
@@ -179,12 +175,10 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 12px 20px;
 }
 
-@media (max-width: 760px) {
-  .detail-overview { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .overview-section, .detail-upgrade { padding: 14px; }
+@media (max-width: 1100px) {
+  .detail-cards { grid-template-columns: minmax(0, 1fr); }
   .detail-upgrade .el-button { min-height: 44px; }
 }
 </style>

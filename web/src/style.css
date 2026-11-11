@@ -1,3 +1,27 @@
+:root {
+  --ops-font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Noto Sans CJK SC', sans-serif;
+  --ops-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  --ops-text-xs: .75rem;
+  --ops-text-sm: .8125rem;
+  --ops-text-body: .875rem;
+  --ops-text-base: 1rem;
+  --ops-text-title: 1.125rem;
+  --ops-text-page: clamp(1.5rem, 2.4vw, 2rem);
+  --ops-text-metric: clamp(1.5rem, 2.4vw, 2rem);
+  --ops-weight-normal: 400;
+  --ops-weight-medium: 500;
+  --ops-weight-semibold: 600;
+  --ops-weight-bold: 700;
+  --ops-leading-body: 1.6;
+  --ops-leading-heading: 1.4;
+  --ops-radius: 12px;
+  --ops-radius-inset: 8px;
+  --ops-card-padding: 20px;
+  --ops-inset-padding: 16px;
+  --ops-section-gap: 16px;
+  font-size: 100%;
+}
+
 html.dark {
   color-scheme: dark;
   --ops-bg: #0b1019;
@@ -18,8 +42,14 @@ html.dark {
   --ops-success: #69e6b4;
   --ops-warning: #f3cb79;
   --ops-danger: #ffa4a9;
-  --ops-radius: 12px;
-  --ops-mono: 'Cascadia Code', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+
+  --el-font-family: var(--ops-font-sans);
+  --el-font-size-extra-large: var(--ops-text-page);
+  --el-font-size-large: var(--ops-text-title);
+  --el-font-size-medium: var(--ops-text-base);
+  --el-font-size-base: var(--ops-text-body);
+  --el-font-size-small: var(--ops-text-sm);
+  --el-font-size-extra-small: var(--ops-text-xs);
 
   --el-color-primary: var(--ops-accent);
   --el-color-primary-light-3: #83edc3;
@@ -53,22 +83,29 @@ html.dark {
   --el-disabled-bg-color: var(--ops-inset);
   --el-mask-color: #04070bbf;
   --el-mask-color-extra-light: #04070b7a;
-  --el-border-radius-base: 8px;
+  --el-border-radius-base: var(--ops-radius-inset);
 
   min-width: 0;
   scroll-padding-top: 76px;
   background: var(--ops-bg);
   color: var(--ops-text);
-  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Noto Sans CJK SC', sans-serif;
-  font-size: 15px;
-  line-height: 1.55;
+  font-family: var(--ops-font-sans);
+  font-weight: var(--ops-weight-normal);
+  line-height: var(--ops-leading-body);
   scrollbar-color: var(--ops-border-strong) var(--ops-bg);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
 body, h1, h2, h3, p { margin: 0; }
 body, #app { min-height: 100dvh; }
+body { font-size: var(--ops-text-body); }
+h1, h2, h3, h4, h5, h6 { color: var(--ops-text); font-weight: var(--ops-weight-semibold); line-height: var(--ops-leading-heading); overflow-wrap: anywhere; }
+h1 { font-size: var(--ops-text-page); font-weight: var(--ops-weight-bold); }
+h2 { font-size: var(--ops-text-title); }
+h3, h4, h5, h6 { font-size: var(--ops-text-base); }
+strong, b { font-weight: var(--ops-weight-semibold); }
 button, input, select, textarea { font: inherit; }
+pre, code, kbd, samp { font-family: var(--ops-mono); }
 button:not(:disabled), a[href] { cursor: pointer; }
 a { color: var(--ops-accent); text-underline-offset: 3px; }
 ::selection { background: var(--ops-accent-bg); color: var(--ops-text); }
@@ -77,6 +114,10 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
 .ops-page { display: grid; min-width: 0; align-content: start; gap: 20px; }
 .ops-page > * { min-width: 0; }
 .ops-panel { min-width: 0; border: 1px solid var(--ops-border); border-radius: var(--ops-radius); background: var(--ops-panel); }
+.ops-panel-body { padding: var(--ops-card-padding); }
+.ops-inset { min-width: 0; padding: var(--ops-inset-padding); border: 1px solid var(--ops-border); border-radius: var(--ops-radius-inset); background: var(--ops-inset); }
+.ops-section-title { font-size: var(--ops-text-title); font-weight: var(--ops-weight-semibold); line-height: var(--ops-leading-heading); }
+.ops-subsection-title { font-size: var(--ops-text-base); font-weight: var(--ops-weight-semibold); line-height: var(--ops-leading-heading); }
 .ops-mono { font-family: var(--ops-mono); font-variant-numeric: tabular-nums; }
 .ops-muted { color: var(--ops-muted); }
 
@@ -115,8 +156,8 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
   border-radius: 999px;
   background: color-mix(in srgb, var(--status-ink) 8%, transparent);
   color: var(--status-ink);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semibold);
   white-space: nowrap;
 }
 
@@ -126,7 +167,10 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
 .ops-status.is-danger { --status-ink: var(--ops-danger); }
 .ops-status.is-muted { --status-ink: var(--ops-faint); }
 
-.el-button { font-weight: 600; }
+.el-button { font-weight: var(--ops-weight-semibold); }
+.el-dialog, .el-message-box, .el-drawer, .el-popper { font-family: var(--ops-font-sans); line-height: var(--ops-leading-body); }
+.el-form-item__label, .el-form-item__content, .el-alert__description,
+.el-input, .el-select__wrapper, .el-textarea__inner { font-size: var(--ops-text-body); }
 .el-button--primary:not(.is-text, .is-link, .is-plain) {
   --el-button-text-color: var(--ops-on-accent);
   --el-button-hover-text-color: var(--ops-on-accent);
@@ -173,8 +217,8 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
 :is(.panel-dialog .el-dialog__title, .panel-confirm .el-message-box__title, .panel-drawer .el-drawer__title) {
   margin: 0;
   color: var(--ops-text);
-  font-size: 1.125rem;
-  font-weight: 700;
+  font-size: var(--ops-text-title);
+  font-weight: var(--ops-weight-bold);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -185,10 +229,10 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
   right: 8px;
   width: 44px;
   height: 44px;
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
 }
 .panel-drawer .el-drawer__header { padding-inline-end: 12px; }
-.panel-drawer .el-drawer__close-btn { width: 44px; height: 44px; border-radius: 8px; }
+.panel-drawer .el-drawer__close-btn { width: 44px; height: 44px; border-radius: var(--ops-radius-inset); }
 
 :is(.panel-dialog .el-dialog__headerbtn, .panel-confirm .el-message-box__headerbtn, .panel-drawer .el-drawer__close-btn):focus-visible {
   outline: 2px solid var(--ops-accent);
@@ -222,12 +266,15 @@ a { color: var(--ops-accent); text-underline-offset: 3px; }
 }
 .console-drawer .el-drawer__body { padding: 0; }
 
+@media (max-width: 700px) {
+  :root { --ops-card-padding: 16px; --ops-text-body: 1rem; }
+}
+
 @media (max-width: 640px) {
-  html.dark { font-size: 16px; }
   .ops-page { gap: 14px; }
   .ops-toolbar, .ops-pagination { padding-inline: 12px; }
   .ops-pagination { justify-content: flex-start; }
-  .el-input__inner, .el-textarea__inner { font-size: 16px; }
+  .el-input__inner, .el-textarea__inner { font-size: var(--ops-text-base); }
 }
 
 @media (max-width: 480px) {

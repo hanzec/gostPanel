@@ -54,6 +54,7 @@ type nodeUpgradeRelease struct {
 
 type NodeUpgradeService struct {
 	db           *gorm.DB
+	logService   *LogService
 	releases     *upgrade.Client
 	panelVersion string
 	cacheMu      sync.Mutex
@@ -62,7 +63,7 @@ type NodeUpgradeService struct {
 
 func NewNodeUpgradeService(db *gorm.DB) *NodeUpgradeService {
 	return &NodeUpgradeService{
-		db: db, releases: upgrade.NewClient(), panelVersion: buildinfo.Version, cache: make(map[string]nodeUpgradeRelease),
+		db: db, logService: NewLogService(db), releases: upgrade.NewClient(), panelVersion: buildinfo.Version, cache: make(map[string]nodeUpgradeRelease),
 	}
 }
 
@@ -220,21 +221,37 @@ func (s *NodeUpgradeService) upgradeAutomatically(ctx context.Context, id uint, 
 	if !nodeUpgradeAvailable(state, component, target) {
 		return nil
 	}
+	current := nodeComponentVersion(state, component)
 	state, err = client.StartUpgrade(ctx, component, target)
 	if err != nil {
+		s.recordAutomaticUpgrade(node, component, current, target, "启动失败："+err.Error())
 		logger.Warnf("启动节点 %d 的 %s 自动升级失败: %v", id, component, err)
 		return nil
 	}
+	s.recordAutomaticUpgrade(node, component, current, target, "已启动")
 	if nodeUpgradeBusy(state) {
 		state, err = waitForNodeUpgrade(ctx, client, state.GetComponent(), state.GetTargetVersion())
 		if err != nil {
+			s.recordAutomaticUpgrade(node, component, current, target, "结果待确认："+err.Error())
 			return err
 		}
 	}
-	if state.GetState() == "failed" {
+	if state.GetState() == "succeeded" {
+		s.recordAutomaticUpgrade(node, component, current, target, "成功")
+	} else if state.GetState() == "failed" {
+		s.recordAutomaticUpgrade(node, component, current, target, "失败："+state.GetError())
 		logger.Warnf("节点 %d 的 %s 自动升级失败: %s", id, component, state.GetError())
 	}
 	return nil
+}
+
+func (s *NodeUpgradeService) recordAutomaticUpgrade(node *model.GostNode, component, current, target, result string) {
+	name := "Gost"
+	if component == "daemon" {
+		name = "yagp-daemon"
+	}
+	s.logService.Record("系统", model.ActionAutoUpgrade, model.ResourceTypeNode, node.ID,
+		fmt.Sprintf("节点 %s (#%d)：%s 自动升级%s（%s → %s）", node.Name, node.ID, name, result, current, target), "", "")
 }
 
 func (s *NodeUpgradeService) findNode(ctx context.Context, id uint) (*model.GostNode, error) {

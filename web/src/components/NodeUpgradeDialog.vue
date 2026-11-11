@@ -22,7 +22,7 @@
       <div class="upgrade-components" :aria-busy="busy">
         <section v-for="item in components" :key="item.key" class="upgrade-component" :aria-labelledby="'node-upgrade-' + item.key">
           <header class="upgrade-component-header">
-            <h3 :id="'node-upgrade-' + item.key">{{ item.name }}</h3>
+            <h3 class="ops-subsection-title" :id="'node-upgrade-' + item.key">{{ item.name }}</h3>
             <span class="ops-status" :class="status.available && item.hasUpdate ? 'is-success' : 'is-muted'">
               {{ availabilityLabel(item) }}
             </span>
@@ -229,15 +229,15 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.upgrade-availability, .upgrade-job { padding: 10px 12px; border: 1px solid var(--ops-border); border-radius: 8px; background: var(--ops-inset); }
+.upgrade-availability, .upgrade-job { padding: var(--ops-inset-padding); border: 1px solid var(--ops-border); border-radius: var(--ops-radius-inset); background: var(--ops-inset); }
 .upgrade-availability { margin: 0 0 12px; color: var(--ops-warning); overflow-wrap: anywhere; }
-.upgrade-components { display: grid; gap: 12px; }
-.upgrade-component { min-width: 0; padding: 12px; border: 1px solid var(--ops-border); border-radius: 8px; }
+.upgrade-components { display: grid; gap: var(--ops-section-gap); }
+.upgrade-component { min-width: 0; padding: var(--ops-inset-padding); border: 1px solid var(--ops-border); border-radius: var(--ops-radius-inset); }
 .upgrade-component-header, .upgrade-controls, .upgrade-policy, .upgrade-job-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .upgrade-component-header, .upgrade-controls { justify-content: space-between; }
-.upgrade-component-header h3 { margin: 0; font-size: 15px; }
+.upgrade-component-header h3 { margin: 0; font-size: var(--ops-text-base); }
 .upgrade-versions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
-.upgrade-versions dt { color: var(--ops-muted); font-size: 12px; }
+.upgrade-versions dt { color: var(--ops-muted); font-size: var(--ops-text-sm); }
 .upgrade-versions dd { margin: 3px 0 0; overflow-wrap: anywhere; }
 .upgrade-policy label { cursor: pointer; }
 .upgrade-job { margin-top: 12px; }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"yagp/internal/dto"
 	"yagp/internal/model"
 	"yagp/pkg/gost"
 )
@@ -102,6 +103,21 @@ func TestRuleReconciliationRepairsStatusAndExitAllowlist(t *testing.T) {
 	if _, pending := syncService.unsavedTunnelConfig.Load(node.ID); pending {
 		t.Fatal("allowlist save retry did not succeed")
 	}
+	refreshConfig()
+	_, err := NewNodeService(db, "").Update(entry.ID, &dto.UpdateNodeReq{
+		Name: entry.Name, ManualAddresses: dto.NodeManualAddresses{"203.0.113.8", entry.IPv4},
+	}, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, nil)
+	syncService.syncNodeRules(node, nil)
+	assertAdmission(firstName, true, []string{entry.IPv4, "203.0.113.8"})
+	refreshConfig()
+	_, err = NewNodeService(db, "").Update(entry.ID, &dto.UpdateNodeReq{
+		Name: entry.Name, ManualAddresses: dto.NodeManualAddresses{},
+	}, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, nil)
+	syncService.syncNodeRules(node, nil)
+	assertAdmission(firstName, true, []string{entry.IPv4})
+	refreshConfig()
 	requireServiceError(t, db.Model(&entry).Update("ipv4", "192.0.2.9").Error, nil)
 	syncService.syncNodeRules(node, nil)
 	assertAdmission(firstName, true, []string{"192.0.2.9"})

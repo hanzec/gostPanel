@@ -12,7 +12,7 @@ vi.mock('@/api/rule', () => ({
   startRule: vi.fn(), stopRule: vi.fn(), updateRule: vi.fn()
 }))
 
-const entryNode = { id: 4, name: '入口 A', ipv4: '192.0.2.10', ipv6: '2001:db8::8' }
+const entryNode = { id: 4, name: '入口 A', ipv4: '192.0.2.10', ipv6: '2001:db8::8', manual_addresses: ['198.51.100.10'] }
 const direct = {
   id: 1, name: 'HTTPS', status: 'running', node: entryNode, node_id: entryNode.id,
   protocol: 'tcp', listen_ip: '192.0.2.10', listen_port: 443, targets: ['primary.test:443', 'fallback.test:443'],
@@ -142,6 +142,7 @@ describe('forwarding rule editor and actions', () => {
       '所有接口', 'IPv4 回环 · 127.0.0.1', 'IPv6 回环 · ::1',
       '入口探测地址 · 192.0.2.10', '入口探测地址 · 2001:db8::8'
     ])
+    expect(listenIP.findAllComponents(ElOption).map(option => option.props('value'))).not.toContain(entryNode.manual_addresses[0])
     await choose(listenIP, entryNode.ipv4)
     await field(dialog, 'listen_port').get('input').setValue('5353')
     expect(dialog.get('#rule-listen-endpoint').text()).toContain('192.0.2.10:5353')
