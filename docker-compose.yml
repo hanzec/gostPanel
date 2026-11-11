@@ -1,6 +1,6 @@
 services:
   yagp:
-    image: &yagp-image ghcr.io/hanzec/yagp:latest
+    image: &yagp-image release.hanzec-overseas.cn/images/yagp:latest
     container_name: yagp
     depends_on:
       yagp-config-init:
