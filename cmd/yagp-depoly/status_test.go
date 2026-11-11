@@ -25,11 +25,9 @@ import (
 func TestSignedUpdateStatusSurvivesReceiverRestart(t *testing.T) {
 	secret := []byte(strings.Repeat("a", 64))
 	token := []byte(strings.Repeat("b", 64))
-	toolSecret := []byte(strings.Repeat("c", 64))
-	toolToken := []byte(strings.Repeat("d", 64))
 	jobs := make(chan deployjob.Request, 1)
 	handler := testHandler(t, secret, token, jobs)
-	handler.upgrade = testHook(t, upgradeProtocol, toolSecret, toolToken)
+	handler.upgrade = testHook(t, upgradeProtocol)
 	handler.directory = t.TempDir()
 
 	digest := "sha256:" + strings.Repeat("e", 64)
@@ -117,7 +115,7 @@ func TestSignedUpdateStatusSurvivesReceiverRestart(t *testing.T) {
 		t.Fatalf("unknown update job returned %d", resp.Code)
 	}
 	wrongMode := deployjob.Request{ID: job.ID, Mode: "depoly"}
-	if resp := read(signedStatusURL(toolSecret, wrongMode, time.Now().Add(time.Minute)), proxy); resp.Code != http.StatusNotFound {
+	if resp := read(signedStatusURL(secret, wrongMode, time.Now().Add(time.Minute)), proxy); resp.Code != http.StatusNotFound {
 		t.Fatalf("update job with mismatched mode returned %d", resp.Code)
 	}
 	writeWebhookFixture(t, filepath.Join(jobDir, "status.json"), `{"mode":"compose",`)

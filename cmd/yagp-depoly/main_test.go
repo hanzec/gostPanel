@@ -42,10 +42,9 @@ func TestServeRejectsInvalidConfiguration(t *testing.T) {
 		{"missing token", webhookArgs("127.0.0.1:0", secret, token+".missing", state), "webhook token"},
 		{"identical credentials", webhookArgs("127.0.0.1:0", secret, secret, state), "must differ"},
 		{"corrupt state", webhookArgs("127.0.0.1:0", secret, token, state), "load webhook acceptance state"},
-		{"incomplete upgrade flags", append(validArgs, "-upgrade-token-file", token), "set all of -upgrade-secret-file"},
-		{"shared acceptance state", append(validArgs, upgradeWebhookArgs(secret, token, state+".new")...), "state files must differ"},
-		{"shared credentials", append(validArgs, upgradeWebhookArgs(secret, token, state+".upgrade")...), "credentials must differ"},
-		{"missing upgrade token", append(validArgs, upgradeWebhookArgs(secret, token+".missing", state+".upgrade")...), "tool upgrade webhook: webhook token"},
+		{"relative upgrade state", append(validArgs, "-upgrade-state-file", "upgrade.state"), "must be an absolute path"},
+		{"shared acceptance state", append(validArgs, "-upgrade-state-file", state+".new"), "state files must differ"},
+		{"corrupt upgrade state", append(validArgs, "-upgrade-state-file", state), "tool upgrade webhook: load webhook acceptance state"},
 		{"invalid listen", webhookArgs("127.0.0.1:-1", secret, token, state+".new"), "listen for deployment webhooks"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -61,19 +60,25 @@ func TestServeWebhookOverTCP(t *testing.T) {
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "secret")
 	token := filepath.Join(dir, "token")
-	upgradeSecret := filepath.Join(dir, "upgrade.secret")
-	upgradeToken := filepath.Join(dir, "upgrade.token")
-	writeWebhookFixture(t, secret, strings.Repeat("a", 64))
-	writeWebhookFixture(t, token, strings.Repeat("b", 64))
-	writeWebhookFixture(t, upgradeSecret, strings.Repeat("c", 64))
-	writeWebhookFixture(t, upgradeToken, strings.Repeat("d", 64))
+	sharedSecret, sharedToken := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	writeWebhookFixture(t, secret, sharedSecret)
+	writeWebhookFixture(t, token, sharedToken)
 	notify, socket := listenNotifySocket(t, false)
 	t.Setenv("NOTIFY_SOCKET", socket)
 	args := append(webhookArgs("127.0.0.1:0", secret, token, filepath.Join(dir, "state")),
-		upgradeWebhookArgs(upgradeSecret, upgradeToken, filepath.Join(dir, "upgrade.state"))...)
+		"-upgrade-state-file", filepath.Join(dir, "upgrade.state"),
+		"-upgrade-secret-file", filepath.Join(dir, "old-secret"),
+		"-upgrade-token-file", filepath.Join(dir, "old-token"))
 	err := serveWebhook(args,
 		func(server *http.Server, listener net.Listener) error {
 			assertReadyMessage(t, notify)
+			queue := make(chan deployjob.Request, 2)
+			handler := server.Handler.(deployHandler)
+			handler.submit = func(job deployjob.Request) error {
+				queue <- job
+				return nil
+			}
+			server.Handler = handler
 			done := make(chan error, 1)
 			go func() { done <- server.Serve(listener) }()
 			defer func() {
@@ -84,20 +89,36 @@ func TestServeWebhookOverTCP(t *testing.T) {
 			}()
 			client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{}}
 			defer client.CloseIdleConnections()
-			for _, path := range []string{"/api/deploy/panel", "/api/deploy/deploy-tool"} {
-				request, err := http.NewRequest(http.MethodPost, "http://"+listener.Addr().String()+path, nil)
+			timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+			digest := "sha256:" + strings.Repeat("e", 64)
+			for _, tc := range []struct {
+				path, body, token string
+				status            int
+			}{
+				{deployPath, digest, "", http.StatusUnauthorized},
+				{upgradePath, "upgrade", "", http.StatusUnauthorized},
+				{deployPath, digest, sharedToken, http.StatusAccepted},
+				{upgradePath, "upgrade", sharedToken, http.StatusAccepted},
+			} {
+				request, err := http.NewRequest(http.MethodPost, "http://"+listener.Addr().String()+tc.path, strings.NewReader(tc.body))
 				if err != nil {
 					t.Fatal(err)
 				}
 				request.Header.Set("X-Real-IP", "192.0.2.10")
+				request.Header.Set("Authorization", "Bearer "+tc.token)
+				request.Header.Set("X-Yagp-Timestamp", timestamp)
+				request.Header.Set("X-Yagp-Signature", signRequest([]byte(sharedSecret), timestamp, tc.body))
 				response, err := client.Do(request)
 				if err != nil {
 					t.Fatal(err)
 				}
 				response.Body.Close()
-				if response.StatusCode != http.StatusUnauthorized {
-					t.Fatalf("real HTTP request to %s without credentials = %d", path, response.StatusCode)
+				if response.StatusCode != tc.status {
+					t.Fatalf("real HTTP request to %s returned %d, want %d", tc.path, response.StatusCode, tc.status)
 				}
+			}
+			if len(queue) != 2 {
+				t.Fatalf("shared credentials submitted %d jobs, want 2", len(queue))
 			}
 			return nil
 		})
@@ -164,10 +185,6 @@ func assertReadyMessage(t *testing.T, conn *net.UnixConn) {
 
 func webhookArgs(listen, secret, token, state string) []string {
 	return []string{"-listen", listen, "-secret-file", secret, "-token-file", token, "-trusted-proxy", "127.0.0.1", "-state-file", state}
-}
-
-func upgradeWebhookArgs(secret, token, state string) []string {
-	return []string{"-upgrade-secret-file", secret, "-upgrade-token-file", token, "-upgrade-state-file", state}
 }
 
 func writeWebhookFixture(t *testing.T, path, value string) {
@@ -288,13 +305,13 @@ func TestUpgradeHook(t *testing.T) {
 	token := []byte(strings.Repeat("c", 64))
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	queue := make(chan deployjob.Request, 1)
-	handler := testHandler(t, []byte(strings.Repeat("d", 64)), []byte(strings.Repeat("e", 64)), queue)
-	handler.upgrade = testHook(t, upgradeProtocol, secret, token)
+	handler := testHandler(t, secret, token, queue)
+	handler.upgrade = testHook(t, upgradeProtocol)
 	for _, tc := range []struct {
 		path, body string
 		status     int
 	}{
-		{"/api/deploy/panel", "upgrade", http.StatusUnauthorized},
+		{"/api/deploy/panel", "upgrade", http.StatusBadRequest},
 		{"/api/depoly/upgrade", "upgrade", http.StatusNotFound},
 		{"/api/deploy/deploy-tool/", "upgrade", http.StatusNotFound},
 		{upgradePath, "0.1.2-abcdef0", http.StatusBadRequest},
@@ -322,12 +339,12 @@ func TestUpgradeHook(t *testing.T) {
 }
 
 func TestWebhookRoutesShareFailuresAndKeepIndependentState(t *testing.T) {
-	panelSecret, panelToken := []byte(strings.Repeat("a", 64)), []byte(strings.Repeat("b", 64))
-	toolSecret, toolToken := []byte(strings.Repeat("c", 64)), []byte(strings.Repeat("d", 64))
+	secret, token := []byte(strings.Repeat("a", 64)), []byte(strings.Repeat("b", 64))
+	invalidSecret, invalidToken := []byte(strings.Repeat("c", 64)), []byte(strings.Repeat("d", 64))
 	digest := "sha256:" + strings.Repeat("e", 64)
 	queue := make(chan deployjob.Request, 2)
-	handler := testHandler(t, panelSecret, panelToken, queue)
-	handler.upgrade = testHook(t, upgradeProtocol, toolSecret, toolToken)
+	handler := testHandler(t, secret, token, queue)
+	handler.upgrade = testHook(t, upgradeProtocol)
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	request := func(method, path, ip, body string, secret, token []byte) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -346,16 +363,16 @@ func TestWebhookRoutesShareFailuresAndKeepIndependentState(t *testing.T) {
 			t.Fatalf("route miss %v returned %d", miss, resp.Code)
 		}
 	}
-	if resp := request("POST", deployPath, badIP, digest, toolSecret, toolToken); resp.Code != http.StatusUnauthorized {
-		t.Fatalf("tool credentials on panel route returned %d", resp.Code)
+	if resp := request("POST", deployPath, badIP, digest, invalidSecret, invalidToken); resp.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid credentials on panel route returned %d", resp.Code)
 	}
-	if resp := request("POST", upgradePath, badIP, "upgrade", panelSecret, panelToken); resp.Code != http.StatusTooManyRequests {
+	if resp := request("POST", upgradePath, badIP, "upgrade", invalidSecret, invalidToken); resp.Code != http.StatusTooManyRequests {
 		t.Fatalf("cross-endpoint fifth failure returned %d", resp.Code)
 	}
-	if resp := request("POST", deployPath, badIP, digest, panelSecret, panelToken); resp.Code != http.StatusTooManyRequests {
+	if resp := request("POST", deployPath, badIP, digest, secret, token); resp.Code != http.StatusTooManyRequests {
 		t.Fatalf("panel request after shared ban returned %d", resp.Code)
 	}
-	if resp := request("POST", upgradePath, badIP, "upgrade", toolSecret, toolToken); resp.Code != http.StatusTooManyRequests {
+	if resp := request("POST", upgradePath, badIP, "upgrade", secret, token); resp.Code != http.StatusTooManyRequests {
 		t.Fatalf("tool request after shared ban returned %d", resp.Code)
 	}
 	if resp := request("GET", upgradePath, badIP, "", nil, nil); resp.Code != http.StatusNotFound {
@@ -363,21 +380,21 @@ func TestWebhookRoutesShareFailuresAndKeepIndependentState(t *testing.T) {
 	}
 	const busyIP = "192.0.2.22"
 	for i := range requestLimit {
-		path, secret, token := deployPath, panelSecret, panelToken
+		path := deployPath
 		if i%2 == 0 {
-			path, secret, token = upgradePath, toolSecret, toolToken
+			path = upgradePath
 		}
 		if resp := request("POST", path, busyIP, "invalid body", secret, token); resp.Code != http.StatusBadRequest {
 			t.Fatalf("invalid body on %s returned %d", path, resp.Code)
 		}
 	}
-	if resp := request("POST", upgradePath, busyIP, "upgrade", toolSecret, toolToken); resp.Code != http.StatusTooManyRequests {
+	if resp := request("POST", upgradePath, busyIP, "upgrade", secret, token); resp.Code != http.StatusTooManyRequests {
 		t.Fatalf("requests to both routes did not share the per-IP quota: status=%d", resp.Code)
 	}
-	if resp := request("POST", deployPath, goodIP, digest, panelSecret, panelToken); resp.Code != http.StatusAccepted {
+	if resp := request("POST", deployPath, goodIP, digest, secret, token); resp.Code != http.StatusAccepted {
 		t.Fatalf("panel admission returned %d", resp.Code)
 	}
-	if resp := request("POST", upgradePath, goodIP, "upgrade", toolSecret, toolToken); resp.Code != http.StatusAccepted {
+	if resp := request("POST", upgradePath, goodIP, "upgrade", secret, token); resp.Code != http.StatusAccepted {
 		t.Fatalf("panel admission affected tool replay/cooldown, status=%d", resp.Code)
 	}
 	if len(queue) != 2 {
@@ -613,7 +630,8 @@ func TestReadCredential(t *testing.T) {
 func testHandler(t *testing.T, secret, token []byte, jobs chan<- deployjob.Request) deployHandler {
 	t.Helper()
 	return deployHandler{
-		panel: testHook(t, panelProtocol, secret, token), trustedProxy: netip.MustParseAddr("172.18.0.2"),
+		panel: testHook(t, panelProtocol), trustedProxy: netip.MustParseAddr("172.18.0.2"),
+		secret: secret, token: token,
 		limits: &requestLimits{clients: make(map[netip.Addr]*clientLimits)},
 		submit: func(job deployjob.Request) error {
 			select {
@@ -627,13 +645,13 @@ func testHandler(t *testing.T, secret, token []byte, jobs chan<- deployjob.Reque
 	}
 }
 
-func testHook(t *testing.T, protocol hookProtocol, secret, token []byte) *deployHook {
+func testHook(t *testing.T, protocol hookProtocol) *deployHook {
 	t.Helper()
 	state, err := loadHookState(filepath.Join(t.TempDir(), "accepted"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &deployHook{protocol: protocol, secret: secret, token: token, state: state}
+	return &deployHook{protocol: protocol, state: state}
 }
 
 func signRequest(secret []byte, timestamp, digest string) string {

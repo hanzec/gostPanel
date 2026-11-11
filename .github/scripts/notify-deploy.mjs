@@ -19,13 +19,14 @@ async function main() {
   if (mode !== 'compose' && !upgrade) throw new Error('Invalid webhook mode.')
   if (!isCurrentPush()) return
   if (upgrade && push && !(configuredURL && secret && token)) {
-    console.log('Skipping automatic tool upgrade until the production-tool URL and credentials are configured.')
+    console.log('Skipping automatic tool upgrade until the shared production webhook URL and credentials are configured.')
     return
   }
 
   const origin = /^https:\/\/[A-Za-z0-9.-]+/.exec(configuredURL)?.[0]
-  if (!origin || ![origin + '/api/deploy', origin + '/api/deploy/', origin + path].includes(configuredURL)) {
-    throw new Error(`Webhook URL must use HTTPS and end in /api/deploy or ${path}.`)
+  const base = origin + '/api/deploy'
+  if (!origin || ![base, base + '/', base + '/panel', base + '/deploy-tool'].includes(configuredURL)) {
+    throw new Error('Webhook URL must use HTTPS and end in /api/deploy, /api/deploy/panel, or /api/deploy/deploy-tool.')
   }
   if (!/^[0-9a-f]{64}$/.test(secret) || !/^[0-9a-f]{64}$/.test(token)) {
     throw new Error('Webhook signing secret and token must be 64 lowercase hexadecimal characters.')

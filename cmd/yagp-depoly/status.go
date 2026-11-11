@@ -150,7 +150,7 @@ func (h deployHandler) statusLinkMode(id, rawQuery string, now time.Time) (strin
 	case "depoly":
 		hook = h.upgrade
 	}
-	if hook == nil || !hmac.Equal([]byte(query.Get("signature")), []byte(statusSignature(hook.secret, id, mode, expires))) {
+	if hook == nil || !hmac.Equal([]byte(query.Get("signature")), []byte(statusSignature(h.secret, id, mode, expires))) {
 		return "", time.Time{}
 	}
 	return mode, time.Unix(until, 0)
