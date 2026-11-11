@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,12 +17,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+
 	"yagp/internal/deployjob"
 )
 
 const (
-	statusPath         = "/api/deploy/status/"
-	statusLinkLifetime = 20 * time.Minute
+	statusPath            = "/api/deploy/status/"
+	statusLinkLifetime    = 20 * time.Minute
+	statusRefreshInterval = time.Second
+	statusPingInterval    = 20 * time.Second
+	statusWriteTimeout    = 5 * time.Second
 )
 
 func signedStatusURL(secret []byte, job deployjob.Request, until time.Time) string {
@@ -44,14 +51,14 @@ func (h deployHandler) serveStatus(w http.ResponseWriter, r *http.Request, ip ne
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	id := strings.TrimPrefix(r.URL.EscapedPath(), statusPath)
-	mode := h.statusLinkMode(id, r.URL.RawQuery, now)
+	mode, expiry := h.statusLinkMode(id, r.URL.RawQuery, now)
 	if mode == "" {
 		h.rejectAuth(w, ip, now)
 		return
 	}
 	status, err := deployjob.ReadStatus(h.directory, id)
 	if errors.Is(err, os.ErrNotExist) {
-		http.NotFound(w, r)
+		rejectUnsupportedRequest(w, r, "update job not found")
 		return
 	}
 	if err != nil {
@@ -60,23 +67,80 @@ func (h deployHandler) serveStatus(w http.ResponseWriter, r *http.Request, ip ne
 		return
 	}
 	if status.Mode != mode {
-		http.NotFound(w, r)
+		rejectUnsupportedRequest(w, r, "update job mode mismatch")
+		return
+	}
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		h.serveStatusStream(w, r, id, expiry, status)
 		return
 	}
 	writeStatusJSON(w, http.StatusOK, status)
 }
 
-func (h deployHandler) statusLinkMode(id, rawQuery string, now time.Time) string {
+func (h deployHandler) serveStatusStream(w http.ResponseWriter, r *http.Request, id string, expiry time.Time, status deployjob.Status) {
+	conn, err := websocket.Accept(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+	// The WebSocket owns the connection after the HTTP upgrade.
+	ctx, cancel := context.WithDeadline(context.Background(), expiry)
+	defer cancel()
+	ctx = conn.CloseRead(ctx)
+
+	write := func(status deployjob.Status) error {
+		writeCtx, cancel := context.WithTimeout(ctx, statusWriteTimeout)
+		defer cancel()
+		return wsjson.Write(writeCtx, conn, status)
+	}
+	if err := write(status); err != nil {
+		return
+	}
+	refresh := time.NewTicker(statusRefreshInterval)
+	defer refresh.Stop()
+	ping := time.NewTicker(statusPingInterval)
+	defer ping.Stop()
+	for status.State != "succeeded" && status.State != "failed" {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ping.C:
+			pingCtx, cancel := context.WithTimeout(ctx, statusWriteTimeout)
+			err := conn.Ping(pingCtx)
+			cancel()
+			if err != nil {
+				return
+			}
+		case <-refresh.C:
+			next, err := deployjob.ReadStatus(h.directory, id)
+			if err != nil || next.Mode != status.Mode {
+				log.Printf("could not stream update job %s: mode=%q err=%v", id, next.Mode, err)
+				_ = conn.Close(websocket.StatusInternalError, "could not read update status")
+				return
+			}
+			if next.State == status.State && next.Logs == status.Logs {
+				continue
+			}
+			if err := write(next); err != nil {
+				return
+			}
+			status = next
+		}
+	}
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func (h deployHandler) statusLinkMode(id, rawQuery string, now time.Time) (string, time.Time) {
 	query, err := url.ParseQuery(rawQuery)
 	if err != nil || !deployjob.ValidID(id) || len(query) != 3 ||
 		len(query["expires"]) != 1 || len(query["mode"]) != 1 || len(query["signature"]) != 1 {
-		return ""
+		return "", time.Time{}
 	}
 	expires := query.Get("expires")
 	until, err := strconv.ParseInt(expires, 10, 64)
 	if err != nil || strconv.FormatInt(until, 10) != expires ||
 		until <= now.Unix() || until > now.Add(statusLinkLifetime).Unix() {
-		return ""
+		return "", time.Time{}
 	}
 	var hook *deployHook
 	mode := query.Get("mode")
@@ -87,9 +151,9 @@ func (h deployHandler) statusLinkMode(id, rawQuery string, now time.Time) string
 		hook = h.upgrade
 	}
 	if hook == nil || !hmac.Equal([]byte(query.Get("signature")), []byte(statusSignature(hook.secret, id, mode, expires))) {
-		return ""
+		return "", time.Time{}
 	}
-	return mode
+	return mode, time.Unix(until, 0)
 }
 
 func writeStatusJSON(w http.ResponseWriter, code int, value any) {

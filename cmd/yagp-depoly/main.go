@@ -215,7 +215,7 @@ func (h deployHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.limits.allowRequest(ip, now)
 			h.limits.authFailed(ip, now)
 		}
-		http.NotFound(w, r)
+		rejectUnsupportedRequest(w, r, "unsupported method or route")
 		return
 	}
 	if !ok {
@@ -282,8 +282,14 @@ func (h deployHandler) submitJob(w http.ResponseWriter, hook *deployHook, job de
 	link := signedStatusURL(hook.secret, job, time.Now().Add(statusLinkLifetime))
 	w.Header().Set("Location", link)
 	writeStatusJSON(w, http.StatusAccepted, struct {
-		StatusURL string `json:"status_url"`
-	}{link})
+		StatusURL       string `json:"status_url"`
+		StatusWebSocket bool   `json:"status_websocket"`
+	}{link, true})
+}
+
+func rejectUnsupportedRequest(w http.ResponseWriter, r *http.Request, reason string) {
+	log.Printf("deployment webhook HTTP 404 method=%q path=%q reason=%q", r.Method, r.URL.EscapedPath(), reason)
+	http.NotFound(w, r)
 }
 
 func validDigest(value string) bool {

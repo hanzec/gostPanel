@@ -201,9 +201,53 @@ jobs:
     with:
       version: ${{ needs.version.outputs.version }}
 
+  upgrade-depoly:
+    name: Upgrade the production deployment tool
+    needs: build
+    if: >-
+      ${{
+        !cancelled() &&
+        github.repository == 'hanzec/yagp' &&
+        github.ref == 'refs/heads/master' &&
+        (
+          (github.event_name == 'workflow_dispatch' && inputs.upgrade_depoly) ||
+          (github.event_name == 'push' && needs.build.result == 'success')
+        )
+      }}
+    runs-on: ubuntu-24.04
+    environment: production-tool
+    permissions:
+      contents: read
+    concurrency:
+      group: yagp-production
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - &checkout_deploy
+        name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - &setup_deploy_node
+        name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Notify the tool upgrade webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.UPGRADE_WEBHOOK_URL || secrets.DEPLOY_WEBHOOK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.UPGRADE_WEBHOOK_SECRET }}
+          WEBHOOK_TOKEN: ${{ secrets.UPGRADE_WEBHOOK_TOKEN }}
+          WEBHOOK_PAYLOAD: upgrade
+        run: node .github/scripts/notify-deploy.mjs depoly
+
   deploy:
     name: Deploy yagp to production
-    needs: [build, docker]
+    needs: [docker, upgrade-depoly]
     if: >-
       ${{
         github.repository == 'hanzec/yagp' &&
@@ -213,173 +257,20 @@ jobs:
       }}
     runs-on: ubuntu-24.04
     environment: production
-    permissions: {}
+    permissions:
+      contents: read
     concurrency:
       group: yagp-production
       queue: max
       cancel-in-progress: false
     steps:
+      - *checkout_deploy
+      - *setup_deploy_node
+
       - name: Notify the deployment webhook
-        shell: bash
         env:
           WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
           WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
           WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
           WEBHOOK_PAYLOAD: ${{ needs.docker.outputs.digest }}
-          WEBHOOK_PATH: /api/deploy/panel
-        run: &notify_depoly |
-          set -euo pipefail
-          check_master_head() {
-            if [[ "$GITHUB_EVENT_NAME" == push ]]; then
-              local master_head
-              master_head=$(git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY.git" refs/heads/master)
-              if [[ "${master_head%%$'\t'*}" != "$GITHUB_SHA" ]]; then
-                printf 'Skipping webhook request because master has advanced.\n'
-                exit 0
-              fi
-            fi
-          }
-
-          wait_for_update() {
-            local status_url=$1 origin=${WEBHOOK_URL%%/api/deploy/*} deadline=$((SECONDS + 960))
-            local http state previous=''
-            while (( SECONDS < deadline )); do
-              if http=$(curl -q --proto '=https' --silent --max-time 10 --output "$response_file" \
-                --write-out '%{http_code}' -- "$origin$status_url") && [[ "$http" == 200 ]]; then
-                state=$(python3 - "$response_file" <<'PY'
-          import json
-          import sys
-
-          with open(sys.argv[1]) as response:
-              job = json.load(response)
-          state = job['state']
-          if state not in ('queued', 'running', 'succeeded', 'failed'):
-              raise SystemExit('Invalid update job state.')
-          if state == 'succeeded' and job.get('exit_code') != 0:
-              raise SystemExit('Update did not exit successfully.')
-          print(state)
-          PY
-                )
-                if [[ "$state" != "$previous" ]]; then
-                  printf 'Update job is %s.\n' "$state"
-                  previous=$state
-                fi
-                case "$state" in
-                  succeeded) return 0 ;;
-                  failed) return 1 ;;
-                esac
-              fi
-              sleep 8
-            done
-            echo 'Timed out waiting for the update job.' >&2
-            return 1
-          }
-
-          check_master_head
-          if [[ "$WEBHOOK_PATH" == /api/deploy/panel ]]; then
-            [[ "$WEBHOOK_PAYLOAD" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'Missing or invalid image digest.' >&2; exit 1; }
-          elif [[ "$GITHUB_EVENT_NAME" == push && ( -z "$WEBHOOK_URL" || -z "$WEBHOOK_SECRET" || -z "$WEBHOOK_TOKEN" ) ]]; then
-            echo 'Skipping automatic tool upgrade until the production-tool webhook URL and credentials are configured.'
-            exit 0
-          fi
-          : "${WEBHOOK_URL:?Missing webhook URL}"
-          : "${WEBHOOK_SECRET:?Missing webhook signing secret}"
-          if [[ "$WEBHOOK_URL" =~ ^(https://[A-Za-z0-9.-]+)/api/deploy/?$ ]]; then
-            WEBHOOK_URL="${BASH_REMATCH[1]}$WEBHOOK_PATH"
-          fi
-          [[ "$WEBHOOK_URL" =~ ^https://[A-Za-z0-9.-]+${WEBHOOK_PATH}$ ]] ||
-            { echo "Webhook URL must use HTTPS and end in /api/deploy or $WEBHOOK_PATH." >&2; exit 1; }
-          [[ "$WEBHOOK_TOKEN" =~ ^[0-9a-f]{64}$ ]] ||
-            { echo 'Webhook token must be 64 lowercase hexadecimal characters.' >&2; exit 1; }
-          webhook_token=$WEBHOOK_TOKEN
-          webhook_secret=$WEBHOOK_SECRET
-          unset WEBHOOK_TOKEN WEBHOOK_SECRET
-
-          if [[ "$GITHUB_EVENT_NAME" == push && "$WEBHOOK_PATH" == /api/deploy/deploy-tool ]]; then
-            echo 'Waiting 60 seconds for the latest release cache to expire.'
-            sleep 60
-            check_master_head
-          fi
-
-          response_file=$(mktemp)
-          trap 'rm -f -- "$response_file"' EXIT
-          for attempt in 1 2 3; do
-            timestamp=$(date +%s)
-            signature=$(WEBHOOK_SECRET="$webhook_secret" WEBHOOK_TIMESTAMP="$timestamp" python3 - <<'PY'
-          import hmac
-          import os
-          import re
-
-          secret = os.environ["WEBHOOK_SECRET"].strip()
-          if not re.fullmatch(r"[0-9a-f]{64}", secret):
-              raise SystemExit("Webhook signing secret must be 64 lowercase hexadecimal characters.")
-          body = os.environ["WEBHOOK_TIMESTAMP"] + "\n" + os.environ["WEBHOOK_PAYLOAD"]
-          print("sha256=" + hmac.digest(secret.encode(), body.encode(), "sha256").hex())
-          PY
-            )
-
-            printf 'Sending %s webhook (attempt %s of 3).\n' "$WEBHOOK_PATH" "$attempt"
-            response=$(curl -q --proto '=https' --silent --connect-timeout 10 --max-time 30 \
-              --output "$response_file" --write-out '%{http_code} %header{retry-after}' --request POST \
-              --header @- --data-binary "$WEBHOOK_PAYLOAD" -- "$WEBHOOK_URL" <<EOF
-          Authorization: Bearer $webhook_token
-          X-Yagp-Timestamp: $timestamp
-          X-Yagp-Signature: $signature
-          Content-Type: text/plain
-          EOF
-            ) || { echo "Webhook request failed (curl exit status $?)." >&2; exit 1; }
-            read -r status retry_after <<< "$response"
-            if [[ "$status" == 202 ]]; then
-              if [[ ! -s "$response_file" ]]; then
-                echo 'Legacy receiver accepted the request. Check the server journal for the result.'
-                exit 0
-              fi
-              status_url=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status_url"])' < "$response_file")
-              status_pattern='^/api/deploy/status/[0-9a-f]{32}\?expires=[0-9]+&mode=(compose|depoly)&signature=[0-9a-f]{64}$'
-              [[ "$status_url" =~ $status_pattern ]] || { echo 'Invalid update status URL.' >&2; exit 1; }
-              printf 'Request accepted for %s. Waiting for the update to exit.\n' "$WEBHOOK_PAYLOAD"
-              wait_for_update "$status_url"
-              exit $?
-            fi
-            if [[ "$status" != 429 || "$attempt" == 3 || ! "$retry_after" =~ ^[1-9][0-9]{0,2}$ ]] || (( retry_after > 300 )); then
-              printf 'Webhook rejected the request (HTTP %s after %s attempt(s)).\n' "$status" "$attempt" >&2
-              exit 1
-            fi
-            printf 'Webhook returned HTTP 429. Retrying in %s seconds.\n' "$retry_after"
-            sleep "$retry_after"
-            check_master_head
-          done
-
-  upgrade-depoly:
-    name: Upgrade the production deployment tool
-    needs: [build, deploy]
-    if: >-
-      ${{
-        !cancelled() &&
-        github.repository == 'hanzec/yagp' &&
-        github.ref == 'refs/heads/master' &&
-        (
-          (github.event_name == 'workflow_dispatch' && inputs.upgrade_depoly) ||
-          (github.event_name == 'push' &&
-            needs.build.result == 'success' &&
-            (needs.deploy.result == 'success' ||
-              (vars.YAGP_DEPLOY_ENABLED != 'true' && needs.deploy.result == 'skipped')))
-        )
-      }}
-    runs-on: ubuntu-24.04
-    environment: production-tool
-    permissions: {}
-    concurrency:
-      group: yagp-production
-      queue: max
-      cancel-in-progress: false
-    steps:
-      - name: Notify the tool upgrade webhook
-        shell: bash
-        env:
-          WEBHOOK_URL: ${{ secrets.UPGRADE_WEBHOOK_URL || secrets.DEPLOY_WEBHOOK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.UPGRADE_WEBHOOK_SECRET }}
-          WEBHOOK_TOKEN: ${{ secrets.UPGRADE_WEBHOOK_TOKEN }}
-          WEBHOOK_PAYLOAD: upgrade
-          WEBHOOK_PATH: /api/deploy/deploy-tool
-        run: *notify_depoly
+        run: node .github/scripts/notify-deploy.mjs compose
