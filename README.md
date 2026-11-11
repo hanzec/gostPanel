@@ -110,9 +110,9 @@ tmpdir=$(mktemp -d /tmp/yagp-deploy.XXXXXXXX) &&
   sudo bash ./setup_deploy.sh install /opt/yagp-panel --traefik traefik-public
 ```
 
-安装脚本会自动识别 AMD64 或 ARM64，从 `release.hanzec-overseas.cn` 将对应的发布包和同版本的 Sigstore 证明下载到 `/tmp` 下的临时目录。Cosign 确认发布包由 `hanzec/yagp` 的 `master` 发布工作流签发后，脚本将两个程序安装到 `/usr/local/sbin/`，退出时清理下载的发布包。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。
+安装脚本会自动识别 AMD64 或 ARM64，从 `release.hanzec-overseas.cn` 将对应的发布包和同版本的 Sigstore 证明下载到 `/tmp` 下的临时目录。Cosign 确认发布包由 `hanzec/yagp` 的 `master` 发布工作流签发后，脚本将两个程序安装到 `/usr/local/sbin/`，并一次配置面板部署和工具升级的 Webhook。退出时清理下载的发布包。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。
 
-从旧版迁移时，等支持此安装流程的版本发布后，执行一次上述 `install` 命令。已安装 `0.1.140-00c1ae3` 的服务器也需要执行这一步。脚本会替换旧 sudo 规则、停用并移除旧工具升级单元，保留部署目录、镜像覆盖配置和凭据。首次安装生成的 HMAC 密钥和 Bearer Token 保存在 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`，在交互终端显示。
+从旧版迁移时，等支持此安装流程的版本发布后，执行一次上述 `install` 命令。已安装 `0.1.140-00c1ae3` 的服务器也需要执行这一步。脚本会替换旧 sudo 规则、停用并移除旧工具升级单元，保留部署目录和镜像覆盖配置。脚本复用现有凭据，只生成缺失的值。面板部署与工具升级分别使用 `/etc/yagp-depoly/` 下的 `panel.secret`、`panel.token` 和 `upgrade.secret`、`upgrade.token`。两组凭据会在交互终端显示。
 
 安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
@@ -130,15 +130,9 @@ Webhook 返回 `202` 后，响应中的 `status_url` 提供短期有效的签名
 
 #### 通过独立 Webhook 升级部署工具
 
-安装两个工具后，可用同一个 `setup_deploy.sh` 启用工具升级入口。
-
-```bash
-sudo bash ./setup_deploy.sh install-upgrade --traefik traefik-public
-```
-
 在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET` 和 `UPGRADE_WEBHOOK_TOKEN`。工具升级任务会在仓库级 `DEPLOY_WEBHOOK_URL` 后补上 `/deploy-tool`。若已配置独立的 `UPGRADE_WEBHOOK_URL`，工具升级优先使用它。两个入口共用 Traefik 路由和接收器，各自使用独立凭据。
 
-配置好工具升级 URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布成功后等待 60 秒，为 Release 缓存留出更新时间，再确认 `master` 仍指向本次提交并发送升级请求。面板部署等待工具升级成功后开始。工具升级入口未配置时，工作流跳过工具升级，继续已启用的面板部署。
+配置好工具升级 URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布成功后等待 60 秒，为 Release 缓存留出更新时间，再确认 `master` 仍指向本次提交并发送升级请求。面板部署等待工具升级成功后开始。GitHub 中未配置工具升级 URL 或凭据时，工作流跳过工具升级，继续已启用的面板部署。
 
 也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。`yagp-update` 从 GitHub Raw 下载目标版本标签下的脚本。工具升级时，脚本从发布缓存下载同版本的程序包和 Sigstore 证明，用 Cosign 验证后替换两个二进制并重启接收器。启动失败时恢复旧文件。
 

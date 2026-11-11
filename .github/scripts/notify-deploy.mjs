@@ -56,7 +56,7 @@ async function main() {
     if (response.status === 404) {
       console.error('Compare the webhook host with the installer output and check the active public Traefik route for /api/deploy/.')
       console.error('Check the receiver with journalctl --namespace=+yagp-depoly -u yagp-depoly.service.')
-      if (upgrade) console.error('Check that setup_deploy.sh install-upgrade enabled the tool endpoint.')
+      if (upgrade) console.error('Check that the current setup_deploy.sh install configured the tool endpoint.')
       throw new Error(`Webhook ${path} returned HTTP 404.`)
     }
     throw new Error(`Webhook rejected the request (HTTP ${response.status} after ${attempt} attempt(s)).`)

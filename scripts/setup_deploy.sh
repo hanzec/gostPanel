@@ -27,7 +27,6 @@ readonly upgrade_endpoint=/api/deploy/deploy-tool
 main() {
     case ${1:-} in
         install) shift; install_webhook "$@" ;;
-        install-upgrade) shift; install_upgrade "$@" ;;
         compose) [[ $# -eq 1 ]] || usage; deploy_image ;;
         depoly) [[ $# -eq 1 ]] || usage; update_tools ;;
         *) usage ;;
@@ -38,10 +37,9 @@ usage() {
     cat >&2 <<'EOF'
 用法：
   sudo bash setup_deploy.sh install Compose部署目录 [--traefik 容器名或ID]
-  sudo bash setup_deploy.sh install-upgrade [--traefik 容器名或ID]
 
 install 适用于已部署的 Linux Docker Compose 面板，要求部署目录内有
-root 管理的 docker-compose.yml 和 .env。原有部署变量须保存在 .env。
+root 管理的 docker-compose.yml 和 .env。一次配置面板部署和工具升级 Webhook。
 部署账号使用 nologin。安装时保留旧镜像覆盖配置并撤销旧 SSH 部署入口。
 EOF
     exit 2
@@ -59,7 +57,8 @@ log() {
 install_webhook() (
     [[ $# -ge 1 ]] || usage
     check_systemd
-    local project_dir project proxy stage cosign arch receiver updater traefik secret token old_secret old_token with_upgrade=false
+    local project_dir project proxy stage cosign arch receiver updater traefik
+    local panel_secret panel_token upgrade_secret upgrade_token old_secret old_token
     cosign=$(find_cosign)
     project_dir=$(resolve_project_dir "$1")
     shift
@@ -77,21 +76,19 @@ install_webhook() (
     lock_deploy
     old_secret="$project_dir/.yagp-webhook-secret"
     old_token="$project_dir/.yagp-webhook-token"
-    secret=$(prepare_credential "$managed_dir/panel.secret" "$old_secret")
-    token=$(prepare_credential "$managed_dir/panel.token" "$old_token")
-    check_distinct_credentials "$secret" "$token" "$managed_dir/upgrade.secret" "$managed_dir/upgrade.token"
-    if [[ -e $upgrade_unit || -L $upgrade_unit || -e $managed_dir/upgrade.secret || -L $managed_dir/upgrade.secret ||
-          -e $managed_dir/upgrade.token || -L $managed_dir/upgrade.token ]]; then
-        check_managed_file "$managed_dir/upgrade.secret"
-        check_managed_file "$managed_dir/upgrade.token"
-        with_upgrade=true
-    fi
+    panel_secret=$(prepare_credential "$managed_dir/panel.secret" "$old_secret")
+    panel_token=$(prepare_credential "$managed_dir/panel.token" "$old_token")
+    upgrade_secret=$(prepare_credential "$managed_dir/upgrade.secret")
+    upgrade_token=$(prepare_credential "$managed_dir/upgrade.token")
+    check_distinct_credentials "$panel_secret" "$panel_token" "$upgrade_secret" "$upgrade_token"
 
     stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
-    setup_account "$project_dir" "$project" "$stage/$receiver" "$stage/$updater" "$with_upgrade"
-    printf '%s\n' "$secret" | write_file "$managed_dir/panel.secret" 0600
-    printf '%s\n' "$token" | write_file "$managed_dir/panel.token" 0600
-    write_hook_unit "$traefik" "$with_upgrade"
+    setup_account "$project_dir" "$project" "$stage/$receiver" "$stage/$updater"
+    printf '%s\n' "$panel_secret" | write_file "$managed_dir/panel.secret" 0600
+    printf '%s\n' "$panel_token" | write_file "$managed_dir/panel.token" 0600
+    printf '%s\n' "$upgrade_secret" | write_file "$managed_dir/upgrade.secret" 0600
+    printf '%s\n' "$upgrade_token" | write_file "$managed_dir/upgrade.token" 0600
+    write_hook_unit "$traefik"
     write_traefik_route "$traefik"
 
     systemctl daemon-reload
@@ -102,46 +99,9 @@ install_webhook() (
     log '配置完成。部署账号已禁用登录，本次未更新容器。'
     log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
     log "查看部署日志：$log_query"
-    show_install_result DEPLOY_WEBHOOK panel "$webhook_base_path" "$traefik" "$secret" "$token"
+    show_install_result DEPLOY_WEBHOOK panel "$webhook_base_path" "$traefik" "$panel_secret" "$panel_token"
+    show_install_result UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$upgrade_secret" "$upgrade_token"
 )
-
-install_upgrade() {
-    check_systemd
-    find_cosign >/dev/null
-    check_managed_file "$listener_unit"
-    check_managed_file "$install_path"
-    check_managed_file "$update_path"
-    require_root_owned "$managed_dir"
-    check_managed_file "$managed_project"
-    local project_dir project proxy traefik secret token
-    proxy=$(traefik_option "$@")
-    project_dir=$(resolve_project_dir "$(<"$managed_project")")
-    project=$(inspect_project "$project_dir")
-    traefik=$(inspect_traefik "$project_dir" "$project" "$proxy")
-    lock_deploy
-    secret=$(prepare_credential "$managed_dir/upgrade.secret")
-    token=$(prepare_credential "$managed_dir/upgrade.token")
-    check_managed_file "$managed_dir/panel.secret"
-    check_managed_file "$managed_dir/panel.token"
-    check_distinct_credentials "$secret" "$token" "$managed_dir/panel.secret" "$managed_dir/panel.token"
-
-    stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
-    stop_legacy_upgrade_job
-    install_account "$deploy_user" "$deploy_home"
-    prepare_job_directory
-    install_update_permissions true
-    printf '%s\n' "$secret" | write_file "$managed_dir/upgrade.secret" 0600
-    printf '%s\n' "$token" | write_file "$managed_dir/upgrade.token" 0600
-    write_hook_unit "$traefik" true
-    write_traefik_route "$traefik"
-
-    systemctl daemon-reload
-    systemctl restart yagp-depoly.service
-    retire_legacy_upgrade_receiver
-    log "Webhook 共用 Traefik 配置：$managed_dir/traefik-panel.yml"
-    log "查看工具升级日志：$log_query"
-    show_install_result UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$secret" "$token"
-}
 
 check_systemd() {
     root_environment
@@ -234,7 +194,7 @@ prepare_managed_dir() {
 }
 
 setup_account() {
-    local project_dir=$1 project=$2 receiver=$3 updater=$4 with_upgrade=$5
+    local project_dir=$1 project=$2 receiver=$3 updater=$4
     local compose_help legacy=false previous_override="$1/$previous_override_name"
     log "检查部署目录与 Compose 配置：$project_dir"
     cd "$project_dir"
@@ -297,7 +257,7 @@ setup_account() {
     log "安装特权更新程序 $update_path。"
     write_file "$update_path" 0755 < "$updater"
     log '校验并安装 sudo 规则。'
-    install_update_permissions "$with_upgrade"
+    install_update_permissions
     log "安装 Webhook 接收器 $install_path。"
     write_file "$install_path" 0755 < "$receiver"
     retire_ssh_key "$project_dir/yagp-depoly"
@@ -324,12 +284,7 @@ EOF
 
 install_update_permissions() {
     install_sudo_rule "$deploy_user" "$deploy_user" "$update_path" compose
-    if [[ $1 == true ]]; then
-        install_sudo_rule "$deploy_user" yagp-deploy-tool "$update_path" depoly
-    elif [[ -e /etc/sudoers.d/yagp-deploy-tool || -L /etc/sudoers.d/yagp-deploy-tool ]]; then
-        check_managed_file /etc/sudoers.d/yagp-deploy-tool
-        rm -f -- /etc/sudoers.d/yagp-deploy-tool
-    fi
+    install_sudo_rule "$deploy_user" yagp-deploy-tool "$update_path" depoly
 }
 
 check_install_parent() {
@@ -411,25 +366,18 @@ read_credential() {
 }
 
 check_distinct_credentials() {
-    local secret=$1 token=$2 other_file other_value previous_value=''
-    shift 2
-    [[ $secret =~ ^[0-9a-f]{64}$ && $token =~ ^[0-9a-f]{64}$ && $secret != "$token" ]] ||
-        fail 'Webhook 签名密钥和 Token 须为两份不同的 64 位小写十六进制字符。'
-    for other_file in "$@"; do
-        if [[ -e $other_file || -L $other_file ]]; then
-            other_value=$(read_credential "$other_file")
-            [[ $secret != "$other_value" && $token != "$other_value" && $previous_value != "$other_value" ]] ||
-                fail '面板部署和工具升级须使用不同的凭据。'
-            previous_value=$other_value
-        fi
-    done
+    local panel_secret=$1 panel_token=$2 upgrade_secret=$3 upgrade_token=$4
+    [[ $panel_secret != "$panel_token" && $upgrade_secret != "$upgrade_token" &&
+       $panel_secret != "$upgrade_secret" && $panel_secret != "$upgrade_token" &&
+       $panel_token != "$upgrade_secret" && $panel_token != "$upgrade_token" ]] ||
+        fail '面板部署和工具升级须各用一对不同的签名密钥和 Token，四份凭据不能重复。'
 }
 
 show_install_result() {
     local prefix=$1 role=$2 endpoint=$3 secret=$5 token=$6
     local hostname proxy_ip proxy_name
     IFS='|' read -r hostname _ _ proxy_ip proxy_name <<< "$4"
-    log "Webhook 信任的公网 Traefik 容器为 $proxy_name（$proxy_ip）。"
+    log "Webhook 信任的公网 Traefik 容器为 ${proxy_name}（${proxy_ip}）。"
     printf '%s_URL=https://%s%s\n' "$prefix" "$hostname" "$endpoint"
     if [[ -t 1 ]]; then
         printf '%s_SECRET=%s\n%s_TOKEN=%s\n' "$prefix" "$secret" "$prefix" "$token"
@@ -489,14 +437,8 @@ inspect_traefik() {
 }
 
 write_hook_unit() {
-    local traefik=$1 with_upgrade=$2 state_directories=yagp-depoly-panel
-    local gateway proxy_ip upgrade_credentials='' upgrade_args=''
+    local traefik=$1 gateway proxy_ip
     IFS='|' read -r _ _ gateway proxy_ip _ <<< "$traefik"
-    if [[ $with_upgrade == true ]]; then
-        state_directories+=' yagp-depoly-upgrade-hook'
-        printf -v upgrade_credentials 'LoadCredential=upgrade-secret:%s/upgrade.secret\nLoadCredential=upgrade-token:%s/upgrade.token' "$managed_dir" "$managed_dir"
-        upgrade_args=' -upgrade-secret-file ${CREDENTIALS_DIRECTORY}/upgrade-secret -upgrade-token-file ${CREDENTIALS_DIRECTORY}/upgrade-token -upgrade-state-file /var/lib/yagp-depoly-upgrade-hook/replay'
-    fi
     log "安装 yagp-depoly.service，监听 Docker 内网 $gateway:39102。"
     write_file "$listener_unit" 0644 <<EOF
 [Unit]
@@ -508,12 +450,13 @@ Wants=docker.service
 Type=notify
 User=$deploy_user
 LogNamespace=yagp-depoly
-StateDirectory=$state_directories
+StateDirectory=yagp-depoly-panel yagp-depoly-upgrade-hook
 StateDirectoryMode=0700
 LoadCredential=webhook-secret:$managed_dir/panel.secret
 LoadCredential=webhook-token:$managed_dir/panel.token
-$upgrade_credentials
-ExecStart=$install_path serve -listen $gateway:39102 -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file /var/lib/yagp-depoly-panel/replay$upgrade_args
+LoadCredential=upgrade-secret:$managed_dir/upgrade.secret
+LoadCredential=upgrade-token:$managed_dir/upgrade.token
+ExecStart=$install_path serve -listen $gateway:39102 -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file /var/lib/yagp-depoly-panel/replay -upgrade-secret-file \${CREDENTIALS_DIRECTORY}/upgrade-secret -upgrade-token-file \${CREDENTIALS_DIRECTORY}/upgrade-token -upgrade-state-file /var/lib/yagp-depoly-upgrade-hook/replay
 TimeoutStartSec=20s
 Restart=on-failure
 RestartSec=5
