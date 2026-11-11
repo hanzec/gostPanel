@@ -68,16 +68,16 @@ func runInstalledUpdate(executable, mode, phase string) error {
 	}
 	switch phase {
 	case "":
-		return runManualUpdate(mode, os.Stdin, os.Stdout, runPublishedScript)
+		return runManualUpdate(mode, os.Stdin, os.Stdout, runPublishedUpdate)
 	case "worker":
-		return runUpdate(deployjob.Directory, os.Getenv("YAGP_UPDATE_JOB"), mode, runPublishedScript)
+		return runUpdate(deployjob.Directory, os.Getenv("YAGP_UPDATE_JOB"), mode, runPublishedUpdate)
 	case "finish":
 		return finishUpdate(deployjob.Directory, os.Getenv("YAGP_UPDATE_JOB"), mode)
 	case "apply":
 		if mode == "depoly" {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
-			// The release script verifies the archive before passing it on stdin.
+			// Retain the verified-archive entry point for the legacy upgrade script.
 			return applyToolRelease(ctx, executable, os.Getenv("YAGP_UPDATE_RELEASE_TAG"), os.Stdin)
 		}
 	}

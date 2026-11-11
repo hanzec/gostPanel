@@ -92,7 +92,7 @@ Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板
 
 #### 通过 Webhook 自动更新面板
 
-该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。请将 Cosign 3.1.3 或更新版本安装到 `/usr/local/bin` 等由 root 管理的目录，供安装和工具升级时验证二进制发布包。 [Cosign 安装说明](https://docs.sigstore.dev/cosign/system_config/installation/)
+该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。请将 Cosign 3.1.3 或更新版本安装到 `/usr/local/bin` 等由 root 管理的目录，供首次安装及旧版更新器首次迁移时验证二进制发布包。 [Cosign 安装说明](https://docs.sigstore.dev/cosign/system_config/installation/)
 
 先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
 
@@ -134,7 +134,9 @@ Webhook 返回 `202` 后，响应中的 `status_url` 提供短期有效的签名
 
 配置好共用的 Webhook URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布成功后等待 60 秒，为 Release 缓存留出更新时间，再确认 `master` 仍指向本次提交并发送升级请求。面板部署等待工具升级成功后开始。
 
-也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。`yagp-update` 从 GitHub Raw 下载目标版本标签下的脚本。工具升级时，脚本从发布缓存下载同版本的程序包和 Sigstore 证明，用 Cosign 验证后替换两个二进制并重启接收器。启动失败时恢复旧文件。
+也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。新版 `yagp-update` 直接从 `release.hanzec-overseas.cn` 下载同版本的程序包和 Sigstore 证明，由程序内的 Go 验签实现确认发布来源，再替换两个二进制并重启接收器。启动失败时恢复旧文件。工具自更新不再下载或执行 `setup_deploy.sh`，也不依赖 Bash、curl、Cosign 命令或 GitHub Raw。
+
+已安装的旧版更新器首次升级到此版本时，仍会按旧流程下载目标版本的脚本，并使用 Cosign 验证发布包。这是一次性迁移；完成后，后续工具升级由新版 `yagp-update` 自行完成。
 
 面板部署和工具升级共用独立的 `yagp-depoly` journal，日志默认写入磁盘并由 journald 轮转。查询链接读取的任务记录保存于 `/var/lib/yagp-update/jobs`，由 systemd-tmpfiles 清理七天前的记录。以下命令可查看接收器和更新任务的日志。
 

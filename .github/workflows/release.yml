@@ -150,8 +150,9 @@ jobs:
           zip yagp-windows-amd64.zip yagp-windows-amd64.exe config/config.yaml LICENSE
           tar -czvf yagp-daemon-linux-amd64.tar.gz yagp-daemon-linux-amd64 yagp-daemon-systemd-linux-amd64 LICENSE
           tar -czvf yagp-daemon-linux-arm64.tar.gz yagp-daemon-linux-arm64 yagp-daemon-systemd-linux-arm64 LICENSE
-          tar -czvf yagp-depoly-linux-amd64.tar.gz yagp-depoly-linux-amd64 yagp-update-linux-amd64 LICENSE
-          tar -czvf yagp-depoly-linux-arm64.tar.gz yagp-depoly-linux-arm64 yagp-update-linux-arm64 LICENSE
+          cp cmd/yagp-update/sigstore/LICENSE SIGSTORE-LICENSE
+          tar -czvf yagp-depoly-linux-amd64.tar.gz yagp-depoly-linux-amd64 yagp-update-linux-amd64 LICENSE SIGSTORE-LICENSE
+          tar -czvf yagp-depoly-linux-arm64.tar.gz yagp-depoly-linux-arm64 yagp-update-linux-arm64 LICENSE SIGSTORE-LICENSE
 
       - name: Attest the deployment tool archives
         if: github.repository == 'hanzec/yagp' && github.ref == 'refs/heads/master'

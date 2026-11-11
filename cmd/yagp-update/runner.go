@@ -21,9 +21,9 @@ import (
 
 const updatePath = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-type scriptRunner func(context.Context, deployjob.Request, io.Writer) error
+type updateRunner func(context.Context, deployjob.Request, io.Writer) error
 
-func runManualUpdate(mode string, input io.Reader, output io.Writer, runScript scriptRunner) error {
+func runManualUpdate(mode string, input io.Reader, output io.Writer, update updateRunner) error {
 	request := deployjob.Request{Mode: mode}
 	if mode == "compose" {
 		if _, err := fmt.Fscan(io.LimitReader(input, 128), &request.Digest); err != nil || !request.ValidInput() {
@@ -32,7 +32,7 @@ func runManualUpdate(mode string, input io.Reader, output io.Writer, runScript s
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Minute)
 	defer cancel()
-	return runScript(ctx, request, output)
+	return update(ctx, request, output)
 }
 
 func submitUpdate(ctx context.Context, input io.Reader, mode, directory string, start func(context.Context, deployjob.Request) error) error {
@@ -88,7 +88,7 @@ func startUpdateUnit(ctx context.Context, request deployjob.Request) error {
 	return nil
 }
 
-func runUpdate(directory, id, mode string, runScript scriptRunner) error {
+func runUpdate(directory, id, mode string, update updateRunner) error {
 	if !deployjob.ValidID(id) {
 		return errors.New("invalid update job ID")
 	}
@@ -119,7 +119,7 @@ func runUpdate(directory, id, mode string, runScript scriptRunner) error {
 	log.Printf("starting %s job %s", mode, id)
 	ctx, cancel := context.WithTimeout(context.Background(), 14*time.Minute)
 	defer cancel()
-	if err := runScript(ctx, request, output); err != nil {
+	if err := update(ctx, request, output); err != nil {
 		log.Printf("update failed: %v", err)
 		return err
 	}
@@ -127,11 +127,17 @@ func runUpdate(directory, id, mode string, runScript scriptRunner) error {
 	return nil
 }
 
-func runPublishedScript(ctx context.Context, request deployjob.Request, output io.Writer) error {
+func runPublishedUpdate(ctx context.Context, request deployjob.Request, output io.Writer) error {
+	if request.Mode == "depoly" {
+		return runNativeToolUpdate(ctx, selfUpgradeClient(), deployjob.Executable)
+	}
 	return runReleaseScript(ctx, selfUpgradeClient(), request, output)
 }
 
 func runReleaseScript(ctx context.Context, client *http.Client, request deployjob.Request, output io.Writer) error {
+	if request.Mode != "compose" {
+		return errors.New("published scripts are only used for compose updates")
+	}
 	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	log.Print("checking the release cache for the latest update version")

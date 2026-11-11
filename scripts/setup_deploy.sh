@@ -628,6 +628,8 @@ deploy_image() {
     log "项目 $project 更新完成，健康检查通过，耗时 $((SECONDS - started)) 秒。"
 }
 
+# 仅为已安装的旧版 yagp-update 保留一次性迁移入口；新版自行下载并验签。
+# 必须调用旧版 apply 阶段，直接执行普通 depoly 命令会再次下载本脚本并递归。
 update_tools() (
     root_environment
     [[ -n ${YAGP_UPDATE_RELEASE_TAG:-} ]] || fail '工具升级须由 yagp-update 指定发布版本。'
