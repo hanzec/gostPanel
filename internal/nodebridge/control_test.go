@@ -158,28 +158,18 @@ func TestBridgeRejectsInvalidConfiguration(t *testing.T) {
 func TestNftConfigurationRPC(t *testing.T) {
 	ctx := t.Context()
 	dir := t.TempDir()
+	t.Setenv("PATH", dir)
 	control := controlServer{config: Config{
 		NodeID: 42, Username: controlTestUser, Password: controlTestPassword, NftConfigFile: filepath.Join(dir, "nft.json"),
 	}}
-	if result, err := control.GetNftConfig(ctx, &emptypb.Empty{}); err != nil || result.GetConfig() != "" {
-		t.Fatalf("missing config = %v, %v", result, err)
-	}
-	config := "{\"nftables\":[]}"
-	if err := os.WriteFile(control.config.NftConfigFile, []byte(config), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if result, err := control.GetNftConfig(ctx, &emptypb.Empty{}); err != nil || result.GetConfig() != config {
-		t.Fatalf("saved config = %v, %v", result, err)
-	}
-	control.config.NftConfigFile = dir
-	if _, err := control.GetNftConfig(ctx, &emptypb.Empty{}); status.Code(err) != codes.Internal {
-		t.Fatalf("unreadable config returned %v", err)
+	if _, err := control.GetNftConfig(ctx, &emptypb.Empty{}); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("preview without nft returned %v", err)
 	}
 	if err := restoreNftConfig(ctx, 42, dir); err == nil {
 		t.Fatal("restoring a directory as config succeeded")
 	}
 	control.config.NftConfigFile = ""
-	if _, err := control.ApplyNftConfig(ctx, &nodegrpc.NftConfig{Config: config}); status.Code(err) != codes.Unimplemented {
+	if _, err := control.ApplyNftConfig(ctx, &nodegrpc.NftConfig{Config: `{"nftables":[]}`}); status.Code(err) != codes.Unimplemented {
 		t.Fatalf("config update on unconfigured node returned %v", err)
 	}
 }

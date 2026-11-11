@@ -120,7 +120,6 @@ func (f *handlerHTTPFixture) registerNodes() {
 	f.engine.POST("/nodes/:id/gost/restart", h.RestartGostService)
 	f.engine.GET("/nodes/:id/gost/logs", h.GostLogs)
 	f.engine.GET("/nodes/:id/nft", h.GetNftConfig)
-	f.engine.PUT("/nodes/:id/nft", h.ApplyNftConfig)
 	f.engine.GET("/nodes/:id/upgrade", h.GetUpgrade)
 	f.engine.PUT("/nodes/:id/upgrade", h.SetUpgradePolicy)
 	f.engine.POST("/nodes/:id/upgrade/:component", h.StartUpgrade)

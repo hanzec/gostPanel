@@ -510,6 +510,7 @@ type NftConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Config        string                 `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	Table         string                 `protobuf:"bytes,2,opt,name=table,proto3" json:"table,omitempty"`
+	LiveConfig    string                 `protobuf:"bytes,3,opt,name=live_config,json=liveConfig,proto3" json:"live_config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -554,6 +555,13 @@ func (x *NftConfig) GetConfig() string {
 func (x *NftConfig) GetTable() string {
 	if x != nil {
 		return x.Table
+	}
+	return ""
+}
+
+func (x *NftConfig) GetLiveConfig() string {
+	if x != nil {
+		return x.LiveConfig
 	}
 	return ""
 }
@@ -1396,10 +1404,12 @@ const file_node_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1a\n" +
 	"\bpriority\x18\x03 \x01(\x05R\bpriority\"E\n" +
 	"\rGostLogsReply\x124\n" +
-	"\aentries\x18\x01 \x03(\v2\x1a.yagp.node.v1.GostLogEntryR\aentries\"9\n" +
+	"\aentries\x18\x01 \x03(\v2\x1a.yagp.node.v1.GostLogEntryR\aentries\"Z\n" +
 	"\tNftConfig\x12\x16\n" +
 	"\x06config\x18\x01 \x01(\tR\x06config\x12\x14\n" +
-	"\x05table\x18\x02 \x01(\tR\x05table\"P\n" +
+	"\x05table\x18\x02 \x01(\tR\x05table\x12\x1f\n" +
+	"\vlive_config\x18\x03 \x01(\tR\n" +
+	"liveConfig\"P\n" +
 	"\n" +
 	"NodeConfig\x12\x1f\n" +
 	"\vconfig_yaml\x18\x01 \x01(\fR\n" +

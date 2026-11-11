@@ -2,8 +2,8 @@ import { flushPromises } from '@vue/test-utils'
 import { ElSwitch } from 'element-plus'
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import NodeGostDialog from '@/components/NodeGostDialog.vue'
-import NodeNftDialog from '@/components/NodeNftDialog.vue'
+import NodeGostService from '@/components/NodeGostService.vue'
+import NodeNftPreview from '@/components/NodeNftPreview.vue'
 import NodeUpgradeDialog from '@/components/NodeUpgradeDialog.vue'
 import * as api from '@/api/node'
 import { apiError, button, click, deferred, mockNodeMessages, mountNodeComponent, response } from './node-test-support.js'
@@ -13,7 +13,6 @@ vi.mock('@/api/node', () => ({
   getGostLogs: vi.fn(),
   restartGostService: vi.fn(),
   getNodeNftConfig: vi.fn(),
-  applyNodeNftConfig: vi.fn(),
   getNodeUpgradeStatus: vi.fn(),
   updateNodeUpgradePolicy: vi.fn(),
   upgradeNodeComponent: vi.fn()
@@ -40,10 +39,14 @@ function open(component, props = {}) {
   return wrapper
 }
 
-describe('Gost service dialog', () => {
+describe('inline Gost service', () => {
   const active = { unit: 'gost.service', active_state: 'active', load_state: 'loaded', sub_state: 'running' }
+  const mountService = (status = 'online') => {
+    wrapper = mountNodeComponent(NodeGostService, { node: { ...node, status } })
+    return wrapper
+  }
 
-  it('loads status and sorts service logs newest first', async () => {
+  it('loads status in the page and sorts service logs when expanded', async () => {
     const status = deferred()
     api.getGostService.mockReturnValueOnce(status.promise)
     api.getGostLogs.mockResolvedValueOnce(response({ entries: [
@@ -51,14 +54,23 @@ describe('Gost service dialog', () => {
       { message: 'newer', priority: 42, timestamp_unix_micros: 2_000_000 },
       { message: 'unknown', timestamp_unix_micros: 0 }
     ] }))
-    const view = open(NodeGostDialog)
+    const view = mountService()
+    expect(view.get('#node-gost-service h2').text()).toBe('Gost 服务')
+    expect(view.find('[role="dialog"]').exists()).toBe(false)
     expect(view.text()).toContain('正在读取服务状态')
     expect(button(view, '重启 Gost').element.disabled).toBe(true)
     status.resolve(response(active))
     await flushPromises()
     expect(api.getGostService).toHaveBeenCalledWith(node.id)
-    expect(api.getGostLogs).toHaveBeenCalledWith(node.id)
+    expect(api.getGostLogs).not.toHaveBeenCalled()
     expect(view.text()).toContain('运行中')
+    const logToggle = view.get('button[aria-controls="node-gost-logs"]')
+    expect(logToggle.attributes('aria-expanded')).toBe('false')
+    expect(view.get('#node-gost-logs').isVisible()).toBe(false)
+    await logToggle.trigger('click')
+    await flushPromises()
+    expect(logToggle.attributes('aria-expanded')).toBe('true')
+    expect(api.getGostLogs).toHaveBeenCalledWith(node.id)
     expect(view.findAll('.gost-log-message').map(item => item.text())).toEqual(['newer', 'older', 'unknown'])
     expect(view.text()).toContain('未知级别')
     expect(view.text()).toContain('未知时间')
@@ -66,22 +78,24 @@ describe('Gost service dialog', () => {
 
     api.getGostService.mockResolvedValue(response({ ...active, active_state: 'activating', sub_state: '' }))
     api.getGostLogs.mockResolvedValue(response({}))
-    await click(view, '刷新状态和日志')
+    await click(view, '刷新')
     expect(view.get('.ops-status').classes()).toContain('is-warning')
     expect(view.text()).toContain('未知')
     expect(view.text()).toContain('暂无日志')
-    await click(view, '关闭')
-    expect(view.emitted('update:modelValue')).toEqual([[false]])
+    await logToggle.trigger('click')
+    expect(logToggle.attributes('aria-expanded')).toBe('false')
+    expect(view.get('#node-gost-logs').isVisible()).toBe(false)
   })
 
   it('retries independent read failures and handles restart cancellation, failure and success', async () => {
     api.getGostService.mockRejectedValueOnce(apiError('节点离线')).mockResolvedValue(response(active))
     api.getGostLogs.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(response({ entries: [] }))
-    const view = open(NodeGostDialog)
+    const view = mountService()
+    await view.get('button[aria-controls="node-gost-logs"]').trigger('click')
     await flushPromises()
     expect(view.text()).toContain('节点离线')
     expect(view.text()).toContain('无法读取 Gost 日志')
-    await click(view, '刷新状态和日志')
+    await click(view, '刷新')
     expect(view.findAll('[role="alert"]')).toHaveLength(0)
 
     messages.confirm.mockRejectedValueOnce('cancel')
@@ -102,154 +116,52 @@ describe('Gost service dialog', () => {
     expect(view.find('[role="alert"]').exists()).toBe(false)
   })
 
-  it('uses the service state and fallback errors when the bridge does not supply descriptions', async () => {
+  it('avoids auto queries for offline nodes and supports manual refresh and recovery', async () => {
     api.getGostService.mockRejectedValueOnce(new Error('offline')).mockResolvedValue(response({ unit: 'gost.service', active_state: 'custom' }))
     api.getGostLogs.mockRejectedValueOnce(apiError('日志不可用')).mockResolvedValue(response({ entries: [] }))
-    const view = open(NodeGostDialog)
-    await flushPromises()
+    const view = mountService('offline')
+    expect(view.text()).toContain('节点当前未在线')
+    expect(api.getGostService).not.toHaveBeenCalled()
+    await click(view, '刷新')
     expect(view.text()).toContain('无法读取 Gost 状态')
+    await view.get('button[aria-controls="node-gost-logs"]').trigger('click')
+    await flushPromises()
     expect(view.text()).toContain('日志不可用')
-    await click(view, '刷新状态和日志')
+    await view.setProps({ node: { ...node, status: 'online' } })
+    await flushPromises()
     expect(view.get('.ops-status').text()).toBe('custom')
     expect(view.get('.ops-status').classes()).toContain('is-muted')
     expect(button(view, '重启 Gost').element.disabled).toBe(true)
   })
 })
 
-describe('nftables dialog', () => {
-  const template = '{"nftables":[]}'
-  const saved = '{"nftables":[{"saved":true}]}'
-  const config = { table: 'yagp_7', config: saved, template }
-  const prerouting = { add: { chain: { family: 'inet', table: config.table, name: 'prerouting', type: 'nat', hook: 'prerouting', prio: -100 } } }
-  const loopback = [
-    { add: { chain: { family: 'inet', table: config.table, name: 'loopback_443', type: 'nat', hook: 'output', prio: -100 } } },
-    { add: { rule: { family: 'inet', table: config.table, chain: 'loopback_443', expr: [{ redirect: { port: 443 } }] } } }
-  ]
-  const loopbackTemplate = JSON.stringify({ nftables: loopback })
+describe('nftables preview', () => {
+  const activeRules = '{"nftables":[{"quota":{"table":"yagp_quota","bytes":9223372036854775807}}]}'
 
-  it('retries loading, protects an edited draft and validates JSON before asking to apply', async () => {
-    api.getNodeNftConfig.mockRejectedValueOnce(apiError('没有已注册的节点'))
-      .mockRejectedValueOnce(new Error('offline')).mockResolvedValue(response(config))
-    const view = open(NodeNftDialog)
-    expect(view.text()).toContain('正在从面板读取配置')
+  it('retries a read failure and displays active rules without editing controls', async () => {
+    api.getNodeNftConfig.mockRejectedValueOnce(apiError('节点离线'))
+      .mockResolvedValueOnce(response({ config: activeRules, live: true }))
+    wrapper = mountNodeComponent(NodeNftPreview, { node })
+    expect(wrapper.text()).toContain('正在读取 nftables 规则')
     await flushPromises()
-    expect(view.get('[role="alert"]').text()).toContain('没有已注册的节点')
-    expect(button(view, '应用到节点').element.disabled).toBe(true)
-    await click(view, '重新加载')
-    expect(view.text()).toContain('无法读取 nft 配置')
-    await click(view, '重新加载')
+    expect(wrapper.get('[role="alert"]').text()).toContain('节点离线')
+    await click(wrapper, '重新加载')
     expect(api.getNodeNftConfig).toHaveBeenCalledWith(node.id)
-    expect(view.text()).toContain('inet yagp_7')
-    expect(view.text()).toContain('最近一次成功应用')
-    const input = view.get('textarea#node-nft-config')
-    expect(input.element.value).toBe(saved)
-
-    await input.setValue('{')
-    await click(view, '应用到节点')
-    expect(view.get('[role="alert"]').text()).toContain('JSON 格式有误')
-    expect(document.activeElement).toBe(view.get('#nft-config-error').element)
-    expect(messages.confirm).not.toHaveBeenCalled()
-    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
-    messages.confirm.mockRejectedValueOnce('cancel')
-    await click(view, '载入面板默认模板')
-    expect(input.element.value).toBe('{')
-    await click(view, '载入面板默认模板')
-    expect(input.element.value).toBe(template)
-    expect(view.text()).toContain('当前显示面板默认模板')
-    expect(view.find('#nft-config-error').exists()).toBe(false)
+    expect(wrapper.get('pre').text()).toBe(activeRules)
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('应用到节点')
   })
 
-  it('preserves the draft until the node acknowledges an applied config', async () => {
-    api.getNodeNftConfig.mockResolvedValue(response(config))
-    const view = open(NodeNftDialog)
+  it('labels saved rules from older nodes and shows when no live rules are configured', async () => {
+    api.getNodeNftConfig.mockResolvedValueOnce(response({ config: activeRules, live: false }))
+      .mockResolvedValueOnce(response({ config: '{"nftables":[]}', live: true }))
+    wrapper = mountNodeComponent(NodeNftPreview, { node })
     await flushPromises()
-    await click(view, '载入面板默认模板')
-    expect(messages.confirm).not.toHaveBeenCalled()
-    expect(button(view, '载入面板默认模板').element.disabled).toBe(true)
-    const input = view.get('textarea#node-nft-config')
-    await input.setValue('   ')
-    expect(button(view, '应用到节点').element.disabled).toBe(true)
-    await input.setValue(template)
-    messages.confirm.mockRejectedValueOnce('cancel')
-    await click(view, '应用到节点')
-    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
-    api.applyNodeNftConfig.mockRejectedValueOnce(apiError('表被占用'))
-    await click(view, '应用到节点')
-    expect(view.text()).toContain('表被占用')
-    api.applyNodeNftConfig.mockRejectedValueOnce(new Error('lost connection'))
-    await click(view, '应用到节点')
-    expect(view.text()).toContain('无法确认 nft 配置已应用')
-    expect(input.element.value).toBe(template)
-
-    const apply = deferred()
-    api.applyNodeNftConfig.mockReturnValueOnce(apply.promise)
-    await click(view, '应用到节点')
-    expect(input.element.disabled).toBe(true)
-    expect(button(view, '关闭').element.disabled).toBe(true)
-    apply.resolve(response({ ...config, config: template }))
-    await flushPromises()
-    expect(api.applyNodeNftConfig).toHaveBeenLastCalledWith(node.id, template)
-    expect(messages.success).toHaveBeenCalledWith('nft 配置已应用')
-    expect(view.text()).toContain('最近一次成功应用')
-    await click(view, '关闭')
-    expect(view.emitted('update:modelValue')).toEqual([[false]])
-  })
-
-  it('shows the server template for an unconfigured node and disables applying an empty template', async () => {
-    api.getNodeNftConfig.mockResolvedValueOnce(response({ table: 'yagp_7', template }))
-    const view = open(NodeNftDialog)
-    await flushPromises()
-    expect(view.get('textarea').element.value).toBe(template)
-    expect(view.text()).toContain('面板默认模板')
-    view.unmount()
-    wrapper = undefined
-    api.getNodeNftConfig.mockResolvedValueOnce(response({ table: 'yagp_7' }))
-    const noTemplate = open(NodeNftDialog)
-    await flushPromises()
-    expect(noTemplate.get('textarea').element.value).toBe('')
-    expect(button(noTemplate, '应用到节点').element.disabled).toBe(true)
-  })
-
-  it('merges the loopback template with the saved chains and waits for confirmation before applying', async () => {
-    const existing = JSON.stringify({ nftables: [prerouting] })
-    api.getNodeNftConfig.mockResolvedValueOnce(response({ ...config, config: existing, template: loopbackTemplate }))
-    const view = open(NodeNftDialog, { loopbackPort: 443 })
-    await flushPromises()
-    const input = view.get('textarea')
-    expect(api.getNodeNftConfig).toHaveBeenCalledWith(node.id, 443)
-    expect(input.element.value).toBe(existing)
-    expect(view.text()).toContain('TCP 443')
-
-    await input.setValue('{}')
-    await click(view, '合并回环模板')
-    expect(view.get('[role="alert"]').text()).toContain('请先修正当前草稿')
-    await input.setValue(existing)
-    await click(view, '合并回环模板')
-    const merged = input.element.value
-    expect(JSON.parse(merged)).toEqual({ nftables: [prerouting, ...loopback] })
-    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
-    await click(view, '合并回环模板')
-    expect(view.get('[role="alert"]').text()).toContain('已包含 loopback_443')
-    expect(input.element.value).toBe(merged)
-
-    messages.confirm.mockRejectedValueOnce('cancel')
-    await click(view, '应用到节点')
-    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
-    api.applyNodeNftConfig.mockResolvedValueOnce(response({ ...config, config: merged }))
-    await click(view, '应用到节点')
-    expect(api.applyNodeNftConfig).toHaveBeenCalledOnce()
-    expect(api.applyNodeNftConfig).toHaveBeenCalledWith(node.id, merged)
-    expect(view.text()).toContain('最近一次成功应用')
-  })
-
-  it('starts with the loopback template for an unconfigured node', async () => {
-    api.getNodeNftConfig.mockResolvedValueOnce(response({ table: config.table, template: loopbackTemplate }))
-    const view = open(NodeNftDialog, { loopbackPort: 443 })
-    await flushPromises()
-    expect(view.get('textarea').element.value).toBe(loopbackTemplate)
-    expect(view.text()).toContain('当前显示回环模板')
-    expect(button(view, '合并回环模板').element.disabled).toBe(true)
-    expect(api.applyNodeNftConfig).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('旧版守护程序仅提供上次保存的规则')
+    expect(wrapper.get('pre').text()).toBe(activeRules)
+    await click(wrapper, '刷新')
+    expect(wrapper.text()).toContain('此节点暂无 yagp 管理的 nftables 规则。')
+    expect(wrapper.find('pre').exists()).toBe(false)
   })
 })
 

@@ -13,7 +13,7 @@ vi.mock('@/api/node', () => ({
   calibrateNodeTraffic: vi.fn(),
   issueNodeRegistrationToken: vi.fn(), getNodeConfig: vi.fn(),
   getGostService: vi.fn(), getGostLogs: vi.fn(), restartGostService: vi.fn(),
-  getNodeNftConfig: vi.fn(), applyNodeNftConfig: vi.fn(),
+  getNodeNftConfig: vi.fn(),
   getNodeUpgradeStatus: vi.fn(), updateNodeUpgradePolicy: vi.fn(), upgradeNodeComponent: vi.fn()
 }))
 vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
@@ -41,6 +41,7 @@ beforeEach(async () => {
   messages = mockNodeMessages()
   api.getNodeList.mockResolvedValue(list([primary]))
   api.getNode.mockResolvedValue(response(primary))
+  api.getGostService.mockResolvedValue(response({ unit: 'gost.service', active_state: 'active', load_state: 'loaded' }))
   getPublicSystemConfig.mockResolvedValue(response({ host: 'panel.example.com' }))
   api.issueNodeRegistrationToken.mockImplementation(async () => token())
   router = createRouter({ history: createMemoryHistory(), routes: [{ name: 'Nodes', path: '/nodes', component: Nodes }] })
@@ -434,23 +435,54 @@ describe('node actions', () => {
     expect(messages.success).toHaveBeenCalledTimes(2)
   })
 
-  it('opens each asynchronous node control and cleans it up when closed', async () => {
-    api.getGostService.mockResolvedValue(response({ unit: 'gost.service' }))
-    api.getGostLogs.mockResolvedValue(response({ entries: [] }))
-    api.getNodeNftConfig.mockResolvedValue(response({ table: 'yagp_7' }))
+  it('links directly to the inline Gost section and fetches logs when expanded', async () => {
+    api.getGostLogs.mockResolvedValue(response({ entries: [{ message: '启动完成', priority: 6 }] }))
+    const view = open()
+    await flushPromises()
+    expect(api.getGostService).not.toHaveBeenCalled()
+    await view.get('.inventory-service-link').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.hash).toBe('#node-gost-service')
+    expect(document.activeElement).toBe(view.get('#node-gost-title').element)
+    const service = view.get('#node-gost-service')
+    expect(api.getGostService).toHaveBeenCalledWith(primary.id)
+    expect(service.text()).toContain('运行中')
+    expect(view.find('[role="dialog"]').exists()).toBe(false)
+    expect(api.getGostLogs).not.toHaveBeenCalled()
+    await service.get('button[aria-controls="node-gost-logs"]').trigger('click')
+    await flushPromises()
+    expect(api.getGostLogs).toHaveBeenCalledWith(primary.id)
+    expect(service.get('#node-gost-logs').text()).toContain('启动完成')
+  })
+
+  it('opens upgrades separately and previews nft only from node configuration', async () => {
+    api.getNodeNftConfig.mockResolvedValue(response({
+      config: '{"nftables":[{"table":{"family":"inet","name":"yagp_quota"}}]}',
+      live: true
+    }))
     api.getNodeUpgradeStatus.mockResolvedValue(response({ available: false }))
     const view = open()
     await flushPromises()
     await openDetail(view)
-    for (const [action, request] of [['Gost 服务', api.getGostService], ['版本与升级', api.getNodeUpgradeStatus], ['nft 配置', api.getNodeNftConfig]]) {
-      await click(view, action)
-      await vi.dynamicImportSettled()
-      await flushPromises()
-      expect(request).toHaveBeenCalledWith(primary.id)
-      const title = `${action} · ${primary.name}`
-      await click(dialog(view, title), '关闭')
-      expect(view.find(`[aria-label="${title}"]`).exists()).toBe(false)
-    }
+    await click(view, '管理升级')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(api.getNodeUpgradeStatus).toHaveBeenCalledWith(primary.id)
+    await click(dialog(view, `版本与升级 · ${primary.name}`), '关闭')
+
+    expect(view.find('#tab-nft').exists()).toBe(false)
+    await click(view, '配置')
+    const settings = dialog(view, settingsTitle)
+    expect(api.getNodeNftConfig).not.toHaveBeenCalled()
+    await settings.get('#tab-nft').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(api.getNodeNftConfig).toHaveBeenCalledWith(primary.id)
+    expect(view.findAll('[role="dialog"]')).toHaveLength(1)
+    const preview = settings.get('#pane-nft')
+    expect(preview.get('pre').text()).toContain('yagp_quota')
+    expect(preview.find('textarea').exists()).toBe(false)
+    expect(preview.text()).not.toContain('应用到节点')
   })
 
   it('cancels deletion, reports a failed delete and reloads after a successful one', async () => {

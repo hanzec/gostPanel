@@ -306,9 +306,9 @@ systemd 节点使用 `yagp-daemon.service` 和 `yagp-gost.service`。Gost 在守
 
 ### 管理节点的 nftables 配置
 
-在装有 `nftables` 的 Linux 节点上，通过节点详情的 **nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。守护进程连接后通过 WebSocket 获取配置和模板，并在实例目录中缓存为 `panel-config.pb`。节点可运行 `/etc/yagp-daemon/<ID>/yagp-daemon nft-template -c /etc/yagp-daemon/<ID>/node.yaml` 读取缓存中的模板。
+在 **节点管理 → 配置 → nft 配置** 可以只读预览在线节点上由 yagp 管理的 nftables 规则。预览当前规则需要 Linux、`nftables` 和新版 `yagp-daemon`。旧版守护程序仅提供上次保存的节点规则。
 
-配置使用 `{"nftables":[...]}`，只允许为节点专用的 `inet yagp_node` 表添加链、规则、集合等对象。配额使用独立的 `inet yagp_quota` 表。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除规则表。升级运行布局时会迁移原有编号规则表及配额用量。卸载时脚本会清理节点规则和配额表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
+流量配额规则随节点的配额设置自动生成，使用独立的 `inet yagp_quota` 表。已有的 `inet yagp_node` 规则继续由守护程序在启动时恢复。升级运行布局时会迁移原有编号规则表及配额用量。卸载时脚本会清理节点规则和配额表并保留配置文件。
 
 ### Gost Relay 来源 IP 白名单
 
@@ -327,7 +327,7 @@ systemd 节点使用 `yagp-daemon.service` 和 `yagp-gost.service`。Gost 在守
 1. 注册 A 和 B，在 **入口管理** 各建一个入口。为两端分别选择节点、监听协议、IP 和端口。保存后面板会让对应的 `yagp-daemon` 检查监听地址是否可用，保存本身不启动转发。旧版守护进程需要升级后才支持监听检查。
 2. 在 A 配置 **固定目标地址**，或选择 TCP、`127.0.0.1` 和 **Clash 规则集** 做本机透明分流。B 选择 **仅监听**，使用 A 可访问的地址。B 监听所有接口时，A 会自动跟随 B 上报的 IP 变化。
 3. 在 **隧道管理** 新建隧道，选择 A 作为来源、B 作为出口。创建时面板保存 A 的转发配置和 B 的 Gost Relay 配置。使用 Clash 时，命中订阅的连接经过 B，其余连接从 A 直连。
-4. 若使用回环透明分流，在运行中的 A 入口打开 **更多 → nftables 模板**，核对并应用到 A。模板使用你选的监听端口，只接管指定进程组的本机 IPv4 TCP 流量。`skgid` 默认示例为 `65534`，请改成实际应用进程组 ID；可单独修改 `dport` 来选择需要接管的原始目的端口。停用隧道前，先移除该重定向。
+4. 回环透明分流依赖入口节点上的流量重定向。升级面板和守护程序会保留此前已应用的重定向，可在节点的 **配置 → nft 配置** 中查看。
 
 ---
 

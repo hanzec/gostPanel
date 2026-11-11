@@ -3,12 +3,10 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,7 +35,7 @@ func (f *handlerHTTPFixture) enrollFixtureNode(t *testing.T, name string, nodeCo
 	}
 	dispatch := nodegrpc.NewDispatcher(nodeControl,
 		nodegrpc.V1_Execute_FullMethodName, nodegrpc.V1_GetGostServiceStatus_FullMethodName, nodegrpc.V1_RestartGostService_FullMethodName,
-		nodegrpc.V1_GetGostLogs_FullMethodName, nodegrpc.V1_GetNftConfig_FullMethodName, nodegrpc.V1_ApplyNftConfig_FullMethodName,
+		nodegrpc.V1_GetGostLogs_FullMethodName, nodegrpc.V1_GetNftConfig_FullMethodName,
 		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName, nodegrpc.V1_SyncTrafficQuota_FullMethodName)
 	startTestReportStream(t, t.Context(), startTestReportServer(t, f.db), node, func(ctx context.Context, method string, body []byte) ([]byte, error) {
 		if err := nodeControl.before(method); err != nil {
@@ -53,6 +51,7 @@ type handlerNodeControl struct {
 	admin       http.Handler
 	mu          sync.Mutex
 	nft         string
+	nftLive     string
 	upgrade     *nodegrpc.NodeUpgradeRequest
 	quota       *nodegrpc.TrafficQuotaRequest
 	calibrates  bool
@@ -106,17 +105,7 @@ func (n *handlerNodeControl) GetGostLogs(_ context.Context, req *nodegrpc.GostLo
 func (n *handlerNodeControl) GetNftConfig(context.Context, *emptypb.Empty) (*nodegrpc.NftConfig, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return &nodegrpc.NftConfig{Config: n.nft}, nil
-}
-
-func (n *handlerNodeControl) ApplyNftConfig(_ context.Context, req *nodegrpc.NftConfig) (*nodegrpc.NftConfig, error) {
-	if !json.Valid([]byte(req.GetConfig())) {
-		return nil, status.Error(codes.InvalidArgument, "invalid nftables JSON")
-	}
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.nft = req.GetConfig()
-	return &nodegrpc.NftConfig{Config: n.nft}, nil
+	return &nodegrpc.NftConfig{Config: n.nft, LiveConfig: n.nftLive}, nil
 }
 
 func (n *handlerNodeControl) GetUpgradeStatus(context.Context, *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
@@ -207,7 +196,9 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
 	f.registerNodes()
 	f.registerSettings()
+	const nftJSON = `{"nftables":[{"add":{"chain":{"name":"legacy"}}}]}`
 	control := &handlerNodeControl{
+		nft:      nftJSON,
 		failures: make(map[string]codes.Code),
 		admin: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.Method != "GET" || req.URL.Path != "/config" {
@@ -228,7 +219,7 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 	f.request(t, "GET", "/nodes/999/config", "", 500)
 	for _, item := range []struct{ method, suffix string }{
 		{"GET", "/gost/service"}, {"POST", "/gost/restart"}, {"GET", "/gost/logs"},
-		{"GET", "/nft"}, {"PUT", "/nft"},
+		{"GET", "/nft"},
 	} {
 		f.request(t, item.method, "/nodes/0"+item.suffix, "", 400)
 		f.request(t, item.method, "/nodes/999"+item.suffix, "", 404)
@@ -263,31 +254,17 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 	control.reject(nodegrpc.V1_GetGostLogs_FullMethodName, codes.Unimplemented)
 	f.request(t, "GET", path+"/gost/logs", "", 501)
 
-	const nftJSON = `{"nftables":[]}`
-	f.request(t, "PUT", path+"/nft", "{}", 400)
-	f.request(t, "PUT", path+"/nft", `{"config":"not-json"}`, 400)
-	f.request(t, "PUT", path+"/nft", `{"config":"`+strings.Repeat("x", nodegrpc.MaxNftConfigBytes+1)+`"}`, 400)
-	body, err := json.Marshal(map[string]string{"config": nftJSON})
-	if err != nil {
-		t.Fatal(err)
-	}
-	updated := handlerData[nodeNftConfig](t, f.request(t, "PUT", path+"/nft", string(body), 200))
 	read := handlerData[nodeNftConfig](t, f.request(t, "GET", path+"/nft", "", 200))
-	if updated != read || read.Config != nftJSON || read.Table != nodegrpc.NftTableName(uint64(node.ID)) ||
-		!json.Valid([]byte(read.Template)) || !strings.Contains(read.Template, read.Table) {
-		t.Fatalf("bridge returned an unexpected nftables config: %+v", read)
+	if read.Config != nftJSON || read.Table != nodegrpc.NftTableName(uint64(node.ID)) || read.Live {
+		t.Fatalf("bridge returned an unexpected saved nftables config: %+v", read)
 	}
-	for _, port := range []string{"0", "65536", "abc"} {
-		f.request(t, "GET", path+"/nft?loopback_port="+port, "", 400)
-	}
-	loopback := handlerData[nodeNftConfig](t, f.request(t, "GET", path+"/nft?loopback_port=443", "", 200))
-	if loopback.Config != read.Config || loopback.Table != read.Table || !json.Valid([]byte(loopback.Template)) {
-		t.Fatalf("unexpected loopback template response: %+v", loopback)
-	}
-	for _, expected := range []string{`"hook":"output"`, `"name":"loopback_443"`, `"redirect":{"port":443}`, strconv.Itoa(gost.ClashRedirectMark)} {
-		if !strings.Contains(loopback.Template, expected) {
-			t.Errorf("loopback template missing %q: %s", expected, loopback.Template)
-		}
+	const liveNft = `{"nftables":[]}`
+	control.mu.Lock()
+	control.nftLive = liveNft
+	control.mu.Unlock()
+	read = handlerData[nodeNftConfig](t, f.request(t, "GET", path+"/nft", "", 200))
+	if read.Config != liveNft || !read.Live {
+		t.Fatalf("bridge returned an unexpected live nftables config: %+v", read)
 	}
 	control.reject(nodegrpc.V1_GetNftConfig_FullMethodName, codes.Unimplemented)
 	f.request(t, "GET", path+"/nft", "", 501)
@@ -298,7 +275,7 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 		t.Fatalf("node restarted %d times, want 1", restarts)
 	}
 	audit := handlerData[handlerPage[model.OperationLog]](t, f.request(t, "GET", "/logs?resource_type=node", "", 200))
-	if audit.Total != 2 || len(audit.List) != 2 || audit.List[0].ResourceID != node.ID || audit.List[1].ResourceID != node.ID {
+	if audit.Total != 1 || len(audit.List) != 1 || audit.List[0].ResourceID != node.ID || audit.List[0].Details != "重启 Gost 服务" {
 		t.Fatalf("only successful node operations should appear in the audit log: %+v", audit)
 	}
 }

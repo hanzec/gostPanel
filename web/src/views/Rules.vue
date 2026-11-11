@@ -156,7 +156,6 @@
                           command="listener-check"
                           :disabled="listenerChecks.get(row.id)?.pending"
                         >检查监听</el-dropdown-item>
-                        <el-dropdown-item v-if="row.use_clash_ruleset && row.status === 'running'" command="nft-template">nftables 模板</el-dropdown-item>
                         <el-dropdown-item command="delete" divided :disabled="pendingRuleIds.has(row.id) || !!row.linked_tunnel_id">删除规则</el-dropdown-item>
                       </el-dropdown-menu>
                     </template>
@@ -224,7 +223,7 @@
               </el-select>
               <p id="rule-listen-ip-help" class="rule-form-hint ops-muted">
                 {{ form.listen_ip === '127.0.0.1' || form.listen_ip === '::1'
-                  ? '回环地址仅接受本机连接。可在入口节点配置 nftables 重定向。'
+                  ? '回环地址仅接受本机连接。'
                   : '可输入自定义 IPv4 或 IPv6。探测地址经过 NAT 时，请选择入口节点本机的地址。' }}
               </p>
             </el-form-item>
@@ -251,7 +250,7 @@
               <p id="rule-target-mode-help" class="rule-form-hint ops-muted">
                 {{ canUseClashRuleset ? 'Clash 分流使用系统设置中的规则集。' : 'Clash 分流需要 TCP 与 127.0.0.1。' }}
                 <template v-if="form.use_clash_ruleset && canUseClashRuleset">
-                  在隧道管理将本入口选为源端。匹配的流量经过隧道，其余流量直连。隧道启动后，可从「更多」打开 nftables 模板。
+                  在隧道管理将本入口选为源端。匹配的流量经过隧道，其余流量直连。
                 </template>
               </p>
             </el-form-item>
@@ -296,14 +295,6 @@
       </template>
     </PanelDialog>
 
-    <NodeNftDialog
-      v-if="nftEntry"
-      v-model="nftDialogVisible"
-      :node="nftEntry.node"
-      :loopback-port="nftEntry.port"
-      @closed="nftEntry = null"
-    />
-
     <PanelDialog
       v-model="exportDialogVisible"
       title="导出规则"
@@ -346,7 +337,6 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, CopyDocument, Download, Plus, Refresh, Remove, Right, Search, Switch, Upload, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import NodeNftDialog from '@/components/NodeNftDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { getNodeList } from '@/api/node'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
@@ -386,8 +376,6 @@ const summary = computed(() => {
 })
 
 const dialogVisible = ref(false)
-const nftDialogVisible = ref(false)
-const nftEntry = ref(null)
 const isEdit = ref(false)
 const editId = ref(null)
 const submitLoading = ref(false)
@@ -582,16 +570,6 @@ const handleRowCommand = async (row, command) => {
     return
   }
   if (command === 'listener-check') return checkListener(row)
-  if (command === 'nft-template') {
-    const node = row.node ?? nodeList.value.find(item => item.id === row.node_id) ?? row.tunnel?.entry_node
-    if (!node?.id) {
-      ElMessage.warning('找不到所在节点，无法打开 nftables 模板。')
-      return
-    }
-    nftEntry.value = { node, port: row.listen_port }
-    nftDialogVisible.value = true
-    return
-  }
   try {
     await confirmPanelAction('确定删除规则「' + row.name + '」？', '删除规则', {
       confirmButtonText: '删除规则',

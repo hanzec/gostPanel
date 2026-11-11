@@ -29,7 +29,6 @@ describe('panel API contracts', () => {
   const timeout = { timeout: 25000 }
   const silent = { silentError: true }
   const nodePolicy = { auto_upgrade_daemon: true }
-  const nft = '{"nftables":[]}'
 
   it.each([
     ['identity', getUserInfo, 'get', '/auth/info'],
@@ -42,11 +41,10 @@ describe('panel API contracts', () => {
     ['delete node', () => node.deleteNode(42), 'delete', '/nodes/42'],
     ['node config', () => node.getNodeConfig(42), 'get', '/nodes/42/config'],
     ['registration token', () => node.issueNodeRegistrationToken(42), 'post', '/nodes/42/registration-token', silent],
-    ['Gost status', () => node.getGostService(42), 'get', '/nodes/42/gost/service'],
-    ['restart Gost', () => node.restartGostService(42), 'post', '/nodes/42/gost/restart', timeout],
-    ['Gost logs', () => node.getGostLogs(42), 'get', '/nodes/42/gost/logs'],
-    ['nft config', () => node.getNodeNftConfig(42), 'get', '/nodes/42/nft'],
-    ['apply nft', () => node.applyNodeNftConfig(42, nft), 'put', '/nodes/42/nft', { ...timeout, data: { config: nft } }],
+    ['Gost status', () => node.getGostService(42), 'get', '/nodes/42/gost/service', silent],
+    ['restart Gost', () => node.restartGostService(42), 'post', '/nodes/42/gost/restart', { ...timeout, ...silent }],
+    ['Gost logs', () => node.getGostLogs(42), 'get', '/nodes/42/gost/logs', silent],
+    ['nft config preview', () => node.getNodeNftConfig(42), 'get', '/nodes/42/nft', silent],
     ['node upgrade status', () => node.getNodeUpgradeStatus(42), 'get', '/nodes/42/upgrade', silent],
     ['node upgrade policy', () => node.updateNodeUpgradePolicy(42, nodePolicy), 'put', '/nodes/42/upgrade', { ...silent, data: nodePolicy }],
     ['start upgrade', () => node.upgradeNodeComponent(42, 'daemon'), 'post', '/nodes/42/upgrade/daemon', { ...timeout, ...silent }],

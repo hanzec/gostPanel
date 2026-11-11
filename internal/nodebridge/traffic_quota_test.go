@@ -20,6 +20,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestTrafficQuotaBatch(t *testing.T) {
@@ -155,6 +156,10 @@ func TestNativeTrafficQuotaLifecycle(t *testing.T) {
 	}
 	if used := apply(state); used != 20 {
 		t.Fatalf("initial usage = %d, want 20", used)
+	}
+	preview, err := control.GetNftConfig(ctx, &emptypb.Empty{})
+	if err != nil || !strings.Contains(preview.GetLiveConfig(), table) || !strings.Contains(preview.GetLiveConfig(), `"bytes": 100000`) {
+		t.Fatalf("preview did not include the generated quota: %v, %v", preview, err)
 	}
 	clientTCP, err := net.DialTimeout("tcp4", tcp.Addr().String(), time.Second)
 	if err != nil {
