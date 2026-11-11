@@ -116,7 +116,9 @@ tmpdir=$(mktemp -d /tmp/yagp-deploy.XXXXXXXX) &&
 
 安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
-安装程序用公网域名生成 Traefik 路由和以 `/api/deploy` 结尾的 `DEPLOY_WEBHOOK_URL`。为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到公网 Traefik file provider 加载的动态目录。迁移时先运行上面的 `install` 命令，然后替换旧路由配置，并从动态目录移除旧的独立升级路由。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
+为公网 Traefik 配置固定内网 IP，将 file provider 的 `directory` 设为容器内的 `/etc/traefik/dynamic`，启用 `watch`，并将该目录绑定到宿主机上由 root 管理的目录。安装脚本会从指定容器的挂载找到宿主机目录，并将 `traefik-panel.yml` 写入该目录。如果 file provider 使用其他目录，在安装命令后加上 `--traefik-dynamic-dir <容器内目录>`。没有绑定目录时，按安装提示将生成的 `/etc/yagp-depoly/traefik-panel.yml` 加入 Traefik 实际读取的位置。迁移时，从动态目录移除旧的独立升级路由。
+
+安装程序根据公网域名生成以 `/api/deploy` 结尾的 `DEPLOY_WEBHOOK_URL`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
 
 在 GitHub 的 `production` Environment 中限制 `master` 部署，并配置安装输出的 `DEPLOY_WEBHOOK_URL`、`DEPLOY_WEBHOOK_SECRET` 和 `DEPLOY_WEBHOOK_TOKEN`。两个工作流任务共用这三个值，并分别请求 `/api/deploy/panel` 和 `/api/deploy/deploy-tool`。仓库级同名 Secrets 和现有的完整端点 URL 也可继续使用。要自动部署面板，将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
 

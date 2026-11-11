@@ -22,6 +22,7 @@ readonly docker_socket=/var/run/docker.sock
 readonly image_repo=ghcr.io/hanzec/yagp
 readonly release_cache=https://release.hanzec-overseas.cn/yagp
 readonly webhook_base_path=/api/deploy
+readonly default_traefik_dynamic_dir=/etc/traefik/dynamic
 
 main() {
     case ${1:-} in
@@ -36,6 +37,7 @@ usage() {
     cat >&2 <<'EOF'
 用法：
   sudo bash setup_deploy.sh install Compose部署目录 [--traefik 容器名或ID]
+      [--traefik-dynamic-dir 容器内动态配置目录]
 
 install 适用于已部署的 Linux Docker Compose 面板，要求部署目录内有
 root 管理的 docker-compose.yml 和 .env。一次配置面板部署和工具升级 Webhook。
@@ -56,15 +58,17 @@ log() {
 install_webhook() (
     [[ $# -ge 1 ]] || usage
     check_systemd
-    local project_dir project proxy stage cosign arch receiver updater traefik
+    local project_dir project proxy stage cosign arch receiver updater traefik options dynamic_dir route_file
     local secret token old_secret old_token
     cosign=$(find_cosign)
     project_dir=$(resolve_project_dir "$1")
     shift
-    proxy=$(traefik_option "$@")
+    options=$(traefik_options "$@")
+    IFS='|' read -r proxy dynamic_dir <<< "$options"
     arch=$(tool_arch)
     project=$(inspect_project "$project_dir")
     traefik=$(inspect_traefik "$project_dir" "$project" "$proxy")
+    route_file=$(traefik_route_file "$proxy" "$dynamic_dir")
     stage=$(mktemp -d /tmp/yagp-deploy.XXXXXXXXXX)
     trap 'rm -rf -- "$stage"' EXIT
     receiver="yagp-depoly-linux-$arch"
@@ -84,15 +88,21 @@ install_webhook() (
     printf '%s\n' "$secret" | write_file "$managed_dir/panel.secret" 0600
     printf '%s\n' "$token" | write_file "$managed_dir/panel.token" 0600
     write_hook_unit "$traefik"
-    write_traefik_route "$traefik"
+    write_traefik_route "$traefik" "$managed_dir/traefik-panel.yml"
 
     systemctl daemon-reload
     systemctl enable yagp-depoly.service
     systemctl restart yagp-depoly.service
+    if [[ -n $route_file ]]; then
+        write_file "$route_file" 0644 < "$managed_dir/traefik-panel.yml"
+        log "Traefik 路由已写入 $route_file。"
+    else
+        log "未找到容器内 $default_traefik_dynamic_dir 对应的宿主机目录。Webhook 路由仍需配置。"
+        log "请指定 --traefik-dynamic-dir 后重新安装，或将 $managed_dir/traefik-panel.yml 加入 Traefik 实际读取的目录。"
+    fi
     retire_legacy_receiver "$project_dir" "$old_secret" "$old_token"
     retire_legacy_upgrade_receiver
-    log '配置完成。部署账号已禁用登录，本次未更新容器。'
-    log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
+    log 'Webhook 接收器安装完成。部署账号已禁用登录，本次未更新容器。'
     log "查看部署日志：$log_query"
     show_install_result "$traefik" "$secret" "$token"
 )
@@ -157,16 +167,39 @@ download_tool_archive() {
         fail '部署工具发布包验签失败。'
 }
 
-traefik_option() {
-    local proxy
-    case $# in
-        0) proxy=traefik ;;
-        1) proxy=${1#--traefik=} ;;
-        2) [[ $1 == --traefik ]] || usage; proxy=$2 ;;
-        *) usage ;;
-    esac
-    [[ -n $proxy && $proxy != -* ]] || usage
-    printf '%s\n' "$proxy"
+traefik_options() {
+    local proxy='' dynamic_dir=''
+    while (( $# )); do
+        case $1 in
+            --traefik)
+                [[ $# -ge 2 && -n $2 ]] || usage
+                proxy=$2
+                shift ;;
+            --traefik=*)
+                proxy=${1#*=}
+                [[ -n $proxy ]] || usage ;;
+            --traefik-dynamic-dir)
+                [[ $# -ge 2 && -n $2 ]] || usage
+                dynamic_dir=$2
+                shift ;;
+            --traefik-dynamic-dir=*)
+                dynamic_dir=${1#*=}
+                [[ -n $dynamic_dir ]] || usage ;;
+            *)
+                [[ $# -eq 1 && -z $proxy && $1 != -* ]] || usage
+                proxy=$1 ;;
+        esac
+        shift
+    done
+    proxy=${proxy:-traefik}
+    [[ $proxy != -* && $proxy != *'|'* && $proxy != *$'\n'* ]] || usage
+    if [[ -n $dynamic_dir ]]; then
+        [[ $dynamic_dir == /* && $dynamic_dir != *'|'* && $dynamic_dir != *$'\n'* &&
+           $dynamic_dir/ != *'/../'* && $dynamic_dir/ != *'/./'* ]] || usage
+        dynamic_dir=${dynamic_dir%/}
+        [[ -n $dynamic_dir ]] || usage
+    fi
+    printf '%s|%s\n' "$proxy" "$dynamic_dir"
 }
 
 resolve_project_dir() {
@@ -422,6 +455,37 @@ inspect_traefik() {
     printf '%s|%s|%s|%s|%s\n' "$hostname" "$entrypoint" "$gateway" "$proxy_ip" "$proxy_name"
 }
 
+traefik_route_file() {
+    local proxy=$1 configured_dir=$2 dynamic_dir mounts type source destination
+    local mount_type='' mount_source='' mount_destination='' host_dir route_file
+    dynamic_dir=${configured_dir:-$default_traefik_dynamic_dir}
+    mounts=$(docker_local inspect --type container --format \
+        '{{range .Mounts}}{{printf "%s\t%s\t%s\n" .Type .Destination .Source}}{{end}}' -- "$proxy") ||
+        fail "无法读取 Traefik 容器 $proxy 的挂载。"
+    # A mount on the dynamic directory takes precedence over a parent mount.
+    while IFS=$'\t' read -r type destination source; do
+        if [[ ( $dynamic_dir == "$destination" || $dynamic_dir == "$destination/"* ) &&
+              ${#destination} -gt ${#mount_destination} ]]; then
+            mount_type=$type
+            mount_source=$source
+            mount_destination=$destination
+        fi
+    done <<< "$mounts"
+    host_dir=$mount_source${dynamic_dir#"$mount_destination"}
+    if [[ $mount_type != bind || ! -d $host_dir ]]; then
+        [[ -z $configured_dir ]] || fail "Traefik 容器 $proxy 的 $dynamic_dir 未通过 bind mount 绑定到宿主机目录。"
+        return 0
+    fi
+    host_dir=$(realpath -e -- "$host_dir") ||
+        fail "无法定位 Traefik 容器 $proxy 的动态配置目录 $dynamic_dir。"
+    require_root_path "$host_dir"
+    route_file="$host_dir/traefik-panel.yml"
+    if [[ -e $route_file || -L $route_file ]]; then
+        check_managed_file "$route_file"
+    fi
+    printf '%s\n' "$route_file"
+}
+
 write_hook_unit() {
     local traefik=$1 gateway proxy_ip
     IFS='|' read -r _ _ gateway proxy_ip _ <<< "$traefik"
@@ -454,7 +518,7 @@ write_traefik_route() {
     local hostname entrypoint gateway hook_rule
     IFS='|' read -r hostname entrypoint gateway _ <<< "$1"
     printf -v hook_rule 'Host(`%s`) && (Path(`/api/deploy`) || PathPrefix(`/api/deploy/`))' "$hostname"
-    write_file "$managed_dir/traefik-panel.yml" 0644 <<EOF
+    write_file "$2" 0644 <<EOF
 http:
   routers:
     yagp-deploy-webhook:
