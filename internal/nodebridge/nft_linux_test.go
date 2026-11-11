@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestNftConfigurationAndQuotaErrors(t *testing.T) {
@@ -103,5 +104,41 @@ esac
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("staged files left behind: %v, %v", entries, err)
+	}
+}
+
+func TestNftPreviewReportsReadFailures(t *testing.T) {
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
+	command := filepath.Join(bin, "nft")
+	control := controlServer{config: Config{NodeID: 42, NftConfigFile: filepath.Join(t.TempDir(), "nft.json")}}
+	const listManagedTable = `if [ "$3" = tables ]; then
+  echo '{"nftables":[{"table":{"family":"inet","name":"yagp_node_42"}}]}'
+  exit 0
+fi
+`
+	for _, test := range []struct {
+		name   string
+		script string
+		detail string
+	}{
+		{"table listing failed", "echo 'permission denied' >&2; exit 1", "permission denied"},
+		{"invalid table listing", "echo 'invalid JSON'", "invalid character"},
+		{"managed table disappeared", listManagedTable + "echo 'table no longer exists' >&2; exit 1", "table no longer exists"},
+		{"invalid rules listing", listManagedTable + "echo 'invalid JSON'", "invalid character"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writeUpgradeFixture(t, command, "#!/bin/sh\n"+test.script+"\n")
+			preview, err := control.GetNftConfig(t.Context(), &emptypb.Empty{})
+			if preview != nil || status.Code(err) != codes.FailedPrecondition || !strings.Contains(status.Convert(err).Message(), test.detail) {
+				t.Fatalf("preview = %v, %v; want a failed precondition containing %q", preview, err, test.detail)
+			}
+		})
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := control.GetNftConfig(ctx, &emptypb.Empty{}); status.Code(err) != codes.Canceled {
+		t.Fatalf("canceled preview returned %v", err)
 	}
 }

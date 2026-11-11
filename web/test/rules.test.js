@@ -2,11 +2,11 @@ import { flushPromises } from '@vue/test-utils'
 import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Rules from '@/views/Rules.vue'
-import { getNodeList, getNodeNftConfig } from '@/api/node'
+import { getNodeList } from '@/api/node'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
-vi.mock('@/api/node', () => ({ getNodeList: vi.fn(), getNodeNftConfig: vi.fn(), applyNodeNftConfig: vi.fn() }))
+vi.mock('@/api/node', () => ({ getNodeList: vi.fn() }))
 vi.mock('@/api/rule', () => ({
   checkRuleListener: vi.fn(), createRule: vi.fn(), deleteRule: vi.fn(), getRuleList: vi.fn(),
   startRule: vi.fn(), stopRule: vi.fn(), updateRule: vi.fn()
@@ -206,20 +206,17 @@ describe('forwarding rule editor and actions', () => {
     })
   })
 
-  it('opens the selected loopback port template on the tunnel entry node', async () => {
+  it('shows the tunnel link for a running Clash entry', async () => {
     getRuleList.mockResolvedValueOnce(result([{
       ...relayRule, protocol: 'tcp', listen_ip: '127.0.0.1', listen_port: 443,
       use_clash_ruleset: true, targets: [], status: 'running', linked_tunnel_id: 8, tunnel_role: 'entry'
     }]))
-    getNodeNftConfig.mockResolvedValueOnce({ data: { table: 'yagp_node_4', template: '{"nftables":[]}' } })
     const wrapper = mountInventory(Rules)
     await flushPromises()
     expect(row(wrapper, 'DNS').text()).toContain('Clash 规则集')
     expect(row(wrapper, 'DNS').text()).toContain('隧道源端')
     expect(row(wrapper, 'DNS').find('[aria-label="停止 DNS"]').exists()).toBe(false)
-    await command(row(wrapper, 'DNS'), 'nft-template')
-    expect(getNodeNftConfig).toHaveBeenCalledWith(entryNode.id, 443)
-    expect(editDialog(wrapper).attributes('aria-label')).toContain('入口 A')
+    expect(row(wrapper, 'DNS').text()).toContain('隧道管理')
   })
 
   it('keeps edits on a failed save and requires a port when copying', async () => {

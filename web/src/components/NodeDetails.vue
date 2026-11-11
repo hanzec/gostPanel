@@ -15,8 +15,8 @@
     </div>
   </header>
 
-  <div class="ops-panel detail-overview">
-    <section class="overview-section" aria-labelledby="node-network-title">
+  <div class="detail-overview">
+    <section class="ops-panel overview-section" aria-labelledby="node-network-title">
       <h2 id="node-network-title"><el-icon aria-hidden="true"><Connection /></el-icon>网络与连接信息</h2>
       <dl class="detail-endpoints">
         <div v-for="item in endpoints" :key="item.label">
@@ -30,7 +30,7 @@
       </dl>
     </section>
 
-    <section class="overview-section" aria-labelledby="node-traffic-title">
+    <section class="ops-panel overview-section" aria-labelledby="node-traffic-title">
       <div class="section-title">
         <h2 id="node-traffic-title"><el-icon aria-hidden="true"><PieChart /></el-icon>流量统计与配额</h2>
         <span v-if="hasQuota" class="detail-chip">{{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}</span>
@@ -61,40 +61,23 @@
     </section>
   </div>
 
-  <section class="detail-maintenance" aria-labelledby="node-maintenance-title">
-    <h2 id="node-maintenance-title">运维操作</h2>
-    <div class="maintenance-grid">
-      <button
-        v-for="action in actions"
-        :key="action.key"
-        type="button"
-        class="ops-panel maintenance-card"
-        :aria-label="action.title"
-        :aria-describedby="'node-action-hint-' + action.key"
-        @click="$emit('action', action.key)"
-      >
-        <el-icon class="maintenance-icon" aria-hidden="true"><component :is="action.icon" /></el-icon>
-        <span class="maintenance-copy"><strong>{{ action.title }}</strong><small :id="'node-action-hint-' + action.key">{{ action.description }}</small></span>
-        <el-icon class="maintenance-arrow" aria-hidden="true"><ArrowRight /></el-icon>
-      </button>
-    </div>
-  </section>
+  <NodeGostService :key="node.id" :node="node" />
 
+  <section class="ops-panel detail-upgrade" aria-labelledby="node-upgrade-title">
+    <h2 id="node-upgrade-title"><el-icon aria-hidden="true"><Download /></el-icon>版本与升级</h2>
+    <el-button @click="$emit('action', 'upgrade')">管理升级</el-button>
+  </section>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, Connection, Download, Location, Lock, Monitor, PieChart, Setting } from '@element-plus/icons-vue'
+import { Connection, Download, Location, PieChart, Setting } from '@element-plus/icons-vue'
+import NodeGostService from '@/components/NodeGostService.vue'
 import { formatBytes, formatRegion, formatTime, nodeIPs, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 
 const props = defineProps({ node: { type: Object, required: true } })
 defineEmits(['action'])
 
-const actions = [
-  { key: 'gost', title: 'Gost 服务', description: '查看运行状态、日志和重启服务', icon: Monitor },
-  { key: 'upgrade', title: '版本与升级', description: '检查稳定版本并管理自动升级', icon: Download },
-  { key: 'nft', title: 'nft 配置', description: '编辑并应用 nftables 规则', icon: Lock }
-]
 const endpoints = computed(() => [
   { label: '节点 IP', value: props.node.address || '待获取地址' },
   { label: 'IPv4', value: nodeIPs(props.node, 4).join(' · ') || '未上报' },
@@ -134,18 +117,16 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
   font-size: 12px;
 }
 .detail-buttons .el-button { min-height: 44px; margin: 0; }
-.detail-overview { display: grid; grid-template-columns: 7fr 5fr; padding: 20px; }
-.overview-section { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-.overview-section:first-child { padding-inline-end: 20px; }
-.overview-section + .overview-section { padding-inline-start: 20px; border-inline-start: 1px solid var(--ops-border); }
+.detail-overview { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; }
+.overview-section { display: flex; flex-direction: column; gap: 12px; padding: 20px; }
 .section-title { justify-content: space-between; }
-.detail-overview h2, .detail-maintenance h2 {
+.detail-overview h2, .detail-upgrade h2 {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 1rem;
 }
-.overview-section h2 .el-icon { color: var(--ops-accent); }
+.detail-overview h2 .el-icon, .detail-upgrade h2 .el-icon { color: var(--ops-accent); }
 .detail-overview dl { margin: 0; min-width: 0; }
 .detail-overview dt { color: var(--ops-muted); font-size: 13px; }
 .detail-overview dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
@@ -192,38 +173,18 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .detail-quota progress::-webkit-progress-bar { background: var(--ops-inset); }
 .detail-quota progress::-webkit-progress-value { background: currentColor; }
 .detail-quota progress::-moz-progress-bar { background: currentColor; }
-.detail-maintenance { display: grid; gap: 10px; }
-.maintenance-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.maintenance-card {
+.detail-upgrade {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
-  min-height: 78px;
-  padding: 12px 14px;
-  color: var(--ops-text);
-  text-align: start;
+  padding: 12px 20px;
 }
-.maintenance-card:hover, .maintenance-card:focus-visible { border-color: var(--ops-accent-line); background: var(--ops-raised); }
-.maintenance-card:active { background: var(--ops-accent-bg); }
-.maintenance-icon {
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  border: 1px solid var(--ops-border);
-  border-radius: 8px;
-  background: var(--ops-inset);
-  color: var(--ops-accent);
-  font-size: 18px;
-}
-.maintenance-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
-.maintenance-copy small { color: var(--ops-muted); font-size: 13px; }
-.maintenance-arrow { color: var(--ops-muted); }
 
 @media (max-width: 760px) {
-  .detail-overview, .maintenance-grid { grid-template-columns: minmax(0, 1fr); }
-  .detail-overview { gap: 14px; padding: 14px; }
-  .overview-section:first-child { padding-inline-end: 0; }
-  .overview-section + .overview-section { padding: 14px 0 0; border-inline-start: 0; border-top: 1px solid var(--ops-border); }
-  .maintenance-card { min-height: 64px; }
+  .detail-overview { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .overview-section, .detail-upgrade { padding: 14px; }
+  .detail-upgrade .el-button { min-height: 44px; }
 }
 </style>

@@ -91,26 +91,19 @@ export function calibrateNodeTraffic(id, calibration) {
 }
 
 export function getGostService(id) {
-    return request.get(`/nodes/${id}/gost/service`)
+    return request.get(`/nodes/${id}/gost/service`, { silentError: true })
 }
 
 export function restartGostService(id) {
-    return request.post(`/nodes/${id}/gost/restart`, null, { timeout: 25000 })
+    return request.post(`/nodes/${id}/gost/restart`, null, { timeout: 25000, silentError: true })
 }
 
 export function getGostLogs(id) {
-    return request.get(`/nodes/${id}/gost/logs`)
+    return request.get(`/nodes/${id}/gost/logs`, { silentError: true })
 }
 
-export function getNodeNftConfig(id, loopbackPort) {
-    if (loopbackPort) {
-        return request.get(`/nodes/${id}/nft`, { params: { loopback_port: loopbackPort } })
-    }
-    return request.get(`/nodes/${id}/nft`)
-}
-
-export function applyNodeNftConfig(id, config) {
-    return request.put(`/nodes/${id}/nft`, { config }, { timeout: 25000 })
+export function getNodeNftConfig(id) {
+    return request.get(`/nodes/${id}/nft`, { silentError: true })
 }
 
 export function getNodeUpgradeStatus(id) {

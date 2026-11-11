@@ -17,7 +17,7 @@
       </section>
     </div>
 
-    <PageHeader v-else title="节点管理" description="登记 Gost 实例，查看节点连接状态和流量，并管理节点服务。">
+    <PageHeader v-else title="节点管理">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
@@ -28,28 +28,21 @@
 
     <section v-if="!detailId" ref="inventoryPanel" class="ops-panel inventory-panel" aria-labelledby="node-inventory-title">
       <div class="inventory-heading">
-        <div>
-          <h2 id="node-inventory-title" tabindex="-1">节点清单</h2>
-          <p class="ops-muted">查看节点状态与流量，点击任意节点行进入详情。</p>
-        </div>
-        <span class="inventory-badge ops-mono">gRPC / TLS</span>
+        <h2 id="node-inventory-title" tabindex="-1">节点清单</h2>
+        <form class="inventory-filters" aria-label="筛选节点" @submit.prevent="handleSearch">
+          <div class="inventory-field">
+            <el-input id="node-keyword" v-model="searchKeyword" aria-label="节点名称" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
+          </div>
+          <div class="inventory-field">
+            <el-select v-model="searchStatus" aria-label="健康状态" placeholder="全部状态" clearable @change="handleSearch">
+              <el-option label="在线" value="online" />
+              <el-option label="离线" value="offline" />
+              <el-option label="异常" value="error" />
+            </el-select>
+          </div>
+          <el-button native-type="submit">筛选</el-button>
+        </form>
       </div>
-
-      <form class="ops-toolbar inventory-filters" aria-label="筛选节点" @submit.prevent="handleSearch">
-        <div class="inventory-field">
-          <label for="node-keyword">节点名称</label>
-          <el-input id="node-keyword" v-model="searchKeyword" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
-        </div>
-        <div class="inventory-field">
-          <label for="node-status">健康状态</label>
-          <el-select id="node-status" v-model="searchStatus" placeholder="全部状态" clearable @change="handleSearch">
-            <el-option label="在线" value="online" />
-            <el-option label="离线" value="offline" />
-            <el-option label="异常" value="error" />
-          </el-select>
-        </div>
-        <el-button native-type="submit" :icon="Search">筛选</el-button>
-      </form>
 
       <div v-if="loadError" class="inventory-error" role="alert">
         <span>无法加载节点清单，请重试。</span>
@@ -75,6 +68,7 @@
               <th scope="col" role="columnheader">节点 IP</th>
               <th scope="col" role="columnheader">状态</th>
               <th scope="col" role="columnheader">累计流量</th>
+              <th scope="col" role="columnheader">Gost 服务</th>
               <th scope="col" role="columnheader">操作</th>
             </tr>
           </thead>
@@ -135,6 +129,15 @@
                 <span v-else-if="node.traffic_quota_state" class="inventory-secondary ops-muted">解除限制待同步</span>
                 <span v-else class="inventory-secondary ops-muted">未设上限</span>
               </td>
+              <td class="inventory-service" role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">Gost 服务</span>
+                <RouterLink
+                  :to="{ ...nodeLocation(node.id), hash: '#node-gost-service' }"
+                  class="inventory-service-link"
+                  :aria-label="'查看 Gost 服务：' + node.name"
+                  @click.stop
+                >查看服务<el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink>
+              </td>
               <td class="inventory-actions-cell" role="cell">
                 <div class="inventory-actions">
                   <el-button v-if="node.status !== 'online'" @click.stop="showInstallCommand(node)">安装</el-button>
@@ -156,7 +159,7 @@
             v-model:current-page="page"
             :page-size="pageSize"
             :total="total"
-            :pager-count="3"
+            :pager-count="5"
             layout="prev, pager, next"
             @current-change="fetchData()"
           />
@@ -168,7 +171,6 @@
       v-model="dialogVisible"
       :title="isEdit ? '节点配置 · ' + editingNode.name : '添加节点'"
       :size="isEdit ? 'wide' : 'standard'"
-      :description="isEdit ? '管理基本设置、Gost 配置与流量统计。' : ''"
       :close-on-click-modal="false"
       :close-on-press-escape="!submitLoading"
       :show-close="!submitLoading"
@@ -201,6 +203,9 @@
             </el-tab-pane>
           </el-tabs>
         </el-tab-pane>
+        <el-tab-pane label="nft 配置" name="nft" lazy>
+          <NodeNftPreview v-if="dialogVisible && settingsTab === 'nft'" :key="editingNode.id" :node="liveEditingNode" />
+        </el-tab-pane>
         <el-tab-pane label="流量校准" name="traffic" lazy>
           <NodeTrafficCalibration :key="editingNode.id" :node="liveEditingNode" @saved="refreshCurrentView()" />
         </el-tab-pane>
@@ -218,9 +223,7 @@
       </template>
     </PanelDialog>
 
-    <NodeGostDialog v-if="gostNode" v-model="gostDialogVisible" :node="gostNode" @closed="gostNode = null" />
     <NodeUpgradeDialog v-if="upgradeNode" v-model="upgradeDialogVisible" :node="upgradeNode" @closed="upgradeNode = null" />
-    <NodeNftDialog v-if="nftNode" v-model="nftDialogVisible" :node="nftNode" @closed="nftNode = null" />
 
     <PanelDialog
       v-model="installDialogVisible"
@@ -278,9 +281,8 @@ import { getPublicSystemConfig } from '@/api/system'
 import { formatBytes, formatRegion, formatTime, nodeIPs, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
-const NodeGostDialog = defineAsyncComponent(() => import('@/components/NodeGostDialog.vue'))
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
-const NodeNftDialog = defineAsyncComponent(() => import('@/components/NodeNftDialog.vue'))
+const NodeNftPreview = defineAsyncComponent(() => import('@/components/NodeNftPreview.vue'))
 const INSTALL_SCRIPT_ROOT = 'https://raw.githubusercontent.com/hanzec/yagp/'
 const NODE_ONLINE_CODE = 10008
 const configTabs = [
@@ -364,12 +366,8 @@ const nodeConfig = ref(null)
 const configLoading = ref(false)
 const configError = ref(false)
 
-const gostNode = ref(null)
-const gostDialogVisible = ref(false)
 const upgradeNode = ref(null)
 const upgradeDialogVisible = ref(false)
-const nftNode = ref(null)
-const nftDialogVisible = ref(false)
 
 const installDialogVisible = ref(false)
 const currentInstallNode = ref(null)
@@ -656,17 +654,9 @@ const handleDelete = async (row) => {
 const handleNodeAction = (action, row) => {
   if (action === 'install') showInstallCommand(row)
   if (action === 'config') openDialog(row)
-  if (action === 'gost') {
-    gostNode.value = row
-    gostDialogVisible.value = true
-  }
   if (action === 'upgrade') {
     upgradeNode.value = row
     upgradeDialogVisible.value = true
-  }
-  if (action === 'nft') {
-    nftNode.value = row
-    nftDialogVisible.value = true
   }
 }
 
@@ -693,19 +683,25 @@ watch(detailId, async (id, previous) => {
     createdInstallNode = null
     dialogVisible.value = false
     installDialogVisible.value = false
-    gostDialogVisible.value = upgradeDialogVisible.value = nftDialogVisible.value = false
-    gostNode.value = upgradeNode.value = nftNode.value = null
+    upgradeDialogVisible.value = false
+    upgradeNode.value = null
   }
   detailNode.value = nodeList.value.find(node => node.id === id) || null
   detailLoading.value = detailError.value = false
   refreshCurrentView()
   if (previous === undefined) return
+  if (id && route.hash === '#node-gost-service') return
   await nextTick()
   const focusTarget = id
     ? detailPage.value?.querySelector('.node-detail-back')
     : inventoryPanel.value?.querySelector('#node-link-' + previous) || inventoryPanel.value?.querySelector('#node-inventory-title')
   focusTarget?.focus()
 }, { immediate: true })
+
+watch([() => detailNode.value?.id, () => route.hash], ([id, hash]) => {
+  if (!id || hash !== '#node-gost-service') return
+  detailPage.value?.querySelector('#node-gost-title')?.focus()
+}, { flush: 'post' })
 
 let refreshTimer
 onMounted(() => {
@@ -721,18 +717,49 @@ onBeforeUnmount(() => {
 <style scoped src="../inventory.css"></style>
 
 <style scoped>
+.inventory-heading { align-items: center; flex-wrap: wrap; }
+.inventory-heading h2 { margin: 0; }
+.inventory-filters { width: min(100%, 380px); gap: 8px; padding: 0; }
+.inventory-filters .inventory-field { flex-basis: 180px; }
+.inventory-filters .inventory-field + .inventory-field { flex-basis: 120px; }
+.inventory-page-size { width: 108px; }
+.inventory-scroll { container-type: inline-size; }
 .node-list-row { cursor: pointer; }
 .inventory-table .node-list-row:focus-within { background: var(--ops-raised); }
 .node-row-link { width: fit-content; min-height: 30px; color: var(--ops-text); text-decoration: none; }
 .node-row-link:hover, .node-row-link:focus-visible { color: var(--ops-accent); text-decoration: underline; }
 .node-row-arrow { color: var(--ops-accent); flex: none; }
+.inventory-service-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.inventory-service-link:hover, .inventory-service-link:focus-visible { text-decoration: underline; }
 .node-detail-crumb, .node-detail-back { display: flex; align-items: center; gap: 8px; }
 .node-detail-crumb { color: var(--ops-muted); font-size: 13px; }
 .node-detail-back { min-height: 44px; color: var(--ops-text); text-decoration: none; }
 .node-detail-back:hover { color: var(--ops-accent); text-decoration: underline; }
+@media (min-width: 701px) {
+  @container (max-width: 720px) {
+    .inventory-table th, .inventory-table td { padding-inline: 8px; }
+    .inventory-table :is(th, td):first-child { padding-inline-start: 14px; }
+    .inventory-table :is(th, td):last-child { padding-inline-end: 14px; }
+    .inventory-table :is(th, td):nth-child(2) { width: 27%; }
+    .node-row-link .el-icon { display: none; }
+  }
+}
 @media (max-width: 700px) {
-  .node-row-link { min-height: 44px; }
+  .inventory-heading .inventory-filters { width: 100%; padding: 0; }
+  .inventory-filters .inventory-field { flex: 2 1 108px; }
+  .inventory-filters .inventory-field + .inventory-field { flex: 1 1 94px; }
+  .node-row-link, .inventory-service-link { min-height: 44px; }
   .inventory-status { align-self: center; }
+  .inventory-actions-cell { grid-column: 2; align-self: end; }
+  .inventory-actions { justify-content: flex-end; }
 }
 .node-settings-tabs :deep(.el-tabs__item) { min-height: 44px; }
 @media (max-width: 480px) {

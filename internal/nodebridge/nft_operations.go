@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 
 	"yagp/pkg/nodegrpc"
 
@@ -16,12 +19,72 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func (s *controlServer) GetNftConfig(context.Context, *emptypb.Empty) (*nodegrpc.NftConfig, error) {
-	config, err := readNftConfig(s.config.NftConfigFile)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "read nftables config: %v", err)
+func (s *controlServer) GetNftConfig(ctx context.Context, _ *emptypb.Empty) (*nodegrpc.NftConfig, error) {
+	if runtime.GOOS != "linux" {
+		return nil, status.Error(codes.Unimplemented, "nftables is only available on Linux")
 	}
-	return s.nftConfigReply(config), nil
+	nft, err := exec.LookPath("nft")
+	if err != nil {
+		return nil, status.Error(codes.Unimplemented, "nftables is unavailable: install the nftables package on this node")
+	}
+	table, legacy := nftTables(s.config.NodeID, s.config.NftConfigFile)
+	quota, legacyQuota := trafficQuotaTables(s.config)
+	config, err := readLiveNftConfig(ctx, nft, []string{table, legacy, quota, legacyQuota})
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
+		return nil, status.Errorf(codes.FailedPrecondition, "read nftables rules: %v", err)
+	}
+	// Older panels expect the saved add commands in Config.
+	saved, _ := readNftConfig(s.config.NftConfigFile)
+	return &nodegrpc.NftConfig{Config: renameNftConfig(saved, legacy, table), Table: table, LiveConfig: config}, nil
+}
+
+func readLiveNftConfig(ctx context.Context, nft string, managedTables []string) (string, error) {
+	nftApplyMu.Lock()
+	defer nftApplyMu.Unlock()
+	output, err := nftOutput(ctx, nft, nil, "-j", "list", "tables")
+	if err != nil {
+		return "", err
+	}
+	var tables struct {
+		Objects []struct {
+			Table struct {
+				Family string `json:"family"`
+				Name   string `json:"name"`
+			} `json:"table"`
+		} `json:"nftables"`
+	}
+	if err := json.Unmarshal(output, &tables); err != nil {
+		return "", err
+	}
+
+	type listing struct {
+		Objects []nftObject `json:"nftables"`
+	}
+	result := listing{Objects: []nftObject{}}
+	for _, object := range tables.Objects {
+		table := object.Table
+		if table.Family != "inet" || !slices.Contains(managedTables, table.Name) {
+			continue
+		}
+		output, err = nftOutput(ctx, nft, nil, "-j", "list", "table", table.Family, table.Name)
+		if err != nil {
+			return "", err
+		}
+		var rules listing
+		if err := json.Unmarshal(output, &rules); err != nil {
+			return "", err
+		}
+		for _, rule := range rules.Objects {
+			if _, metadata := rule["metainfo"]; !metadata {
+				result.Objects = append(result.Objects, rule)
+			}
+		}
+	}
+	encoded, err := json.MarshalIndent(result, "", "  ")
+	return string(encoded), err
 }
 
 func (s *controlServer) ApplyNftConfig(ctx context.Context, req *nodegrpc.NftConfig) (*nodegrpc.NftConfig, error) {

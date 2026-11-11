@@ -73,11 +73,7 @@ func syncTrafficQuota(ctx context.Context, cfg Config, next trafficQuotaState) (
 		return 0, status.Error(codes.Unimplemented, "nftables is unavailable: install the nftables package on this node")
 	}
 	path := trafficQuotaPath(cfg.ConfigFile)
-	table := fmt.Sprintf("yagp_quota_%d", cfg.NodeID)
-	var legacy string
-	if cfg.RuntimeLayout >= singleNodeLayoutVersion {
-		table, legacy = singleNodeQuotaTable, table
-	}
+	table, legacy := trafficQuotaTables(cfg)
 	nftApplyMu.Lock()
 	defer nftApplyMu.Unlock()
 	previous, err := readTrafficQuotaState(path)
@@ -231,6 +227,14 @@ func readLiveTrafficQuota(ctx context.Context, nft, table string) (*liveTrafficQ
 
 func trafficQuotaPath(configFile string) string {
 	return filepath.Join(filepath.Dir(configFile), ".traffic-quota.json")
+}
+
+func trafficQuotaTables(cfg Config) (table, legacy string) {
+	table = fmt.Sprintf("yagp_quota_%d", cfg.NodeID)
+	if cfg.RuntimeLayout >= singleNodeLayoutVersion {
+		return singleNodeQuotaTable, table
+	}
+	return table, ""
 }
 
 func validTrafficQuotaPorts(ports []uint32) bool {
