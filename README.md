@@ -76,13 +76,13 @@ TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT=websecure
 AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
 ```
 
-从部署目录启动 Compose 中指定的 [GHCR 镜像](https://github.com/hanzec/yagp/pkgs/container/yagp)。
+从部署目录运行 Compose。面板和初始化服务默认从 `release.hanzec-overseas.cn/images/yagp:latest` 拉取镜像。
 
 ```bash
 docker compose up -d
 ```
 
-镜像支持 Linux amd64 和 arm64。可以在 `docker-compose.yml` 中将镜像设为 `ghcr.io/hanzec/yagp:RELEASE_TAG` 来固定面板版本。节点的安装、重新注册和升级使用同一发布标签。
+镜像支持 Linux amd64 和 arm64。可以在 `docker-compose.yml` 中将镜像设为 `release.hanzec-overseas.cn/images/yagp:RELEASE_TAG` 来固定面板版本。节点的安装、重新注册和升级使用同一发布标签。
 
 Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板容器中的 `/app/config`、`/app/data` 和 `/app/logs`。启动时，初始化服务会在 `config/config.yaml` 缺失时从镜像复制模板。面板以只读方式挂载配置，已有配置会继续使用。
 
@@ -128,7 +128,7 @@ Webhook 返回 `202` 后，响应中的 `status_url` 提供短期有效的签名
 
 如果 Actions 在发送 Webhook 时收到 `404`，核对安装输出的公网域名和 Traefik 实际加载的 `traefik-panel.yml`。环境级 `DEPLOY_WEBHOOK_URL` 会覆盖仓库级同名 Secret。新版接收器会在 journal 记录不支持的请求方法和路径，可用下文的日志命令确认请求是否到达接收器。
 
-也可在服务器上执行 `sudo /usr/local/sbin/yagp-update depoly` 手动升级两个程序。该命令会等到更新结束并返回实际退出码。手动更新镜像时，使用 `sudo /usr/local/sbin/yagp-update compose`，从标准输入传入目标镜像的 `sha256:…` 摘要。
+也可在服务器上执行 `sudo /usr/local/sbin/yagp-update depoly` 手动升级两个程序。该命令会等到更新结束并返回实际退出码。手动更新镜像时，使用 `sudo /usr/local/sbin/yagp-update compose`，从标准输入传入目标镜像的 `sha256:…` 摘要。手动和 Webhook 部署都按摘要从 `release.hanzec-overseas.cn/images/yagp` 拉取面板镜像。
 
 #### 通过 Webhook 升级部署工具
 

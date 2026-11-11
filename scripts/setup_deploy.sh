@@ -19,7 +19,8 @@ readonly managed_project="$managed_dir/project-dir"
 readonly managed_override="$managed_dir/compose.yml"
 readonly previous_override_name=.yagp-depoly.yml
 readonly docker_socket=/var/run/docker.sock
-readonly image_repo=ghcr.io/hanzec/yagp
+readonly image_repo=release.hanzec-overseas.cn/images/yagp
+readonly legacy_image_repo=ghcr.io/hanzec/yagp
 readonly release_cache=https://release.hanzec-overseas.cn/yagp
 readonly webhook_base_path=/api/deploy
 readonly default_traefik_dynamic_dir=/etc/traefik/dynamic
@@ -546,7 +547,7 @@ import_override() {
     if [[ -e $source || -L $source ]]; then
         check_managed_file "$source"
         image=$(sed -n '3s/^    image: //p' "$source")
-        [[ $image == "$image_repo@"* && ${image#*@} =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        [[ $image == "$legacy_image_repo@"* && ${image#*@} =~ ^sha256:[0-9a-f]{64}$ ]] ||
             fail '旧镜像覆盖文件中没有有效的 yagp 镜像 digest。'
         log "保留旧镜像：$image"
     else
@@ -591,7 +592,7 @@ deploy_image() {
     IFS= read -r digest && [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] ||
         fail '需要完整的小写 SHA-256 镜像 digest。'
     image="$image_repo@$digest"
-    log "开始部署面板镜像 $image。"
+    log "开始部署面板镜像 ${image}。"
 
     require_root_owned "$managed_dir"
     lock_deploy
@@ -603,8 +604,10 @@ deploy_image() {
     check_services "$project_dir" "$project"
     running=$(docker_local inspect --type container --format \
         '{{.Config.Image}}|{{index .Config.Labels "com.docker.compose.project"}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' yagp 2>/dev/null) || running=''
-    if [[ $running == "$image|$project|healthy" ]]; then
-        write_override "$managed_override" "$project" "$image"
+    if [[ $running == "$image|$project|healthy" ||
+          $running == "$legacy_image_repo@$digest|$project|healthy" ]]; then
+        # 继续引用正在运行的镜像，直到实际拉取了加速地址上的镜像。
+        write_override "$managed_override" "$project" "${running%%|*}"
         log "项目 $project 已运行该镜像且健康，跳过重启：$digest"
         return
     fi
