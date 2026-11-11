@@ -41,6 +41,11 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 	config := &NftConfig{Config: "{\"nftables\":[]}"}
 	// Carry a newer peer's field through the older protobuf schema in both directions.
 	config.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 100, protowire.VarintType), 43))
+	liveConfig := &NftConfig{
+		Config:     config.GetConfig(),
+		Table:      SingleNodeNftTable,
+		LiveConfig: `{"nftables":[{"table":{"family":"inet","name":"yagp_quota"}}]}`,
+	}
 	forwardedReport := &ReportRequest{
 		NodeId: 42,
 		Observation: &observer.ObserveRequest{Events: []*observer.Event{{
@@ -66,7 +71,7 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 				{TimestampUnixMicros: 1730000000000001, Message: "connection refused", Priority: 3},
 			}}),
 		exchange(V1_GetNftConfig_FullMethodName, V1Client.GetNftConfig,
-			empty, config),
+			empty, liveConfig),
 		exchange(V1_ApplyNftConfig_FullMethodName, V1Client.ApplyNftConfig,
 			config, config),
 		exchange(V1_SyncTrafficQuota_FullMethodName, V1Client.SyncTrafficQuota,

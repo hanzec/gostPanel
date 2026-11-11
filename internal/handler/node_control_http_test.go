@@ -254,6 +254,7 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 	control.reject(nodegrpc.V1_GetGostLogs_FullMethodName, codes.Unimplemented)
 	f.request(t, "GET", path+"/gost/logs", "", 501)
 
+	f.request(t, "GET", "/nodes/0/nft", "", 400)
 	read := handlerData[nodeNftConfig](t, f.request(t, "GET", path+"/nft", "", 200))
 	if read.Config != nftJSON || read.Table != nodegrpc.NftTableName(uint64(node.ID)) || read.Live {
 		t.Fatalf("bridge returned an unexpected saved nftables config: %+v", read)
