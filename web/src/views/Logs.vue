@@ -1,10 +1,8 @@
 <template>
   <div class="ops-page">
-    <PageHeader title="操作日志" description="按执行者、操作和资源追溯面板变更与自动升级，查看来源与详情。">
-      <template #actions>
-        <el-button :icon="Refresh" :loading="loading" @click="fetchData">刷新日志</el-button>
-      </template>
-    </PageHeader>
+    <PageActions>
+      <el-button :icon="Refresh" :loading="loading" @click="fetchData">刷新日志</el-button>
+    </PageActions>
 
     <MetricStrip label="审计记录摘要" :items="summary" />
 
@@ -174,7 +172,7 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Collection, Delete, Document, Refresh, Search, User } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import PageHeader from '@/components/PageHeader.vue'
+import PageActions from '@/components/PageActions.vue'
 import { getLogList } from '@/api/log'
 
 const logList = ref([])

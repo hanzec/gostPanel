@@ -20,6 +20,7 @@
             >
               <el-icon aria-hidden="true"><Menu /></el-icon>
             </button>
+            <h1 v-if="identity === 'ready'" class="console-topbar__title">{{ route.meta.title }}</h1>
           </div>
 
           <div v-if="username" class="console-identity">
@@ -174,11 +175,14 @@ watch(() => route.path, async () => {
 }
 
 .console-topbar__inner { min-height: 56px; justify-content: space-between; gap: 10px; }
+.console-topbar__location { flex-shrink: 0; }
+.console-topbar__title { font-size: var(--ops-text-title); white-space: nowrap; }
 
 .console-identity { gap: 9px; }
-.console-identity__text { display: grid; min-width: 0; line-height: 1.4; }
-.console-identity__text strong { overflow: hidden; max-width: 22ch; font-size: var(--ops-text-sm); text-overflow: ellipsis; white-space: nowrap; }
-.console-identity__text small { color: var(--ops-faint); font-size: var(--ops-text-xs); white-space: nowrap; }
+.console-identity__text { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); line-height: 1.4; }
+.console-identity__text strong, .console-identity__text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-identity__text strong { max-width: 22ch; font-size: var(--ops-text-sm); }
+.console-identity__text small { color: var(--ops-faint); font-size: var(--ops-text-xs); }
 
 .console-identity__avatar, .console-icon-button {
   display: grid;
