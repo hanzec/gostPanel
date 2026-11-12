@@ -24,10 +24,6 @@
           <dt>{{ item.label }}</dt>
           <dd class="ops-mono">{{ item.value }}</dd>
         </div>
-        <div v-if="node.local_addresses?.length" class="detail-address-list">
-          <dt>本机 IP</dt>
-          <dd class="ops-mono">{{ node.local_addresses.join(' · ') }}</dd>
-        </div>
         <div v-if="node.address_mappings?.length" class="detail-address-list">
           <dt>本机监听 IP → 对外连接 IP</dt>
           <dd v-for="mapping in node.address_mappings" :key="mapping.listen_ip" class="ops-mono">
@@ -57,7 +53,7 @@ defineEmits(['action'])
 
 const endpoints = computed(() => [
   { label: '节点 IP', value: props.node.address || '待获取地址' },
-  { label: 'IPv4', value: nodeIPs(props.node, 4).join(' · ') || '未上报' },
+  { label: 'IPv4', value: nodeIPs(props.node, 4).join(' · ') || '不支持' },
   { label: 'IPv6', value: nodeIPs(props.node, 6).join(' · ') || '不支持' }
 ])
 </script>
