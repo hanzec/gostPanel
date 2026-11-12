@@ -80,7 +80,17 @@ jobs:
         shell: bash
         run: |
           output="$RUNNER_TEMP/go-coverage"
-          mkdir -p "$output"
+          gost_fixture="$RUNNER_TEMP/gost-test"
+          mkdir -p "$output" "$gost_fixture"
+          # Use a pinned Gost binary for the real Relay round trip in the node tests.
+          curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 90 \
+            --output "$gost_fixture/gost.tar.gz" \
+            https://github.com/go-gost/gost/releases/download/v3.3.3/gost_3.3.3_linux_amd64.tar.gz
+          (
+            cd "$gost_fixture"
+            printf '%s  gost.tar.gz\n' f4c1255dc892a7014c0ad6e5f1c3573108f7bea4403f04f21873406ab58aa666 | sha256sum --check
+            tar -xzf gost.tar.gz gost
+          )
           go mod download
           toolchain=$(go env GOVERSION)
           # A separate network namespace keeps the real nftables rules off the runner.
@@ -88,13 +98,16 @@ jobs:
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/src,readonly" \
             --mount "type=bind,source=$(go env GOMODCACHE),target=/go/pkg/mod,readonly" \
             --mount "type=bind,source=$output,target=/coverage" \
+            --mount "type=bind,source=$gost_fixture/gost,target=/test-gost,readonly" \
             --workdir /src \
             -e GOTOOLCHAIN=local -e YAGP_TEST_NFT=1 -e YAGP_TEST_UPGRADE=1 \
+            -e YAGP_TEST_GOST_BINARY=/test-gost \
             "golang:${toolchain#go}-alpine" sh -ec '
               apk add --no-cache bash curl git nftables
               mkdir -p /run/systemd/system
               bash test/scripts/install_node_test.sh
-              go run ./test/go/_runner -count=1 -timeout=2m -coverprofile=/coverage/go-coverage.out ./...
+              # Attribute API-to-daemon integration coverage across package boundaries.
+              go run ./test/go/_runner -count=1 -timeout=2m -coverpkg=./... -coverprofile=/coverage/go-coverage.out ./...
             '
           total=$(go tool cover -func "$output/go-coverage.out" | awk '/^total:/ {print $NF}')
           printf '### Go test coverage\n\nStatement coverage: **%s**\n' "$total" >> "$GITHUB_STEP_SUMMARY"

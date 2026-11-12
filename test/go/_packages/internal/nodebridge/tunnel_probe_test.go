@@ -40,17 +40,37 @@ func TestTunnelProbeVerifiesResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client, server := net.Pipe()
-	defer client.Close()
-	go func() {
-		defer server.Close()
-		var data [sha256.Size]byte
-		if _, err := io.ReadFull(server, data[:]); err == nil {
-			_, _ = server.Write(data[:])
-		}
-	}()
-	if _, err := exchangeTunnelProbe(ctx, client, endpoint.GetToken()); status.Code(err) != codes.DataLoss {
-		t.Fatalf("plain echo returned %v, want DataLoss", err)
+	for _, tc := range []struct {
+		name       string
+		replyBytes int
+		keepOpen   bool
+		want       codes.Code
+	}{
+		{"plain echo", sha256.Size, false, codes.DataLoss},
+		{"truncated reply", 1, false, codes.Unavailable},
+		{"no reply before deadline", 0, true, codes.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			client, server := net.Pipe()
+			defer client.Close()
+			go func() {
+				defer server.Close()
+				var request [sha256.Size]byte
+				if _, err := io.ReadFull(server, request[:]); err != nil {
+					return
+				}
+				if tc.keepOpen {
+					<-ctx.Done()
+					return
+				}
+				_, _ = server.Write(request[:tc.replyBytes])
+			}()
+			if _, err := exchangeTunnelProbe(ctx, client, endpoint.GetToken()); status.Code(err) != tc.want {
+				t.Fatalf("exchangeTunnelProbe returned %v, want %s", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -68,25 +88,52 @@ func TestTunnelProbeRejectsUnmanagedDestination(t *testing.T) {
 }
 
 func TestTunnelProbeReportsMissingOrInvalidGostSetup(t *testing.T) {
+	const liveChain = `{"data":{"name":"tunnel-1-chain","hops":[{"name":"hop-0","nodes":[{"name":"exit-relay","addr":"192.0.2.1:8443","connector":{"type":"relay"},"dialer":{"type":"tcp"}}]}]}}`
 	for _, tc := range []struct {
 		name, response string
+		httpStatus     int
+		adminOffline   bool
+		failingProcess bool
 		want           codes.Code
 	}{
-		{"missing chain", `{"data":null}`, codes.NotFound},
-		{"wrong chain", `{"data":{"name":"tunnel-2-chain"}}`, codes.FailedPrecondition},
-		{"missing Gost binary", `{"data":{"name":"tunnel-1-chain","hops":[{"name":"hop-0","nodes":[{"name":"exit-relay","addr":"192.0.2.1:8443","connector":{"type":"relay"},"dialer":{"type":"tcp"}}]}]}}`, codes.Internal},
+		{name: "missing chain", response: `{"data":null}`, want: codes.NotFound},
+		{name: "wrong chain", response: `{"data":{"name":"tunnel-2-chain"}}`, want: codes.FailedPrecondition},
+		{name: "Gost admin is offline", adminOffline: true, want: codes.Internal},
+		{name: "Gost denies admin access", httpStatus: http.StatusUnauthorized, want: codes.Internal},
+		{name: "invalid Gost admin response", response: "not JSON", want: codes.Internal},
+		{name: "missing Gost binary", response: liveChain, want: codes.Internal},
+		{name: "Gost exits during startup", response: liveChain, failingProcess: true, want: codes.Internal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.failingProcess {
+				if runtime.GOOS != "linux" {
+					t.Skip("requires a Linux executable")
+				}
+				binary, err := exec.LookPath("false")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(binary, filepath.Join(dir, "gost")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet || r.URL.Path != "/api/config/chains/tunnel-1-chain" {
 					t.Errorf("unexpected Gost admin request %s %s", r.Method, r.URL.Path)
+				}
+				if tc.httpStatus != 0 {
+					w.WriteHeader(tc.httpStatus)
 				}
 				_, _ = io.WriteString(w, tc.response)
 			}))
 			defer admin.Close()
 			control := &controlServer{config: Config{
-				AdminAddress: admin.Listener.Addr().String(), ConfigFile: filepath.Join(t.TempDir(), "node.yaml"),
+				AdminAddress: admin.Listener.Addr().String(), ConfigFile: filepath.Join(dir, "node.yaml"),
 			}, client: admin.Client()}
+			if tc.adminOffline {
+				admin.Close()
+			}
 			_, err := control.ProbeTunnel(context.Background(), &nodegrpc.TunnelProbeRequest{
 				ChainName: "tunnel-1-chain", Address: "127.0.0.1:12345", Token: make([]byte, sha256.Size),
 			})

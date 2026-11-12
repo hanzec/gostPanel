@@ -1,6 +1,7 @@
 package nodegrpc
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -62,6 +63,7 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 			Kind: "service", Service: "rule-1", Type: "stats", Stats: &observer.Stats{InputBytes: 10, OutputBytes: 20},
 		}}},
 	}
+	probeEndpoint := &TunnelProbeEndpoint{Address: "127.0.0.1:43210", Token: bytes.Repeat([]byte{0x00, 0xff}, 16)}
 	calls := []protocolExchange{
 		exchange(V1_Execute_FullMethodName, V1Client.Execute,
 			&CommandRequest{Method: "POST", Path: "/config/services", Body: []byte("{\"name\":\"test\"}")},
@@ -69,6 +71,10 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 		exchange(V1_CheckListener_FullMethodName, V1Client.CheckListener,
 			&ListenerCheckRequest{Protocol: "udp", Ip: "2001:db8::42", Port: 13053},
 			&ListenerCheckReply{Reason: "occupied"}),
+		exchange(V1_StartTunnelProbe_FullMethodName, V1Client.StartTunnelProbe, empty, probeEndpoint),
+		exchange(V1_ProbeTunnel_FullMethodName, V1Client.ProbeTunnel,
+			&TunnelProbeRequest{ChainName: "tunnel-42-chain", Address: probeEndpoint.GetAddress(), Token: probeEndpoint.GetToken()},
+			&TunnelProbeReply{RoundTripMs: 36}),
 		exchange(V1_GetObserverEndpoint_FullMethodName, V1Client.GetObserverEndpoint,
 			empty, &ObserverEndpoint{Address: "127.0.0.1:10900"}),
 		exchange(V1_GetGostServiceStatus_FullMethodName, V1Client.GetGostServiceStatus,
