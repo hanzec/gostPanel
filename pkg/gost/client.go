@@ -107,8 +107,9 @@ type SelectorConfig struct {
 
 // ForwarderNode 转发目标节点
 type ForwarderNode struct {
-	Name string `json:"name"`
-	Addr string `json:"addr"`
+	Name    string `json:"name"`
+	Addr    string `json:"addr"`
+	Network string `json:"network,omitempty"`
 }
 
 // AuthConfig 认证配置

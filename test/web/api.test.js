@@ -63,6 +63,7 @@ describe('panel API contracts', () => {
     ['delete tunnel', () => tunnel.deleteTunnel(42), 'delete', '/tunnels/42'],
     ['start tunnel', () => tunnel.startTunnel(42), 'post', '/tunnels/42/start'],
     ['stop tunnel', () => tunnel.stopTunnel(42), 'post', '/tunnels/42/stop'],
+    ['test tunnel', () => tunnel.testTunnel(42), 'post', '/tunnels/42/test', { timeout: 15000, ...silent }],
     ['settings', system.getSystemConfig, 'get', '/system/config'],
     ['public settings', system.getPublicSystemConfig, 'get', '/system/public-config'],
     ['update settings', () => system.updateSystemConfig(body), 'put', '/system/config', { data: body }],

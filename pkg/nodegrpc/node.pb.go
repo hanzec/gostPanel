@@ -1633,6 +1633,162 @@ func (x *TransparentRedirectReply) GetActive() bool {
 	return false
 }
 
+type TunnelProbeEndpoint struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Token         []byte                 `protobuf:"bytes,2,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TunnelProbeEndpoint) Reset() {
+	*x = TunnelProbeEndpoint{}
+	mi := &file_node_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TunnelProbeEndpoint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TunnelProbeEndpoint) ProtoMessage() {}
+
+func (x *TunnelProbeEndpoint) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TunnelProbeEndpoint.ProtoReflect.Descriptor instead.
+func (*TunnelProbeEndpoint) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *TunnelProbeEndpoint) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *TunnelProbeEndpoint) GetToken() []byte {
+	if x != nil {
+		return x.Token
+	}
+	return nil
+}
+
+type TunnelProbeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChainName     string                 `protobuf:"bytes,1,opt,name=chain_name,json=chainName,proto3" json:"chain_name,omitempty"`
+	Address       string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	Token         []byte                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TunnelProbeRequest) Reset() {
+	*x = TunnelProbeRequest{}
+	mi := &file_node_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TunnelProbeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TunnelProbeRequest) ProtoMessage() {}
+
+func (x *TunnelProbeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TunnelProbeRequest.ProtoReflect.Descriptor instead.
+func (*TunnelProbeRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *TunnelProbeRequest) GetChainName() string {
+	if x != nil {
+		return x.ChainName
+	}
+	return ""
+}
+
+func (x *TunnelProbeRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *TunnelProbeRequest) GetToken() []byte {
+	if x != nil {
+		return x.Token
+	}
+	return nil
+}
+
+type TunnelProbeReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RoundTripMs   int64                  `protobuf:"varint,1,opt,name=round_trip_ms,json=roundTripMs,proto3" json:"round_trip_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TunnelProbeReply) Reset() {
+	*x = TunnelProbeReply{}
+	mi := &file_node_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TunnelProbeReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TunnelProbeReply) ProtoMessage() {}
+
+func (x *TunnelProbeReply) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TunnelProbeReply.ProtoReflect.Descriptor instead.
+func (*TunnelProbeReply) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *TunnelProbeReply) GetRoundTripMs() int64 {
+	if x != nil {
+		return x.RoundTripMs
+	}
+	return 0
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
@@ -1759,7 +1915,17 @@ const file_node_proto_rawDesc = "" +
 	"\x18TransparentRedirectReply\x12\x12\n" +
 	"\x04mark\x18\x01 \x01(\rR\x04mark\x12%\n" +
 	"\x0edocker_address\x18\x02 \x01(\tR\rdockerAddress\x12\x16\n" +
-	"\x06active\x18\x03 \x01(\bR\x06active*\xc0\x01\n" +
+	"\x06active\x18\x03 \x01(\bR\x06active\"E\n" +
+	"\x13TunnelProbeEndpoint\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x14\n" +
+	"\x05token\x18\x02 \x01(\fR\x05token\"c\n" +
+	"\x12TunnelProbeRequest\x12\x1d\n" +
+	"\n" +
+	"chain_name\x18\x01 \x01(\tR\tchainName\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x14\n" +
+	"\x05token\x18\x03 \x01(\fR\x05token\"6\n" +
+	"\x10TunnelProbeReply\x12\"\n" +
+	"\rround_trip_ms\x18\x01 \x01(\x03R\vroundTripMs*\xc0\x01\n" +
 	"\x19TransparentRedirectAction\x12+\n" +
 	"'TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED\x10\x00\x12'\n" +
 	"#TRANSPARENT_REDIRECT_ACTION_PREPARE\x10\x01\x12%\n" +
@@ -1779,7 +1945,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_node_proto_goTypes = []any{
 	(TransparentRedirectAction)(0),     // 0: yagp.node.v1.TransparentRedirectAction
 	(*CommandRequest)(nil),             // 1: yagp.node.v1.CommandRequest
@@ -1807,11 +1973,14 @@ var file_node_proto_goTypes = []any{
 	(*StreamFrame)(nil),                // 23: yagp.node.v1.StreamFrame
 	(*TransparentRedirectRequest)(nil), // 24: yagp.node.v1.TransparentRedirectRequest
 	(*TransparentRedirectReply)(nil),   // 25: yagp.node.v1.TransparentRedirectReply
-	(*proto.ObserveRequest)(nil),       // 26: proto.ObserveRequest
+	(*TunnelProbeEndpoint)(nil),        // 26: yagp.node.v1.TunnelProbeEndpoint
+	(*TunnelProbeRequest)(nil),         // 27: yagp.node.v1.TunnelProbeRequest
+	(*TunnelProbeReply)(nil),           // 28: yagp.node.v1.TunnelProbeReply
+	(*proto.ObserveRequest)(nil),       // 29: proto.ObserveRequest
 }
 var file_node_proto_depIdxs = []int32{
 	8,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
-	26, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	29, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	19, // 2: yagp.node.v1.RegisterNodeReply.credentials:type_name -> yagp.node.v1.NodeCredentials
 	22, // 3: yagp.node.v1.NodeIPsRequest.local_ip_snapshot:type_name -> yagp.node.v1.LocalIPSnapshot
 	0,  // 4: yagp.node.v1.TransparentRedirectRequest.action:type_name -> yagp.node.v1.TransparentRedirectAction
@@ -1835,7 +2004,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   25,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

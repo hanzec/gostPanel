@@ -72,3 +72,15 @@ export function stopTunnel(id) {
         method: 'post'
     })
 }
+
+/**
+ * 测试隧道转发
+ */
+export function testTunnel(id) {
+    return request({
+        url: `/tunnels/${id}/test`,
+        method: 'post',
+        timeout: 15000,
+        silentError: true
+    })
+}

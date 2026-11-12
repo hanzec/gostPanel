@@ -26,6 +26,8 @@ func controlDispatcher(control *controlServer) nodegrpc.StreamHandler {
 		nodegrpc.V1_GetUpgradeStatus_FullMethodName,
 		nodegrpc.V1_StartUpgrade_FullMethodName,
 		nodegrpc.V1_ConfigureTransparentRedirect_FullMethodName,
+		nodegrpc.V1_StartTunnelProbe_FullMethodName,
+		nodegrpc.V1_ProbeTunnel_FullMethodName,
 	)
 }
 

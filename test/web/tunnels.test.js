@@ -5,7 +5,7 @@ import Tunnels from '@/views/Tunnels.vue'
 import { getRoutingNodes } from '@/api/node'
 import { getGostRulesets } from '@/api/system'
 import { getRuleList } from '@/api/rule'
-import { createTunnel, deleteTunnel, getTunnelList, startTunnel, stopTunnel, updateTunnel } from '@/api/tunnel'
+import { createTunnel, deleteTunnel, getTunnelList, startTunnel, stopTunnel, testTunnel, updateTunnel } from '@/api/tunnel'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
 vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
@@ -13,7 +13,7 @@ vi.mock('@/api/system', () => ({ getGostRulesets: vi.fn() }))
 vi.mock('@/api/rule', () => ({ getRuleList: vi.fn() }))
 vi.mock('@/api/tunnel', () => ({
   createTunnel: vi.fn(), deleteTunnel: vi.fn(), getTunnelList: vi.fn(),
-  startTunnel: vi.fn(), stopTunnel: vi.fn(), updateTunnel: vi.fn()
+  startTunnel: vi.fn(), stopTunnel: vi.fn(), testTunnel: vi.fn(), updateTunnel: vi.fn()
 }))
 
 const ingress = { id: 4, name: '入口 A', addresses: ['192.0.2.1', '192.0.2.2', '2001:db8::1'] }
@@ -691,6 +691,46 @@ describe('Relay tunnel configuration', () => {
     await flushPromises()
     expect(updateTunnel).toHaveBeenCalledWith(udpRelay.id, expect.any(Object))
     expect(updateTunnel.mock.calls[0][1]).not.toHaveProperty('allowlist_node_ids')
+  })
+
+  it('tests the selected running tunnel and shows the result inside the dialog', async () => {
+    const pending = Promise.withResolvers()
+    testTunnel.mockReturnValueOnce(pending.promise)
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+
+    await button(row(wrapper, relay.name), '测试').trigger('click')
+    const popup = dialog(wrapper)
+    expect(popup.text()).toContain(relay.name)
+    expect(popup.text()).toContain(ingress.name)
+    expect(popup.text()).toContain(egress.name)
+    expect(testTunnel).not.toHaveBeenCalled()
+    const start = button(popup, '开始测试')
+    await start.trigger('click')
+    await start.trigger('click')
+    expect(testTunnel).toHaveBeenCalledExactlyOnceWith(relay.id)
+    expect(popup.get('[role="status"]').text()).toContain('正在测试隧道转发')
+    expect(start.classes()).toContain('is-loading')
+
+    pending.resolve({ data: { success: true, latency_ms: 42 } })
+    await flushPromises()
+    expect(popup.get('[role="status"]').text()).toContain('隧道转发正常')
+    expect(popup.text()).toContain('往返耗时 42 ms')
+    expect(start.classes()).not.toContain('is-loading')
+
+    testTunnel.mockRejectedValueOnce({ response: { data: { message: '出口节点离线' } } })
+    await start.trigger('click')
+    await flushPromises()
+    expect(popup.get('[role="status"]').text()).toContain('测试失败')
+    expect(popup.text()).toContain('出口节点离线')
+    expect(popup.text()).not.toContain('往返耗时')
+    await button(popup, '关闭').trigger('click')
+
+    await button(row(wrapper, udpRelay.name), '测试').trigger('click')
+    expect(dialog(wrapper).text()).toContain('请先启动隧道')
+    expect(dialog(wrapper).text()).not.toContain('出口节点离线')
+    expect(button(dialog(wrapper), '开始测试').element.disabled).toBe(true)
+    expect(testTunnel).toHaveBeenCalledTimes(2)
   })
 
   it('disables competing toggles during a pending start and confirms deletions', async () => {

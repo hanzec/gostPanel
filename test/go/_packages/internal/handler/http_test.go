@@ -146,6 +146,7 @@ func (f *handlerHTTPFixture) registerForwarding() {
 	f.engine.DELETE("/tunnels/:id", tunnels.Delete)
 	f.engine.POST("/tunnels/:id/start", tunnels.Start)
 	f.engine.POST("/tunnels/:id/stop", tunnels.Stop)
+	f.engine.POST("/tunnels/:id/test", tunnels.Test)
 }
 
 func (f *handlerHTTPFixture) registerSettings() {

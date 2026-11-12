@@ -36,6 +36,8 @@ const (
 	V1_GetUpgradeStatus_FullMethodName             = "/yagp.v1/GetUpgradeStatus"
 	V1_StartUpgrade_FullMethodName                 = "/yagp.v1/StartUpgrade"
 	V1_ConfigureTransparentRedirect_FullMethodName = "/yagp.v1/ConfigureTransparentRedirect"
+	V1_StartTunnelProbe_FullMethodName             = "/yagp.v1/StartTunnelProbe"
+	V1_ProbeTunnel_FullMethodName                  = "/yagp.v1/ProbeTunnel"
 )
 
 // V1Client is the client API for V1 service.
@@ -59,6 +61,8 @@ type V1Client interface {
 	GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
 	StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
 	ConfigureTransparentRedirect(ctx context.Context, in *TransparentRedirectRequest, opts ...grpc.CallOption) (*TransparentRedirectReply, error)
+	StartTunnelProbe(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*TunnelProbeEndpoint, error)
+	ProbeTunnel(ctx context.Context, in *TunnelProbeRequest, opts ...grpc.CallOption) (*TunnelProbeReply, error)
 }
 
 type v1Client struct {
@@ -219,6 +223,26 @@ func (c *v1Client) ConfigureTransparentRedirect(ctx context.Context, in *Transpa
 	return out, nil
 }
 
+func (c *v1Client) StartTunnelProbe(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*TunnelProbeEndpoint, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TunnelProbeEndpoint)
+	err := c.cc.Invoke(ctx, V1_StartTunnelProbe_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *v1Client) ProbeTunnel(ctx context.Context, in *TunnelProbeRequest, opts ...grpc.CallOption) (*TunnelProbeReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TunnelProbeReply)
+	err := c.cc.Invoke(ctx, V1_ProbeTunnel_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // V1Server is the server API for V1 service.
 // All implementations must embed UnimplementedV1Server
 // for forward compatibility.
@@ -240,6 +264,8 @@ type V1Server interface {
 	GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error)
 	StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error)
 	ConfigureTransparentRedirect(context.Context, *TransparentRedirectRequest) (*TransparentRedirectReply, error)
+	StartTunnelProbe(context.Context, *emptypb.Empty) (*TunnelProbeEndpoint, error)
+	ProbeTunnel(context.Context, *TunnelProbeRequest) (*TunnelProbeReply, error)
 	mustEmbedUnimplementedV1Server()
 }
 
@@ -294,6 +320,12 @@ func (UnimplementedV1Server) StartUpgrade(context.Context, *NodeUpgradeRequest) 
 }
 func (UnimplementedV1Server) ConfigureTransparentRedirect(context.Context, *TransparentRedirectRequest) (*TransparentRedirectReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConfigureTransparentRedirect not implemented")
+}
+func (UnimplementedV1Server) StartTunnelProbe(context.Context, *emptypb.Empty) (*TunnelProbeEndpoint, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StartTunnelProbe not implemented")
+}
+func (UnimplementedV1Server) ProbeTunnel(context.Context, *TunnelProbeRequest) (*TunnelProbeReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ProbeTunnel not implemented")
 }
 func (UnimplementedV1Server) mustEmbedUnimplementedV1Server() {}
 func (UnimplementedV1Server) testEmbeddedByValue()            {}
@@ -586,6 +618,42 @@ func _V1_ConfigureTransparentRedirect_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _V1_StartTunnelProbe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).StartTunnelProbe(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_StartTunnelProbe_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).StartTunnelProbe(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _V1_ProbeTunnel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TunnelProbeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).ProbeTunnel(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_ProbeTunnel_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).ProbeTunnel(ctx, req.(*TunnelProbeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // V1_ServiceDesc is the grpc.ServiceDesc for V1 service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -652,6 +720,14 @@ var V1_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConfigureTransparentRedirect",
 			Handler:    _V1_ConfigureTransparentRedirect_Handler,
+		},
+		{
+			MethodName: "StartTunnelProbe",
+			Handler:    _V1_StartTunnelProbe_Handler,
+		},
+		{
+			MethodName: "ProbeTunnel",
+			Handler:    _V1_ProbeTunnel_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

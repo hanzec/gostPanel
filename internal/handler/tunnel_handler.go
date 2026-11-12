@@ -175,3 +175,22 @@ func (h *TunnelHandler) Stop(c *gin.Context) {
 
 	response.SuccessWithMessage(c, "停止成功", nil)
 }
+
+type tunnelTestResult struct {
+	Success   bool  `json:"success"`
+	LatencyMS int64 `json:"latency_ms"`
+}
+
+func (h *TunnelHandler) Test(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		response.BadRequest(c, "无效的隧道 ID")
+		return
+	}
+	latency, err := h.tunnelService.Test(c.Request.Context(), uint(id))
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+	response.Success(c, tunnelTestResult{Success: true, LatencyMS: latency})
+}

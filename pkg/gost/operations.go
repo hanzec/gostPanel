@@ -17,6 +17,18 @@ func (c *Client) CheckListener(ctx context.Context, protocol, ip string, port ui
 	})
 }
 
+func (c *Client) StartTunnelProbe(ctx context.Context) (*nodegrpc.TunnelProbeEndpoint, error) {
+	return callNode(ctx, c, c.config.Timeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.TunnelProbeEndpoint, error) {
+		return client.StartTunnelProbe(ctx, &emptypb.Empty{})
+	})
+}
+
+func (c *Client) ProbeTunnel(ctx context.Context, req *nodegrpc.TunnelProbeRequest) (*nodegrpc.TunnelProbeReply, error) {
+	return callNode(ctx, c, 9*time.Second, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.TunnelProbeReply, error) {
+		return client.ProbeTunnel(ctx, req)
+	})
+}
+
 func (c *Client) GostServiceStatus(ctx context.Context) (*nodegrpc.GostServiceStatus, error) {
 	return callNode(ctx, c, c.config.Timeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.GostServiceStatus, error) {
 		return client.GetGostServiceStatus(ctx, &emptypb.Empty{})

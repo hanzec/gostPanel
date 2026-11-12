@@ -124,6 +124,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.DELETE("/tunnels/:id", tunnelHandler.Delete)
 		authRoutes.POST("/tunnels/:id/start", tunnelHandler.Start)
 		authRoutes.POST("/tunnels/:id/stop", tunnelHandler.Stop)
+		authRoutes.POST("/tunnels/:id/test", tunnelHandler.Test)
 
 		// 操作日志
 		authRoutes.GET("/logs", logHandler.List)
