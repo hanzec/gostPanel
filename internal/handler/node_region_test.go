@@ -5,14 +5,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"yagp/internal/model"
 	"yagp/internal/repository"
 	"yagp/pkg/geoip"
+	"yagp/pkg/logger"
 )
 
 type regionLookupTransport func(*http.Request) (*http.Response, error)
@@ -24,6 +28,9 @@ func (call regionLookupTransport) RoundTrip(req *http.Request) (*http.Response, 
 func TestNodeHTTPReturnsRegionFromCurrentIP(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
 	f.geoIP = geoip.NewDatabase("../../pkg/geoip/testdata/GeoIP2-Country-Test.mmdb", "")
+	if err := f.geoIP.Load(); err != nil {
+		t.Fatal(err)
+	}
 	h := f.registerNodes()
 	h.geoIPClient = &http.Client{Transport: regionLookupTransport(func(req *http.Request) (*http.Response, error) {
 		t.Fatalf("unexpected online lookup with a readable database: %s", req.URL)
@@ -69,6 +76,24 @@ func TestNodeHTTPFallsBackToGeoJSWhenRegionDatabaseDownloadFails(t *testing.T) {
 
 	f := newHandlerHTTPFixture(t)
 	f.geoIP = geoip.NewDatabase(filepath.Join(t.TempDir(), "country.mmdb"), download.URL)
+	if err := f.geoIP.Refresh(t.Context()); err == nil {
+		t.Fatal("unavailable database download succeeded")
+	}
+	logFile, err := os.CreateTemp(t.TempDir(), "geoip-warning-*.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = logger.Init(&logger.Config{Level: "error"})
+		_ = logFile.Close()
+	})
+	stdout := os.Stdout
+	os.Stdout = logFile
+	err = logger.Init(&logger.Config{Level: "warn"})
+	os.Stdout = stdout
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := f.registerNodes()
 	h.geoIPClient = &http.Client{Transport: regionLookupTransport(func(req *http.Request) (*http.Response, error) {
 		if req.Method != http.MethodGet || req.URL.Host != "get.geojs.io" {
@@ -106,5 +131,63 @@ func TestNodeHTTPFallsBackToGeoJSWhenRegionDatabaseDownloadFails(t *testing.T) {
 		if node.Region != want[node.Name] {
 			t.Errorf("node %q region = %q, want %q", node.Name, node.Region, want[node.Name])
 		}
+	}
+	_ = logger.Sync()
+	logs, err := os.ReadFile(logFile.Name())
+	if err != nil || !strings.Contains(string(logs), `"level":"warn"`) ||
+		!strings.Contains(string(logs), "回退到旧版 GeoJS 在线查询") {
+		t.Fatalf("missing fallback warning: %s, %v", logs, err)
+	}
+	f.request(t, http.MethodGet, "/nodes", "", http.StatusOK)
+	if downloads.Load() != 1 {
+		t.Fatalf("list request retried the database download: %d attempts", downloads.Load())
+	}
+}
+
+func TestNodeListDoesNotWaitForGeoIPDownload(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	finishDownload := func() { releaseOnce.Do(func() { close(release) }) }
+	download := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		http.ServeFile(w, r, "../../pkg/geoip/testdata/GeoIP2-Country-Test.mmdb")
+	}))
+	defer download.Close()
+	defer finishDownload()
+	f := newHandlerHTTPFixture(t)
+	f.geoIP = geoip.NewDatabase(filepath.Join(t.TempDir(), "country.mmdb"), download.URL)
+	refreshed := make(chan error, 1)
+	go func() { refreshed <- f.geoIP.Refresh(t.Context()) }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("GeoIP download did not start")
+	}
+	h := f.registerNodes()
+	var onlineLookups atomic.Int32
+	h.geoIPClient = &http.Client{Transport: regionLookupTransport(func(req *http.Request) (*http.Response, error) {
+		onlineLookups.Add(1)
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("GB\n"))}, nil
+	})}
+	if err := f.db.Create(&model.GostNode{Name: "edge", IPv4: "81.2.69.142"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	requested := time.Now()
+	page := handlerData[handlerPage[model.GostNode]](t, f.request(t, http.MethodGet, "/nodes", "", http.StatusOK))
+	if elapsed := time.Since(requested); elapsed > time.Second {
+		t.Fatalf("node list waited for the database download: %s", elapsed)
+	}
+	if len(page.List) != 1 || page.List[0].Region != "GB" || onlineLookups.Load() != 1 {
+		t.Fatalf("online fallback while database downloads: %+v, lookups=%d", page, onlineLookups.Load())
+	}
+	finishDownload()
+	if err := <-refreshed; err != nil {
+		t.Fatal(err)
+	}
+	page = handlerData[handlerPage[model.GostNode]](t, f.request(t, http.MethodGet, "/nodes", "", http.StatusOK))
+	if len(page.List) != 1 || page.List[0].Region != "GB" || onlineLookups.Load() != 1 {
+		t.Fatalf("completed database was not reused: %+v, lookups=%d", page, onlineLookups.Load())
 	}
 }

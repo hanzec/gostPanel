@@ -27,6 +27,8 @@ docker compose up -d
 
 默认镜像为 `release.hanzec-overseas.cn/images/yagp:latest`（Linux amd64、arm64）。固定版本可在 [docker-compose.yml](./docker-compose.yml) 中替换标签。配置、数据和日志分别保存在部署目录的 `config/`、`data/` 和 `logs/`。
 
+Compose 通过 Traefik 的 `yagp-compress` 中间件启用 gzip，压缩面板页面、静态资源和 API 响应。客户端需支持 gzip，响应达到 Traefik 默认的 1024 字节阈值才会压缩。已有部署需更新 `docker-compose.yml` 后执行 `docker compose up -d yagp`，仅升级镜像不会更新这些标签。
+
 ### Linux 二进制
 
 在项目根目录以 root 执行。需要 systemd 和大于 128 MB 的内存。默认监听 `39100`，配置位于 `/etc/gost-panel`，服务为 `gost-panel.service`。安装后配置下文的认证与节点接入。
@@ -64,6 +66,8 @@ database:
   type: mysql
   dsn: "yagp:<password>@tcp(mysql.internal:3306)/yagp?charset=utf8mb4&loc=Local"
 ```
+
+节点地区使用独立的 `data/server-country.mmdb` 文件。面板每次启动先加载有效本地库，再在后台重新下载并校验数据库；更新失败时继续使用已有有效库。`geoip.download_url` 可指定 `.mmdb` 文件直链，留空使用默认地址。启动日志会打印本地库状态和下载结果。没有可用库时，节点查询回退到旧版 GeoJS 在线查询并记录 warning；API 请求不会等待或触发数据库下载。
 
 ## 节点接入
 

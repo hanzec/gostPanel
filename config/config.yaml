@@ -10,7 +10,7 @@ database:
   dsn: ""  # MySQL 连接串，也可用 YAGP_DATABASE_DSN
 
 geoip:
-  download_url: ""  # .mmdb 文件直链，留空使用项目默认下载地址
+  download_url: ""  # 每次启动在后台更新 .mmdb，留空使用项目默认下载地址
 
 authentik:
   trusted_proxies: ["127.0.0.1", "::1"]

@@ -56,6 +56,8 @@ func main() {
 	}()
 
 	logger.Info("yagp 启动中...")
+	backgroundCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
 
 	// 设置 Gin 模式
 	if cfg.Server.Mode == "release" {
@@ -94,7 +96,7 @@ func main() {
 	}
 
 	nodeUpgrade := service.NewNodeUpgradeService(db)
-	geoIP := geoip.NewDatabase(geoip.DefaultDatabasePath, cfg.GeoIP.DownloadURL)
+	geoIP := startGeoIP(backgroundCtx, geoip.DefaultDatabasePath, cfg.GeoIP.DownloadURL)
 	r, err := router.NewRouter(db, cfg.Authentik, nodeUpgrade, reportFingerprint, geoIP)
 	if err != nil {
 		logger.Fatalf("Authentik 配置无效: %v", err)
@@ -116,8 +118,6 @@ func main() {
 	// 启动规则状态同步服务
 	syncService := service.NewRuleSyncService(db)
 	syncService.Start()
-	backgroundCtx, stopBackground := context.WithCancel(context.Background())
-	defer stopBackground()
 	go service.NewGostRulesetService(db).Run(backgroundCtx)
 	go nodeUpgrade.Run(backgroundCtx)
 
