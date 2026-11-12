@@ -54,6 +54,22 @@ export function getGostRuleset() {
     return request.get('/system/gost-ruleset')
 }
 
+export function getGostRulesets() {
+    return request.get('/system/gost-rulesets')
+}
+
 export function updateGostRuleset(url, nodeIds) {
     return request.put('/system/gost-ruleset', { url, node_ids: nodeIds }, { timeout: 25000 })
+}
+
+export function createGostRuleset(data) {
+    return request.post('/system/gost-rulesets', data, { timeout: 25000, silentError: true })
+}
+
+export function updateNamedGostRuleset(id, data) {
+    return request.put(`/system/gost-rulesets/${id}`, data, { timeout: 25000, silentError: true })
+}
+
+export function deleteGostRuleset(id) {
+    return request.delete(`/system/gost-rulesets/${id}`, { silentError: true })
 }

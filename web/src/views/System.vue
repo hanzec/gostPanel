@@ -148,9 +148,13 @@
             <el-tab-pane name="gost-ruleset" label="Clash 规则集" lazy>
               <header class="settings-section-heading">
                 <h2>透明代理规则集订阅</h2>
-                <p>面板定期读取 Clash 规则集，转换为 Gost 分流白名单并同步到所选节点。</p>
+                <p>添加订阅后，可在透明转发中组合多个规则集。</p>
               </header>
-              <GostRulesetSettings />
+              <GostRulesetCatalog />
+              <details class="legacy-ruleset">
+                <summary>默认规则集与旧节点同步</summary>
+                <GostRulesetSettings />
+              </details>
             </el-tab-pane>
           </el-tabs>
         </section>
@@ -204,6 +208,7 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { backupSystem, getSystemConfig, sendTestBark, sendTestEmail, updateSystemConfig } from '@/api/system'
 import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
+import GostRulesetCatalog from '@/components/GostRulesetCatalog.vue'
 import PageActions from '@/components/PageActions.vue'
 import { useSystemStore } from '@/store/system'
 
@@ -260,7 +265,7 @@ const context = computed(() => {
   if (activeTab.value === 'gost-ruleset') {
     return {
       icon: Connection, label: 'BYPASS', title: '在 Gost 中使用规则集',
-      description: '在现有透明代理转发链的第一跳添加下方配置。匹配的目标经代理转发，其余目标直连。',
+      description: '选择了规则集的透明隧道会自动同步订阅。手工配置的旧节点可使用默认规则集对应的 Gost 配置。',
       factLabel: 'Gost 第一跳配置', factValue: 'bypass: yagp-transparent-proxy'
     }
   }
@@ -454,6 +459,7 @@ onMounted(loadSettings)
 .settings-section-heading { margin-bottom: 24px; }
 .settings-section-heading h2 { margin: 0 0 8px; font-size: var(--ops-text-title); font-weight: var(--ops-weight-semibold); }
 .settings-section-heading p { margin: 0; color: var(--ops-muted); font-size: var(--ops-text-body); }
+.legacy-ruleset > summary { cursor: pointer; margin-bottom: 16px; }
 
 .settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
 .settings-full-field { grid-column: 1 / -1; }

@@ -37,7 +37,11 @@ func (s *TunnelService) createEndpointTunnel(req *dto.CreateTunnelReq, nodeIDs [
 		}
 		tunnel.ProtocolOptions = req.ProtocolOptions
 	}
-	if err := setTunnelTargets(tunnel, req.Targets, req.UseClashRuleset, req.Strategy); err != nil {
+	var useOriginal *bool
+	if req.UseOriginalTarget {
+		useOriginal = &req.UseOriginalTarget
+	}
+	if err := s.setTunnelTargets(tunnel, req.Targets, useOriginal, req.UseClashRuleset, req.RulesetIDs, req.ManualDomains, req.Strategy); err != nil {
 		return nil, err
 	}
 	if err := endpointNodesOnline(tunnel); err != nil {
@@ -109,16 +113,37 @@ func (s *TunnelService) setTunnelEndpoints(tunnel *model.GostTunnel, entryID, ex
 	return nil
 }
 
-func setTunnelTargets(t *model.GostTunnel, targets []string, useClash bool, strategy string) error {
+func (s *TunnelService) setTunnelTargets(t *model.GostTunnel, targets []string, useOriginal *bool, useClash bool, rulesetIDs []uint, manualDomains []string, strategy string) error {
 	if t.ExitRule.Role == model.EndpointRoleExit {
 		// Ignore obsolete tunnel-level input: the selected exit is the only source of target policy.
 		t.Targets, t.UseClashRuleset, t.Strategy = nil, false, ""
+		t.UseOriginalTarget, t.RulesetIDs, t.ManualDomains = false, nil, nil
 		return validateTunnelTargets(t)
 	}
-	if targets != nil || useClash || strategy != "" {
+	if targets != nil || useOriginal != nil || useClash || rulesetIDs != nil || manualDomains != nil || strategy != "" {
 		t.Targets, t.UseClashRuleset, t.Strategy = targets, useClash, strategy
+		if useOriginal != nil {
+			t.UseOriginalTarget = *useOriginal
+		}
+		if rulesetIDs != nil {
+			t.RulesetIDs = rulesetIDs
+		}
+		if manualDomains != nil {
+			t.ManualDomains = manualDomains
+		}
 	} else if t.Strategy == "" {
 		t.Targets, t.UseClashRuleset, t.Strategy = t.EntryRule.Targets, t.EntryRule.UseClashRuleset, t.EntryRule.Strategy
+		t.UseOriginalTarget, t.RulesetIDs, t.ManualDomains = t.EntryRule.UseOriginalTarget, t.EntryRule.RulesetIDs, t.EntryRule.ManualDomains
+	}
+	if !t.UseOriginalTarget && (len(t.RulesetIDs) != 0 || len(t.ManualDomains) != 0) {
+		return errors.ErrEndpointTargets
+	}
+	if rulesetIDs != nil || manualDomains != nil {
+		ids, domains, err := NewGostRulesetService(s.tunnelRepo.DB).NormalizeSelection(context.Background(), t.RulesetIDs, t.ManualDomains)
+		if err != nil {
+			return err
+		}
+		t.RulesetIDs, t.ManualDomains = ids, domains
 	}
 	if t.Strategy == "" {
 		t.Strategy = "round"
@@ -128,10 +153,13 @@ func setTunnelTargets(t *model.GostTunnel, targets []string, useClash bool, stra
 
 func validateTunnelTargets(t *model.GostTunnel) error {
 	source := endpointTargetRule(t)
-	if err := validateClashTarget(source.UseClashRuleset, source.Protocol, source.ListenIP, source.Targets); err != nil {
+	if err := validateTransparentTarget(source.UseOriginalTarget, source.UseClashRuleset, source.Protocol, source.ListenIP, source.Targets); err != nil {
 		return err
 	}
-	if !source.UseClashRuleset && len(source.Targets) == 0 {
+	if source.Protocol == model.RuleProtocolTransparent && !source.UseOriginalTarget && !source.UseClashRuleset {
+		return errors.ErrRuleTransparentTargetRequired
+	}
+	if !source.UseOriginalTarget && !source.UseClashRuleset && len(source.Targets) == 0 {
 		return errors.ErrTunnelTargetRequired
 	}
 	return nil
@@ -142,8 +170,10 @@ func endpointTargetRule(t *model.GostTunnel) model.GostRule {
 	rule := *t.EntryRule
 	if t.ExitRule != nil && t.ExitRule.Role == model.EndpointRoleExit {
 		rule.Targets, rule.UseClashRuleset, rule.Strategy = t.ExitRule.Targets, t.ExitRule.UseClashRuleset, t.ExitRule.Strategy
+		rule.UseOriginalTarget, rule.RulesetIDs, rule.ManualDomains = t.ExitRule.UseOriginalTarget, t.ExitRule.RulesetIDs, t.ExitRule.ManualDomains
 	} else if t.Strategy != "" {
 		rule.Targets, rule.UseClashRuleset, rule.Strategy = t.Targets, t.UseClashRuleset, t.Strategy
+		rule.UseOriginalTarget, rule.RulesetIDs, rule.ManualDomains = t.UseOriginalTarget, t.RulesetIDs, t.ManualDomains
 	}
 	return rule
 }
@@ -220,7 +250,8 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 }
 
 func prepareEndpointRedirect(t *model.GostTunnel, entryClient *gost.Client, host string) (*nodegrpc.TransparentRedirectRequest, error) {
-	if !endpointTargetRule(t).UseClashRuleset {
+	source := endpointTargetRule(t)
+	if !source.UseOriginalTarget && !source.UseClashRuleset {
 		return nil, nil
 	}
 	redirect := transparentRedirectRequest(t.EntryRule, host)
@@ -246,7 +277,7 @@ func (s *TunnelService) provisionEndpointTunnel(t *model.GostTunnel, entryClient
 		return err
 	}
 	if redirect.GetDockerAddress() != "" {
-		svc := gost.BuildMarkedClashRedirectService(dockerEntranceServiceName(t.EntryRule.ID), mark)
+		svc := gost.BuildMarkedTransparentRedirectService(dockerEntranceServiceName(t.EntryRule.ID), mark, transparentFiltering(&source))
 		svc.Addr = net.JoinHostPort(redirect.GetDockerAddress(), strconv.Itoa(t.EntryRule.ListenPort))
 		// IP_TRANSPARENT lets Gost start before the bridge address is assigned. The handler reads SO_ORIGINAL_DST for DNAT.
 		svc.Listener.Metadata = map[string]any{"tproxy": true}
@@ -354,8 +385,9 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 		return err
 	}
 	entryClient, exitClient := utils.GetGostClient(t.EntryNode), utils.GetGostClient(t.ExitNode)
-	useClash := endpointTargetRule(t).UseClashRuleset
-	if save && useClash {
+	source := endpointTargetRule(t)
+	transparent := source.UseOriginalTarget || source.UseClashRuleset
+	if save && transparent {
 		request := &nodegrpc.TransparentRedirectRequest{
 			Action: nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE,
 			Owner:  entranceServiceName(t.EntryRule.ID),
@@ -373,13 +405,17 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 	if err := entryClient.DeleteService(serviceName); err != nil {
 		return err
 	}
-	if useClash {
+	if transparent {
 		if err := entryClient.DeleteService(dockerEntranceServiceName(t.EntryRule.ID)); err != nil {
 			return err
 		}
 	}
-	if err := stderrors.Join(entryClient.DeleteChain(tunnelChainName(t.ID)),
-		entryClient.DeleteChain(clashTunnelChainName(t.ID)), exitClient.DeleteService(relayServiceName(t.ID))); err != nil {
+	cleanupErr := stderrors.Join(entryClient.DeleteChain(tunnelChainName(t.ID)),
+		entryClient.DeleteChain(clashTunnelChainName(t.ID)), exitClient.DeleteService(relayServiceName(t.ID)))
+	if len(source.RulesetIDs) != 0 || len(source.ManualDomains) != 0 {
+		cleanupErr = stderrors.Join(cleanupErr, entryClient.DeleteNamedTransparentBypass(transparentPolicyName(t.ID)))
+	}
+	if err := cleanupErr; err != nil {
 		return err
 	}
 	if save {

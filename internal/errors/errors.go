@@ -26,6 +26,11 @@ func New(code int, message string, httpCode int) *BizError {
 	}
 }
 
+// InvalidRulesetSelection preserves field-specific validation details for API callers.
+func InvalidRulesetSelection(message string) *BizError {
+	return New(10421, message, http.StatusBadRequest)
+}
+
 // ==================== 节点相关错误 (100xx) ====================
 
 var (
@@ -66,15 +71,18 @@ var (
 	// ErrRuleTypeInvalid 无效的规则类型
 	ErrRuleTypeInvalid = New(10108, "无效的规则类型", http.StatusBadRequest)
 	// ErrTunnelChainNotFound 隧道链不存在
-	ErrTunnelChainNotFound  = New(10109, "隧道未启动或链路不存在", http.StatusBadRequest)
-	ErrRuleListenIPInvalid  = New(10110, "监听 IP 必须是 IPv4 或 IPv6 地址", http.StatusBadRequest)
-	ErrRuleClashInvalid     = New(10111, "Clash 透明分流需要 TCP 和 127.0.0.1 监听，且不能填写固定目标", http.StatusBadRequest)
-	ErrRuleClashUnavailable = New(10112, "请先在系统设置中配置可用的 Clash 规则集", http.StatusBadRequest)
-	ErrRuleTunnelLinked     = New(10113, "端点已绑定隧道，请在隧道管理中操作", http.StatusBadRequest)
-	ErrRuleTargetRequired   = New(10114, "请在出口端点配置目标，再到隧道管理启动", http.StatusBadRequest)
-	ErrEndpointProtocol     = New(10115, "入口端点仅支持 TCP 或 UDP，其他隧道协议请在出口端点选择", http.StatusBadRequest)
-	ErrEndpointTargets      = New(10116, "入口无需目标；出口须填写固定目标或选择 Clash 规则集，且不能同时使用两者", http.StatusBadRequest)
-	ErrEndpointRole         = New(10117, "请选择有效的入口或出口端点角色", http.StatusBadRequest)
+	ErrTunnelChainNotFound           = New(10109, "隧道未启动或链路不存在", http.StatusBadRequest)
+	ErrRuleListenIPInvalid           = New(10110, "监听 IP 必须是 IPv4 或 IPv6 地址", http.StatusBadRequest)
+	ErrRuleClashInvalid              = New(10111, "Clash 透明分流需要透明代理入口或旧版 TCP 和 127.0.0.1 监听，且不能填写固定目标", http.StatusBadRequest)
+	ErrRuleClashUnavailable          = New(10112, "请先在系统设置中配置可用的 Clash 规则集", http.StatusBadRequest)
+	ErrRuleTunnelLinked              = New(10113, "端点已绑定隧道，请在隧道管理中操作", http.StatusBadRequest)
+	ErrRuleTargetRequired            = New(10114, "请在出口端点配置目标，再到隧道管理启动", http.StatusBadRequest)
+	ErrEndpointProtocol              = New(10115, "入口支持 TCP、UDP 或透明代理，出口须选择 Gost Relay 通道", http.StatusBadRequest)
+	ErrEndpointTargets               = New(10116, "入口无需目标；出口须使用原始目标、旧版 Clash 或固定目标，固定目标不能同时使用规则过滤", http.StatusBadRequest)
+	ErrEndpointRole                  = New(10117, "请选择有效的入口或出口端点角色", http.StatusBadRequest)
+	ErrRuleOriginalTargetInvalid     = New(10118, "原始目标转发需要透明代理入口，且不能填写固定目标", http.StatusBadRequest)
+	ErrRuleTransparentListenIP       = New(10119, "透明代理入口的监听地址必须是回环地址", http.StatusBadRequest)
+	ErrRuleTransparentTargetRequired = New(10120, "透明代理入口需要出口使用原始目标或旧版 Clash 规则集", http.StatusBadRequest)
 )
 
 // ==================== 隧道相关错误 (102xx) ====================

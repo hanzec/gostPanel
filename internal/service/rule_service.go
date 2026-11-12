@@ -2,6 +2,7 @@
 package service
 
 import (
+	"context"
 	stderrors "errors"
 	"fmt"
 	"net"
@@ -72,11 +73,18 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 		return nil, errors.ErrRuleTypeInvalid
 	}
 
-	listenIP, err := normalizeRuleListenIP(req.ListenIP)
+	listenIP, err := normalizeRuleListenIP(model.RuleProtocol(req.Protocol), req.ListenIP)
 	if err != nil {
 		return nil, err
 	}
-	if err = validateEndpointConfig(model.EndpointRole(req.Role), kind, model.RuleProtocol(req.Protocol), listenIP, req.Targets, req.UseClashRuleset); err != nil {
+	if err = validateEndpointConfig(model.EndpointRole(req.Role), kind, model.RuleProtocol(req.Protocol), listenIP, req.Targets, req.UseOriginalTarget, req.UseClashRuleset); err != nil {
+		return nil, err
+	}
+	if !req.UseOriginalTarget && (len(req.RulesetIDs) != 0 || len(req.ManualDomains) != 0) {
+		return nil, errors.ErrEndpointTargets
+	}
+	rulesetIDs, manualDomains, err := s.rulesetService.NormalizeSelection(context.Background(), req.RulesetIDs, req.ManualDomains)
+	if err != nil {
 		return nil, err
 	}
 	if err := validateEndpointProtocolOptions(model.EndpointRole(req.Role), req.Protocol, req.ProtocolOptions); err != nil {
@@ -92,21 +100,23 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 
 	// 创建规则
 	rule := &model.GostRule{
-		NodeID:          nodeID,
-		TunnelID:        tunnelID,
-		Name:            req.Name,
-		Type:            kind,
-		Role:            model.EndpointRole(req.Role),
-		Protocol:        model.RuleProtocol(req.Protocol),
-		ProtocolOptions: req.ProtocolOptions,
-		ListenIP:        listenIP,
-		ListenPort:      req.ListenPort,
-		Targets:         req.Targets,
-		UseClashRuleset: req.UseClashRuleset,
-		Strategy:        req.Strategy,
-		EnableTLS:       req.EnableTLS,
-		Remark:          req.Remark,
-		Status:          model.RuleStatusStopped,
+		NodeID:            nodeID,
+		TunnelID:          tunnelID,
+		Name:              req.Name,
+		Type:              kind,
+		Role:              model.EndpointRole(req.Role),
+		Protocol:          model.RuleProtocol(req.Protocol),
+		ProtocolOptions:   req.ProtocolOptions,
+		ListenIP:          listenIP,
+		ListenPort:        req.ListenPort,
+		Targets:           req.Targets,
+		UseClashRuleset:   req.UseClashRuleset,
+		UseOriginalTarget: req.UseOriginalTarget,
+		RulesetIDs:        rulesetIDs, ManualDomains: manualDomains,
+		Strategy:  req.Strategy,
+		EnableTLS: req.EnableTLS,
+		Remark:    req.Remark,
+		Status:    model.RuleStatusStopped,
 	}
 
 	if err = s.ruleRepo.Create(rule); err != nil {
@@ -159,14 +169,28 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 
 	listenIP := rule.ListenIP
 	if req.ListenIP != nil {
-		listenIP, err = normalizeRuleListenIP(*req.ListenIP)
-		if err != nil {
-			return nil, err
-		}
+		listenIP = *req.ListenIP
+	} else if req.Protocol == string(model.RuleProtocolTransparent) && rule.Protocol != model.RuleProtocolTransparent {
+		listenIP = ""
+	}
+	listenIP, err = normalizeRuleListenIP(model.RuleProtocol(req.Protocol), listenIP)
+	if err != nil {
+		return nil, err
 	}
 	useClashRuleset := rule.UseClashRuleset
 	if req.UseClashRuleset != nil {
 		useClashRuleset = *req.UseClashRuleset
+	}
+	useOriginalTarget := rule.UseOriginalTarget
+	if req.UseOriginalTarget != nil {
+		useOriginalTarget = *req.UseOriginalTarget
+	}
+	rulesetIDs, manualDomains := rule.RulesetIDs, rule.ManualDomains
+	if req.RulesetIDs != nil {
+		rulesetIDs = req.RulesetIDs
+	}
+	if req.ManualDomains != nil {
+		manualDomains = req.ManualDomains
 	}
 	targets := rule.Targets
 	if req.Targets != nil {
@@ -177,18 +201,29 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 		role = model.EndpointRole(req.Role)
 	}
 	if role == model.EndpointRoleEntry {
-		if len(req.Targets) != 0 || (req.UseClashRuleset != nil && *req.UseClashRuleset) {
+		if len(req.Targets) != 0 || (req.UseClashRuleset != nil && *req.UseClashRuleset) ||
+			(req.UseOriginalTarget != nil && *req.UseOriginalTarget) || len(req.RulesetIDs) != 0 || len(req.ManualDomains) != 0 {
 			return nil, errors.ErrEndpointTargets
 		}
 		targets, useClashRuleset = []string{}, false
+		useOriginalTarget, rulesetIDs, manualDomains = false, nil, nil
 	}
 	// Listener-only edits preserve targets belonging to an unconverted legacy endpoint.
-	if role != "" || req.UseClashRuleset != nil || req.Targets != nil || req.Strategy != "" {
-		if err = validateEndpointConfig(role, rule.Type, model.RuleProtocol(req.Protocol), listenIP, targets, useClashRuleset); err != nil {
+	if role != "" || req.UseClashRuleset != nil || req.UseOriginalTarget != nil || useOriginalTarget || req.Protocol == "red" || req.RulesetIDs != nil || req.ManualDomains != nil || req.Targets != nil || req.Strategy != "" {
+		if err = validateEndpointConfig(role, rule.Type, model.RuleProtocol(req.Protocol), listenIP, targets, useOriginalTarget, useClashRuleset); err != nil {
 			return nil, err
 		}
-	} else if req.Protocol != "" && req.Protocol != "tcp" && req.Protocol != "udp" {
+	} else if req.Protocol != "" && req.Protocol != "tcp" && req.Protocol != "udp" && req.Protocol != "red" {
 		return nil, errors.ErrEndpointProtocol
+	}
+	if !useOriginalTarget && (len(rulesetIDs) != 0 || len(manualDomains) != 0) {
+		return nil, errors.ErrEndpointTargets
+	}
+	if req.RulesetIDs != nil || req.ManualDomains != nil {
+		rulesetIDs, manualDomains, err = s.rulesetService.NormalizeSelection(context.Background(), rulesetIDs, manualDomains)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if req.ProtocolOptions != nil || req.Protocol != string(rule.Protocol) || role != rule.Role {
 		if err := validateEndpointProtocolOptions(role, req.Protocol, req.ProtocolOptions); err != nil {
@@ -211,6 +246,7 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	rule.ListenPort = req.ListenPort
 	rule.Targets = targets
 	rule.UseClashRuleset = useClashRuleset
+	rule.UseOriginalTarget, rule.RulesetIDs, rule.ManualDomains = useOriginalTarget, rulesetIDs, manualDomains
 	if req.Strategy != "" {
 		rule.Strategy = req.Strategy
 	}
@@ -247,23 +283,27 @@ func (s *RuleService) findRuleNode(id *uint) (*model.GostNode, error) {
 	return node, err
 }
 
-func validateEndpointConfig(role model.EndpointRole, kind model.RuleType, protocol model.RuleProtocol, listenIP string, targets []string, useClash bool) error {
+func validateEndpointConfig(role model.EndpointRole, kind model.RuleType, protocol model.RuleProtocol, listenIP string, targets []string, useOriginal, useClash bool) error {
+	if useOriginal && useClash {
+		return errors.ErrEndpointTargets
+	}
 	if role != "" && (kind != model.RuleTypeForward || (role != model.EndpointRoleEntry && role != model.EndpointRoleExit)) {
 		return errors.ErrEndpointRole
 	}
-	if role != model.EndpointRoleExit && protocol != "" && protocol != model.RuleProtocolTCP && protocol != model.RuleProtocolUDP {
+	if ((role == model.EndpointRoleExit || kind == model.RuleTypeTunnel) && protocol == model.RuleProtocolTransparent) ||
+		(role != model.EndpointRoleExit && protocol != "" && protocol != model.RuleProtocolTCP && protocol != model.RuleProtocolUDP && protocol != model.RuleProtocolTransparent) {
 		return errors.ErrEndpointProtocol
 	}
 	switch role {
 	case model.EndpointRoleEntry:
-		if len(targets) != 0 || useClash {
+		if len(targets) != 0 || useOriginal || useClash {
 			return errors.ErrEndpointTargets
 		}
 	case model.EndpointRoleExit:
 		if !relayBindReachable(listenIP) {
 			return errors.ErrTunnelExitInvalid
 		}
-		if (useClash && len(targets) != 0) || (!useClash && len(targets) == 0) {
+		if ((useOriginal || useClash) && len(targets) != 0) || (!useOriginal && !useClash && len(targets) == 0) {
 			return errors.ErrEndpointTargets
 		}
 		for _, target := range targets {
@@ -272,13 +312,22 @@ func validateEndpointConfig(role model.EndpointRole, kind model.RuleType, protoc
 			}
 		}
 	default:
-		return validateClashTarget(useClash, protocol, listenIP, targets)
+		return validateTransparentTarget(useOriginal, useClash, protocol, listenIP, targets)
 	}
 	return nil
 }
 
-func normalizeRuleListenIP(value string) (string, error) {
+func normalizeRuleListenIP(protocol model.RuleProtocol, value string) (string, error) {
 	value = strings.TrimSpace(value)
+	if protocol == model.RuleProtocolTransparent {
+		if value != "" {
+			addr, err := netip.ParseAddr(value)
+			if err != nil || !addr.IsLoopback() || addr.Zone() != "" {
+				return "", errors.ErrRuleTransparentListenIP
+			}
+		}
+		return "127.0.0.1", nil
+	}
 	if value == "" {
 		return "", nil
 	}
@@ -434,7 +483,7 @@ func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 	if rule.Status == model.RuleStatusRunning {
 		return nil
 	}
-	if rule.Type == model.RuleTypeForward && (rule.Role != "" || rule.UseClashRuleset || len(rule.Targets) == 0) {
+	if rule.Type == model.RuleTypeForward && (rule.Role != "" || rule.Protocol == model.RuleProtocolTransparent || rule.UseOriginalTarget || rule.UseClashRuleset || len(rule.Targets) == 0) {
 		return errors.ErrRuleTargetRequired
 	}
 
@@ -487,6 +536,12 @@ func (s *RuleService) startTunnelRule(rule *model.GostRule, node *model.GostNode
 	if rule.TunnelID == nil {
 		return errors.ErrTunnelRequired
 	}
+	if rule.Protocol == model.RuleProtocolTransparent {
+		return errors.ErrEndpointProtocol
+	}
+	if err := validateTransparentTarget(rule.UseOriginalTarget, rule.UseClashRuleset, rule.Protocol, rule.ListenIP, rule.Targets); err != nil {
+		return err
+	}
 
 	// 获取隧道信息
 	tunnel, err := s.tunnelRepo.FindByID(*rule.TunnelID)
@@ -517,9 +572,9 @@ func (s *RuleService) provisionSelectedEntrance(client *gost.Client, rule *model
 	}
 
 	chainID := tunnel.ChainID
-	if rule.UseClashRuleset {
+	if rule.Protocol == model.RuleProtocolTransparent || rule.UseClashRuleset {
 		var err error
-		chainID, err = s.prepareClashChain(client, tunnel, mark)
+		chainID, err = s.prepareTransparentChain(client, tunnel, rule, mark)
 		if err != nil {
 			return err
 		}
@@ -656,8 +711,8 @@ func (s *RuleService) provisionService(client *gost.Client, node *model.GostNode
 	}
 
 	var svc *gost.ServiceConfig
-	if rule.UseClashRuleset {
-		svc = gost.BuildMarkedClashRedirectService(serviceName, mark)
+	if rule.Protocol == model.RuleProtocolTransparent || rule.UseClashRuleset {
+		svc = gost.BuildMarkedTransparentRedirectService(serviceName, mark, transparentFiltering(rule))
 	} else if rule.Protocol == model.RuleProtocolTCP {
 		svc = gost.BuildTCPForwardService(serviceName, rule.ListenPort, targets, strategy)
 	} else {

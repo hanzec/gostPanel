@@ -52,6 +52,9 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 		}
 		return s.createEndpointTunnel(req, nodeIDs, username, ip, userAgent)
 	}
+	if req.UseOriginalTarget || len(req.RulesetIDs) != 0 || len(req.ManualDomains) != 0 {
+		return nil, errors.ErrTunnelEndpointsRequired
+	}
 	if err := validateRelayProtocolOptions(req.Protocol, req.ProtocolOptions); err != nil {
 		return nil, err
 	}
@@ -146,10 +149,13 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 		if tunnel.ExitRule.Role != model.EndpointRoleExit && req.Protocol != "" {
 			tunnel.Protocol = req.Protocol
 		}
-		if err := setTunnelTargets(tunnel, req.Targets, req.UseClashRuleset, req.Strategy); err != nil {
+		if err := s.setTunnelTargets(tunnel, req.Targets, req.UseOriginalTarget, req.UseClashRuleset, req.RulesetIDs, req.ManualDomains, req.Strategy); err != nil {
 			return nil, err
 		}
 	} else {
+		if (req.UseOriginalTarget != nil && *req.UseOriginalTarget) || len(req.RulesetIDs) != 0 || len(req.ManualDomains) != 0 {
+			return nil, errors.ErrTunnelEndpointsRequired
+		}
 		tunnel.Protocol = req.Protocol
 		tunnel.RelayPort = req.RelayPort
 	}

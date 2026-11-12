@@ -39,9 +39,12 @@ type GostTunnel struct {
 
 	ProtocolOptions map[string]string `gorm:"type:text;serializer:json" json:"protocol_options"`
 
-	AllowlistNodeIDs []uint   `gorm:"type:text;serializer:json" json:"allowlist_node_ids"`
-	Targets          []string `gorm:"type:text;serializer:json" json:"targets"`
-	UseClashRuleset  bool     `gorm:"default:false" json:"use_clash_ruleset"`
+	AllowlistNodeIDs  []uint   `gorm:"type:text;serializer:json" json:"allowlist_node_ids"`
+	Targets           []string `gorm:"type:text;serializer:json" json:"targets"`
+	UseClashRuleset   bool     `gorm:"default:false" json:"use_clash_ruleset"`
+	UseOriginalTarget bool     `gorm:"not null;default:false" json:"use_original_target"`
+	RulesetIDs        []uint   `gorm:"type:text;serializer:json" json:"ruleset_ids"`
+	ManualDomains     []string `gorm:"type:text;serializer:json" json:"manual_domains"`
 	// An empty strategy identifies older tunnels whose targets still belong to the source rule.
 	Strategy string `gorm:"size:20" json:"strategy"`
 

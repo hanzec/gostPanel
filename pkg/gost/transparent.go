@@ -14,27 +14,40 @@ func BuildClashRedirectService(name string) *ServiceConfig {
 }
 
 func BuildMarkedClashRedirectService(name string, mark uint32) *ServiceConfig {
-	return &ServiceConfig{
+	return BuildMarkedTransparentRedirectService(name, mark, true)
+}
+
+// BuildMarkedTransparentRedirectService forwards to the original socket destination.
+// Domain-based routing also reads HTTP Host or TLS SNI to match the configured rules.
+func BuildMarkedTransparentRedirectService(name string, mark uint32, matchDomains bool) *ServiceConfig {
+	service := &ServiceConfig{
 		Name:     name,
 		Listener: &ListenerConfig{Type: "red"},
-		Handler: &HandlerConfig{
-			Type:     "red",
-			Metadata: map[string]any{"sniffing": true, "sniffing.fallback": true, "sniffing.timeout": "5s"},
-		},
+		Handler:  &HandlerConfig{Type: "red"},
 		SockOpts: &SocketOptions{Mark: int(mark)},
 	}
+	if matchDomains {
+		service.Handler.Metadata = map[string]any{"sniffing": true, "sniffing.fallback": true, "sniffing.timeout": "5s"}
+	}
+	return service
 }
 
 // EnsureClashChain leaves the fixed-target tunnel's route and configuration intact.
 func (c *Client) EnsureClashChain(source, name string) error {
-	return c.ensureClashChain(source, name, ClashRedirectMark, false)
+	return c.ensureTransparentChain(source, name, ClashRedirectMark, TransparentBypassName, false)
 }
 
 func (c *Client) EnsureMarkedClashChain(source, name string, mark uint32) error {
-	return c.ensureClashChain(source, name, mark, true)
+	return c.EnsureMarkedTransparentChain(source, name, mark, TransparentBypassName)
 }
 
-func (c *Client) ensureClashChain(source, name string, mark uint32, replace bool) error {
+// EnsureMarkedTransparentChain clones the Relay route with the redirect exemption mark.
+// An empty bypass sends every captured connection through the tunnel.
+func (c *Client) EnsureMarkedTransparentChain(source, name string, mark uint32, bypass string) error {
+	return c.ensureTransparentChain(source, name, mark, bypass, true)
+}
+
+func (c *Client) ensureTransparentChain(source, name string, mark uint32, bypass string, replace bool) error {
 	current, err := c.resource("/config/chains/" + name)
 	if err != nil || (!replace && len(current) != 0) {
 		return err
@@ -43,7 +56,7 @@ func (c *Client) ensureClashChain(source, name string, mark uint32, replace bool
 	if err != nil {
 		return err
 	}
-	chain, err := markedClashChain(raw, name, mark)
+	chain, err := markedTransparentChain(raw, name, mark, bypass)
 	if err != nil {
 		return err
 	}
@@ -62,7 +75,7 @@ func (c *Client) ensureClashChain(source, name string, mark uint32, replace bool
 	return nil
 }
 
-func markedClashChain(raw json.RawMessage, name string, mark uint32) (map[string]json.RawMessage, error) {
+func markedTransparentChain(raw json.RawMessage, name string, mark uint32, bypass string) (map[string]json.RawMessage, error) {
 	var chain map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &chain); err != nil {
 		return nil, err
@@ -77,7 +90,11 @@ func markedClashChain(raw json.RawMessage, name string, mark uint32) (map[string
 		return nil, fmt.Errorf("Gost 隧道缺少出口 Relay")
 	}
 	// A whitelist on the first hop sends unmatched destinations directly.
-	hop["bypass"], _ = json.Marshal(TransparentBypassName)
+	if bypass == "" {
+		delete(hop, "bypass")
+	} else {
+		hop["bypass"], _ = json.Marshal(bypass)
+	}
 	sockOpts, _ := json.Marshal(SocketOptions{Mark: int(mark)})
 	hop["sockopts"] = sockOpts
 	nodes[exit]["sockopts"] = sockOpts

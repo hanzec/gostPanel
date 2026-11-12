@@ -21,22 +21,25 @@ func migrateTunnelEndpointRoles(db *gorm.DB) error {
 			// The role marks migrated endpoints, so later startup cannot restore stale tunnel targets.
 			if exit.Role == "" {
 				exit.Targets, exit.UseClashRuleset, exit.Strategy = tunnel.Targets, tunnel.UseClashRuleset, tunnel.Strategy
+				exit.UseOriginalTarget, exit.RulesetIDs, exit.ManualDomains = tunnel.UseOriginalTarget, tunnel.RulesetIDs, tunnel.ManualDomains
 				if tunnel.Strategy == "" {
 					exit.Targets, exit.UseClashRuleset, exit.Strategy = entry.Targets, entry.UseClashRuleset, entry.Strategy
+					exit.UseOriginalTarget, exit.RulesetIDs, exit.ManualDomains = entry.UseOriginalTarget, entry.RulesetIDs, entry.ManualDomains
 				}
 				if tunnel.Protocol != "" {
 					exit.Protocol = model.RuleProtocol(tunnel.Protocol)
 					exit.ProtocolOptions = tunnel.ProtocolOptions
 				}
 				exit.Role = model.EndpointRoleExit
-				if err := tx.Model(exit).Select("Role", "Protocol", "ProtocolOptions", "Targets", "UseClashRuleset", "Strategy").UpdateColumns(exit).Error; err != nil {
+				if err := tx.Model(exit).Select("Role", "Protocol", "ProtocolOptions", "Targets", "UseClashRuleset", "UseOriginalTarget", "RulesetIDs", "ManualDomains", "Strategy").UpdateColumns(exit).Error; err != nil {
 					return err
 				}
 			}
 			if entry.Role == "" {
 				entry.Role = model.EndpointRoleEntry
 				entry.Targets, entry.UseClashRuleset, entry.Strategy = []string{}, false, "round"
-				if err := tx.Model(entry).Select("Role", "Targets", "UseClashRuleset", "Strategy").UpdateColumns(entry).Error; err != nil {
+				entry.UseOriginalTarget, entry.RulesetIDs, entry.ManualDomains = false, nil, nil
+				if err := tx.Model(entry).Select("Role", "Targets", "UseClashRuleset", "UseOriginalTarget", "RulesetIDs", "ManualDomains", "Strategy").UpdateColumns(entry).Error; err != nil {
 					return err
 				}
 			}

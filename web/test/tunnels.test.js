@@ -3,11 +3,13 @@ import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plu
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Tunnels from '@/views/Tunnels.vue'
 import { getRoutingNodes } from '@/api/node'
+import { getGostRulesets } from '@/api/system'
 import { getRuleList } from '@/api/rule'
 import { createTunnel, deleteTunnel, getTunnelList, startTunnel, stopTunnel, updateTunnel, updateTunnelAllowlist } from '@/api/tunnel'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
 vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
+vi.mock('@/api/system', () => ({ getGostRulesets: vi.fn() }))
 vi.mock('@/api/rule', () => ({ getRuleList: vi.fn() }))
 vi.mock('@/api/tunnel', () => ({
   createTunnel: vi.fn(), deleteTunnel: vi.fn(), getTunnelList: vi.fn(),
@@ -45,6 +47,7 @@ const dialog = wrapper => wrapper.get('[role="dialog"]')
 const selectField = (wrapper, prop) => field(wrapper, prop).getComponent(ElSelect)
 
 beforeEach(() => {
+  getGostRulesets.mockResolvedValue({ data: [{ id: 1, name: '旧 Clash 订阅' }, { id: 2, name: '工作域名' }] })
   getRoutingNodes.mockResolvedValue([ingress, egress, legacyNode])
   getRuleList.mockResolvedValue(result(entrances))
   getTunnelList.mockResolvedValue(result(tunnels, 32))
@@ -140,6 +143,39 @@ describe('Relay tunnel inventory', () => {
 })
 
 describe('Relay tunnel configuration', () => {
+  it('pairs transparent entries with original-target exits and rejects both mismatched combinations', async () => {
+    const transparent = { ...source, role: 'entry', protocol: 'red', use_clash_ruleset: false }
+    const tcp = { ...source, id: 71, role: 'entry', use_clash_ruleset: false }
+    const original = { ...destination, role: 'exit', use_original_target: true, targets: [], ruleset_ids: [2], manual_domains: ['manual.example'] }
+    const fixed = { ...destination, id: 72, role: 'exit', targets: ['fixed.example:443'], use_original_target: false }
+    getRuleList.mockResolvedValue(result([transparent, tcp, original, fixed]))
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
+    const editor = dialog(wrapper)
+    await field(editor, 'name').get('input').setValue('Transparent tunnel')
+    await choose(selectField(editor, 'entry_rule_id'), tcp.id)
+    await choose(selectField(editor, 'exit_rule_id'), original.id)
+    await button(editor, '添加并启动').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['exit_rule_id', false, '按原始目标需要选择“透明转发（HTTP/HTTPS）”入口'])
+    await choose(selectField(editor, 'entry_rule_id'), transparent.id)
+    await choose(selectField(editor, 'exit_rule_id'), fixed.id)
+    await button(editor, '添加并启动').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['exit_rule_id', false, '透明转发入口需要选择“按原始目标”的出口'])
+    expect(createTunnel).not.toHaveBeenCalled()
+    await choose(selectField(editor, 'exit_rule_id'), original.id)
+    expect(editor.get('.tunnel-policy-summary').text()).toContain('按原始目标')
+    expect(editor.get('.target-routing-summary').text()).toContain('匹配规则后走隧道')
+    expect(editor.get('.target-routing-summary').text()).toContain('工作域名')
+    expect(editor.get('.target-routing-summary').text()).toContain('manual.example')
+    await button(editor, '添加并启动').trigger('click')
+    await flushPromises()
+    expect(createTunnel).toHaveBeenCalledExactlyOnceWith({ name: 'Transparent tunnel', entry_rule_id: transparent.id, exit_rule_id: original.id, remark: '', allowlist_node_ids: [] })
+  })
+
   it('preserves advanced options on a legacy tunnel and clears them when its transport changes', async () => {
     const legacy = { ...missingRelay, protocol: 'wss', protocol_options: { path: '/legacy', tls_server_name: 'relay.example' } }
     getTunnelList.mockResolvedValue(result([legacy]))
@@ -227,11 +263,12 @@ describe('Relay tunnel configuration', () => {
     await command(row(wrapper, configured.name), 'edit')
     let editor = dialog(wrapper)
     expect(editor.get('.tunnel-policy-summary').text()).toContain('QUIC')
-    expect(editor.get('.tunnel-policy-summary').text()).toContain('Clash 规则集')
+    expect(editor.get('.tunnel-policy-summary').text()).toContain('按原始目标')
+    expect(editor.get('.target-routing-summary').text()).toContain('旧 Clash 订阅')
     await choose(selectField(editor, 'entry_rule_id'), badEntry.id)
     await button(editor, '保存更改').trigger('click')
     await flushPromises()
-    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['exit_rule_id', false, '此出口的 Clash 分流需要入口使用 TCP 与 127.0.0.1'])
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['exit_rule_id', false, '按原始目标需要选择“透明转发（HTTP/HTTPS）”入口'])
     expect(updateTunnel).not.toHaveBeenCalled()
     await choose(selectField(editor, 'entry_rule_id'), entry.id)
     await button(editor, '保存更改').trigger('click')
@@ -315,7 +352,7 @@ describe('Relay tunnel configuration', () => {
     await command(row(wrapper, configured.name), 'edit')
     const editor = dialog(wrapper)
     expect(selectField(editor, 'protocol').props('modelValue')).toBe('h2')
-    expect(selectField(editor, 'use_clash_ruleset').props('modelValue')).toBe(false)
+    expect(selectField(editor, 'use_original_target').props('modelValue')).toBe(false)
     expect(editor.get('input[aria-label="目标地址 1"]').element.value).toBe('saved.example:8443')
     expect(selectField(editor, 'strategy').props('modelValue')).toBe('rand')
     await choose(selectField(editor, 'protocol'), 'wss')
@@ -341,9 +378,10 @@ describe('Relay tunnel configuration', () => {
     expect(selectField(dialog(wrapper), 'protocol').props('modelValue')).toBe('tcp')
   })
 
-  it('revalidates Clash requirements after changing the source and keeps fixed targets when switching modes', async () => {
+  it('requires a transparent entry for original targets and keeps fixed addresses when switching modes', async () => {
     const incompatible = { ...source, id: 70, protocol: 'udp', use_clash_ruleset: false, targets: [] }
-    getRuleList.mockResolvedValue(result([source, incompatible, destination]))
+    const transparent = { ...source, protocol: 'red', use_clash_ruleset: false }
+    getRuleList.mockResolvedValue(result([transparent, incompatible, destination]))
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
     await button(wrapper, '添加隧道').trigger('click')
@@ -353,24 +391,27 @@ describe('Relay tunnel configuration', () => {
     await choose(selectField(editor, 'entry_rule_id'), source.id)
     await choose(selectField(editor, 'exit_rule_id'), destination.id)
     await editor.get('input[aria-label="目标地址 1"]').setValue('saved.example:443')
-    await choose(selectField(editor, 'use_clash_ruleset'), true)
+    await choose(selectField(editor, 'use_original_target'), true)
     expect(editor.find('input[aria-label="目标地址 1"]').exists()).toBe(false)
     await choose(selectField(editor, 'entry_rule_id'), incompatible.id)
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
-    expect(field(editor, 'use_clash_ruleset').text()).toContain('Clash 分流需要源端点使用 TCP 与 127.0.0.1')
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['use_original_target', false, '按原始目标需要选择“透明转发（HTTP/HTTPS）”入口'])
     expect(createTunnel).not.toHaveBeenCalled()
-    await choose(selectField(editor, 'use_clash_ruleset'), false)
+    await choose(selectField(editor, 'use_original_target'), false)
     expect(editor.get('input[aria-label="目标地址 1"]').element.value).toBe('saved.example:443')
     await editor.get('button[aria-label="移除目标地址 1"]').trigger('click')
     expect(editor.get('input[aria-label="目标地址 1"]').element.value).toBe('')
     await choose(selectField(editor, 'entry_rule_id'), source.id)
-    await choose(selectField(editor, 'use_clash_ruleset'), true)
+    await choose(selectField(editor, 'use_original_target'), true)
+    await choose(selectField(editor, 'match_rules'), true)
+    await choose(selectField(editor, 'ruleset_ids'), [2])
+    await field(editor, 'manualDomainsText').get('textarea').setValue('manual.example')
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(createTunnel).toHaveBeenCalledExactlyOnceWith({
       name: 'Clash tunnel', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'tcp', remark: '', allowlist_node_ids: [],
-      use_clash_ruleset: true, targets: [], strategy: 'round'
+      use_original_target: true, use_clash_ruleset: false, targets: [], strategy: 'round', ruleset_ids: [2], manual_domains: ['manual.example']
     })
   })
 
@@ -500,7 +541,7 @@ describe('Relay tunnel configuration', () => {
     ])
     await choose(destinationSelect, destination.id)
     await choose(selectField(editor, 'protocol'), 'udp')
-    await choose(selectField(editor, 'use_clash_ruleset'), true)
+    await editor.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
     await choose(selectField(editor, 'allowlist_node_ids'), [ingress.id])
     await field(editor, 'remark').get('textarea').setValue('new service')
     createTunnel.mockRejectedValueOnce(error)
@@ -513,7 +554,7 @@ describe('Relay tunnel configuration', () => {
     await flushPromises()
     expect(createTunnel).toHaveBeenLastCalledWith({
       name: 'New UDP relay', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'udp', remark: 'new service',
-      allowlist_node_ids: [ingress.id], use_clash_ruleset: true, targets: [], strategy: 'round'
+      allowlist_node_ids: [ingress.id], use_clash_ruleset: false, targets: ['app.example:443'], strategy: 'round'
     })
     expect(ElMessage.success).toHaveBeenCalledWith('隧道已添加并启动')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
@@ -537,11 +578,13 @@ describe('Relay tunnel configuration', () => {
     expect(selectField(dialog(wrapper), 'allowlist_node_ids').props('modelValue')).toEqual([egress.id])
     await choose(selectField(dialog(wrapper), 'entry_rule_id'), source.id)
     await choose(selectField(dialog(wrapper), 'exit_rule_id'), destination.id)
+    await choose(selectField(dialog(wrapper), 'use_original_target'), false)
+    await dialog(wrapper).get('input[aria-label="目标地址 1"]').setValue('app.example:443')
     await button(dialog(wrapper), '保存更改').trigger('click')
     await flushPromises()
     expect(updateTunnel).toHaveBeenLastCalledWith(13, {
       name: 'Media relay', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'udp', remark: '',
-      use_clash_ruleset: true, targets: [], strategy: 'round'
+      use_original_target: false, use_clash_ruleset: false, targets: ['app.example:443'], strategy: 'round', ruleset_ids: [], manual_domains: []
     })
     expect(ElMessage.success).toHaveBeenCalledWith('隧道已更新')
     await command(row(wrapper, 'Unknown relay'), 'edit')

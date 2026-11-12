@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getRoutingNodes } from '@/api/node'
 import * as api from '@/api/system'
 import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
+import GostRulesetCatalog from '@/components/GostRulesetCatalog.vue'
 import System from '@/views/System.vue'
 
 vi.mock('element-plus', async (original) => ({
@@ -22,7 +23,11 @@ vi.mock('@/api/system', () => ({
   sendTestEmail: vi.fn(),
   updateSystemConfig: vi.fn(),
   getGostRuleset: vi.fn(),
-  updateGostRuleset: vi.fn()
+  updateGostRuleset: vi.fn(),
+  getGostRulesets: vi.fn(),
+  createGostRuleset: vi.fn(),
+  updateNamedGostRuleset: vi.fn(),
+  deleteGostRuleset: vi.fn()
 }))
 vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
 
@@ -94,6 +99,7 @@ beforeEach(() => {
   api.updateSystemConfig.mockResolvedValue({ data: {} })
   getRoutingNodes.mockResolvedValue(nodes)
   api.getGostRuleset.mockResolvedValue({ data: {} })
+  api.getGostRulesets.mockResolvedValue({ data: [] })
 })
 
 afterEach(() => {
@@ -346,6 +352,44 @@ describe('System settings', () => {
 })
 
 describe('Gost routing settings', () => {
+  it('manages multiple named subscriptions separately from the default ruleset', async () => {
+    const legacy = { id: 1, name: '默认规则集', url: 'https://example.test/default.txt', matcher_count: 1 }
+    const existing = { id: 2, name: '开发', url: 'https://example.test/dev.txt', matcher_count: 2 }
+    const added = { id: 3, name: '文档', url: 'https://example.test/docs.yaml', matcher_count: 3 }
+    api.getGostRulesets.mockResolvedValueOnce({ data: [legacy, existing] })
+    const wrapper = mountPage(GostRulesetCatalog)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain(legacy.name)
+    expect(wrapper.text()).toContain(existing.name)
+    await button(wrapper, '添加规则集').trigger('click')
+    await wrapper.get('#named-ruleset-name').setValue(added.name)
+    await wrapper.get('#named-ruleset-url').setValue(added.url)
+    api.getGostRulesets.mockResolvedValueOnce({ data: [legacy, existing, added] })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.createGostRuleset).toHaveBeenCalledWith({ name: added.name, url: added.url })
+    expect(wrapper.findAll('li')).toHaveLength(2)
+
+    await wrapper.get('[aria-label="编辑 文档"]').trigger('click')
+    expect(wrapper.get('#named-ruleset-url').element.value).toBe(added.url)
+    await wrapper.get('#named-ruleset-name').setValue('产品文档')
+    api.getGostRulesets.mockResolvedValueOnce({ data: [legacy, existing, { ...added, name: '产品文档' }] })
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.updateNamedGostRuleset).toHaveBeenCalledWith(added.id, { name: '产品文档', url: added.url })
+
+    ElMessageBox.confirm.mockResolvedValueOnce('confirm').mockResolvedValueOnce('confirm')
+    api.deleteGostRuleset.mockRejectedValueOnce({ response: { data: { message: '规则集正在使用' } } })
+    await wrapper.get('[aria-label="删除 开发"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('规则集正在使用')
+    api.getGostRulesets.mockResolvedValueOnce({ data: [legacy, existing] })
+    await wrapper.get('[aria-label="删除 产品文档"]').trigger('click')
+    await flushPromises()
+    expect(api.deleteGostRuleset).toHaveBeenLastCalledWith(added.id)
+    expect(wrapper.findAll('li')).toHaveLength(1)
+  })
+
   it('caps the Clash preview and saves the trimmed URL and selected nodes', async () => {
     const matchers = Array.from({ length: 22 }, (_, index) => `domain-${index}.test`)
     api.getGostRuleset.mockResolvedValueOnce({
