@@ -433,7 +433,7 @@ describe('node registration and quota settings', () => {
     await flushPromises()
     await openDetail(view)
     const overview = view.get('.detail-overview')
-    expect(overview.text()).toContain('本机 IP')
+    expect(overview.findAll('dt').map(term => term.text())).not.toContain('本机 IP')
     expect(overview.text()).toContain('fd00::2 → 2001:db8::20')
     expect(overview.text()).not.toContain('补充 IP')
     expect(overview.text()).not.toContain(primary.manual_addresses[0])
@@ -675,6 +675,26 @@ describe('node actions', () => {
     await flushPromises()
     expect(api.calibrateNodeTraffic).toHaveBeenLastCalledWith(primary.id, { quota_used_bytes: 0 })
     expect(messages.success).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    [
+      {
+        ipv6: '', addresses: ['192.0.2.7', '100.113.158.92'],
+        local_addresses: ['100.113.158.92', '192.0.2.7', 'fd7a:115c:a1e0::7']
+      },
+      { IPv4: '192.0.2.7 · 100.113.158.92', IPv6: 'fd7a:115c:a1e0::7' }
+    ],
+    [{ local_addresses: null }, { IPv4: primary.ipv4, IPv6: primary.ipv6 }],
+    [{ ipv4: '', ipv6: '', addresses: [], local_addresses: [] }, { IPv4: '不支持', IPv6: '不支持' }]
+  ])('merges reported and local IPs by family without a separate local IP row (%j)', async (report, expected) => {
+    api.getNode.mockResolvedValue(response({ ...primary, ...report }))
+    await router.push('/nodes?node=7')
+    const view = open()
+    await flushPromises()
+    const addresses = Object.fromEntries(view.get('.detail-overview').findAll('dt')
+      .map(term => [term.text(), term.element.nextElementSibling.textContent]))
+    expect(addresses).toEqual({ '节点 IP': primary.address, ...expected })
   })
 
   it('opens a bookmarked inline Gost section and fetches logs when expanded', async () => {
