@@ -261,6 +261,137 @@ describe('forwarding rule inventory', () => {
   })
 })
 describe('forwarding rule editor and actions', () => {
+  it('creates an exit with its own Gost transport, targets and strategy', async () => {
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '新建端点').trigger('click')
+    const dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('Web exit')
+    await choose(selectField(dialog, 'role'), 'exit')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    await field(dialog, 'listen_port').get('input').setValue('8443')
+    expect(dialog.get('#rule-target-title').text()).toBe('目标与策略')
+    const protocol = selectField(dialog, 'protocol')
+    expect(protocol.findAllComponents(ElOption).map(option => option.props('value'))).toEqual(['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic'])
+    await choose(protocol, 'tls')
+    await choose(selectField(dialog, 'listen_ip'), '127.0.0.1')
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['listen_ip', false, '出口须使用可达的本机 IP，或选择所有接口'])
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['targetList', false, '请至少填写一个目标地址'])
+    expect(createRule).not.toHaveBeenCalled()
+    await choose(selectField(dialog, 'listen_ip'), '::1')
+    await expect(wrapper.getComponent(ElForm).vm.validateField('listen_ip')).rejects.toBeDefined()
+    await choose(selectField(dialog, 'listen_ip'), '')
+    await dialog.get('input[aria-label="目标地址 1"]').setValue(' app.example:443 ')
+    await button(dialog, '添加目标地址').trigger('click')
+    await dialog.get('input[aria-label="目标地址 2"]').setValue('[2001:db8::10]:443')
+    await button(dialog, '添加目标地址').trigger('click')
+    await dialog.get('button[aria-label="移除目标地址 3"]').trigger('click')
+    await choose(selectField(dialog, 'strategy'), 'hash')
+    expect(dialog.get('#rule-target-address-help').text()).toContain('HTTPS 会透传客户端发送的 SNI')
+    expect(dialog.get('input[aria-label="目标地址 1"]').attributes('aria-describedby')).toBe('rule-target-address-help')
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledExactlyOnceWith({
+      node_id: entryNode.id, name: 'Web exit', role: 'exit', protocol: 'tls', listen_ip: '', listen_port: 8443, remark: '',
+      use_clash_ruleset: false, targets: ['app.example:443', '[2001:db8::10]:443'], strategy: 'hash'
+    })
+  })
+
+  it.each(['0.0.0.0', '::'])('accepts %s for an exit listening on all interfaces', async listenIP => {
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '新建端点').trigger('click')
+    const dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('Wildcard exit')
+    await choose(selectField(dialog, 'role'), 'exit')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    await choose(selectField(dialog, 'listen_ip'), listenIP)
+    await field(dialog, 'listen_port').get('input').setValue('8443')
+    await dialog.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledExactlyOnceWith({
+      node_id: entryNode.id, name: 'Wildcard exit', role: 'exit', protocol: 'tcp', listen_ip: listenIP, listen_port: 8443, remark: '',
+      use_clash_ruleset: false, targets: ['app.example:443'], strategy: 'round'
+    })
+  })
+
+  it('allows a Clash exit with QUIC and clears exit settings when changing direction to entry', async () => {
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '新建端点').trigger('click')
+    let dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('Clash exit')
+    await choose(selectField(dialog, 'role'), 'exit')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    await field(dialog, 'listen_port').get('input').setValue('9443')
+    await choose(selectField(dialog, 'protocol'), 'quic')
+    await choose(selectField(dialog, 'use_clash_ruleset'), true)
+    expect(dialog.find('input[aria-label="目标地址 1"]').exists()).toBe(false)
+    expect(dialog.get('#rule-target-mode-help').text()).toContain('入口须使用 TCP 与 127.0.0.1')
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledExactlyOnceWith({
+      node_id: entryNode.id, name: 'Clash exit', role: 'exit', protocol: 'quic', listen_ip: '', listen_port: 9443, remark: '',
+      use_clash_ruleset: true, targets: [], strategy: 'round'
+    })
+    await button(wrapper, '新建端点').trigger('click')
+    dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('New entry')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    await field(dialog, 'listen_port').get('input').setValue('9444')
+    await choose(selectField(dialog, 'role'), 'exit')
+    await choose(selectField(dialog, 'protocol'), 'mtls')
+    await dialog.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
+    await choose(selectField(dialog, 'strategy'), 'rand')
+    await choose(selectField(dialog, 'use_clash_ruleset'), true)
+    await choose(selectField(dialog, 'role'), 'entry')
+    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('tcp')
+    expect(dialog.find('#rule-target-title').exists()).toBe(false)
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenLastCalledWith({
+      node_id: entryNode.id, name: 'New entry', role: 'entry', protocol: 'tcp', listen_ip: '', listen_port: 9444, remark: '',
+      use_clash_ruleset: false, targets: [], strategy: 'round'
+    })
+  })
+
+  it('edits a stopped tunnel exit policy while locking its role and listener, and copies the exit policy', async () => {
+    const exit = { ...relayRule, name: 'Saved exit', role: 'exit', protocol: 'quic', linked_tunnel_id: 8, linked_tunnel_status: 'stopped', targets: ['saved.example:443'], strategy: 'rand' }
+    getRuleList.mockResolvedValue(result([exit, { ...exit, id: 20, name: 'Running exit', status: 'running', linked_tunnel_status: 'running' }, direct]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    expect(row(wrapper, 'Saved exit').text()).toContain('出口')
+    expect(row(wrapper, 'HTTPS').text()).toContain('未指定')
+    expect(row(wrapper, 'Running exit').find('[aria-label="编辑 Running exit"]').exists()).toBe(false)
+    expect(row(wrapper, 'Saved exit').find('[aria-label="启动 Saved exit"]').exists()).toBe(false)
+    await wrapper.get('[aria-label="编辑 Saved exit"]').trigger('click')
+    let dialog = editDialog(wrapper)
+    expect(selectField(dialog, 'node_id').props('disabled')).toBe(true)
+    expect(selectField(dialog, 'role').props('disabled')).toBe(true)
+    expect(selectField(dialog, 'listen_ip').props('disabled')).toBe(true)
+    expect(field(dialog, 'listen_port').get('input').element.disabled).toBe(true)
+    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('quic')
+    expect(dialog.get('input[aria-label="目标地址 1"]').element.value).toBe('saved.example:443')
+    await choose(selectField(dialog, 'protocol'), 'ws')
+    await dialog.get('input[aria-label="目标地址 1"]').setValue('updated.example:8443')
+    await button(dialog, '保存端点').trigger('click')
+    await flushPromises()
+    expect(updateRule).toHaveBeenCalledExactlyOnceWith(exit.id, {
+      node_id: entryNode.id, name: exit.name, role: 'exit', protocol: 'ws', listen_ip: exit.listen_ip, listen_port: exit.listen_port, remark: '',
+      use_clash_ruleset: false, targets: ['updated.example:8443'], strategy: 'rand'
+    })
+    await command(row(wrapper, 'Saved exit'), 'copy')
+    dialog = editDialog(wrapper)
+    expect(selectField(dialog, 'role').props('modelValue')).toBe('exit')
+    expect(selectField(dialog, 'role').props('disabled')).toBe(false)
+    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('quic')
+    expect(dialog.get('input[aria-label="目标地址 1"]').element.value).toBe('saved.example:443')
+    expect(field(dialog, 'listen_port').get('input').element.value).toBe('')
+  })
+
   it('binds a mapped local IP and displays its public endpoint with the same port', async () => {
     const mapping = { listen_ip: '10.10.0.8', connect_ip: '2001:db8::80' }
     const mappedNode = { ...entryNode, address_mappings: [mapping] }
@@ -290,15 +421,17 @@ describe('forwarding rule editor and actions', () => {
     expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ listen_ip: mapping.listen_ip, listen_port: 9443 }))
   })
 
-  it('creates an endpoint without choosing its direction or target, then checks that listener', async () => {
+  it('creates an entry without target settings, then checks that listener', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
     await button(wrapper, '新建端点').trigger('click')
     const dialog = editDialog(wrapper)
     expect(dialog.findAll('.el-form-item__label').map(item => item.text())).toEqual([
-      '端点名称', '所在节点', '协议', '监听 IP', '监听端口', '备注'
+      '端点名称', '端点方向', '所在节点', '协议', '监听 IP', '监听端口', '备注'
     ])
-    expect(dialog.text()).toContain('选择源端和目的端，再配置目标与策略')
+    expect(dialog.text()).toContain('入口接收流量，出口配置目标与策略')
+    expect(selectField(dialog, 'role').props('modelValue')).toBe('entry')
+    expect(dialog.find('#rule-target-title').exists()).toBe(false)
     await field(dialog, 'name').get('input').setValue('  internal API  ')
     expect(field(dialog, 'listen_port').get('input').element.value).toBe('')
     await button(dialog, '创建端点').trigger('click')
@@ -329,7 +462,8 @@ describe('forwarding rule editor and actions', () => {
 
     expect(createRule).toHaveBeenCalledWith({
       node_id: 4, name: 'internal API', protocol: 'udp',
-      listen_ip: '192.0.2.10', listen_port: 5353, remark: '可用于隧道任一端'
+      listen_ip: '192.0.2.10', listen_port: 5353, remark: '可用于隧道任一端',
+      role: 'entry', targets: [], use_clash_ruleset: false, strategy: 'round'
     })
     expect(ElMessage.success).toHaveBeenCalledWith('端点已创建')
     expect(checkRuleListener).toHaveBeenCalledWith(99)
@@ -340,7 +474,7 @@ describe('forwarding rule editor and actions', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
-  it('creates a loopback endpoint without assigning a Clash target or tunnel role', async () => {
+  it('creates a loopback entry without assigning a Clash target', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
     await button(wrapper, '新建端点').trigger('click')
@@ -363,7 +497,8 @@ describe('forwarding rule editor and actions', () => {
     await flushPromises()
     expect(createRule).toHaveBeenCalledWith({
       node_id: entryNode.id, name: '透明入口', protocol: 'udp',
-      listen_ip: '127.0.0.1', listen_port: 443, remark: ''
+      listen_ip: '127.0.0.1', listen_port: 443, remark: '',
+      role: 'entry', targets: [], use_clash_ruleset: false, strategy: 'round'
     })
   })
 
@@ -408,7 +543,8 @@ describe('forwarding rule editor and actions', () => {
     await flushPromises()
     expect(createRule).toHaveBeenCalledWith({
       node_id: 4, name: 'DNS-copy', protocol: 'udp',
-      listen_ip: '2001:db8::8', listen_port: 5354, remark: ''
+      listen_ip: '2001:db8::8', listen_port: 5354, remark: '',
+      role: 'entry', targets: [], use_clash_ruleset: false, strategy: 'round'
     })
   })
 

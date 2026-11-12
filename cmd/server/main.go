@@ -187,7 +187,10 @@ func autoMigrate(db *gorm.DB) error {
 		return err
 	}
 
-	return migrateTunnelAllowlists(db)
+	if err := migrateTunnelAllowlists(db); err != nil {
+		return err
+	}
+	return migrateTunnelEndpointRoles(db)
 }
 
 func migrateTunnelAllowlists(db *gorm.DB) error {

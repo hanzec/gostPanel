@@ -72,3 +72,40 @@ func TestEntranceHTTPInventoriesAndProtectsTunnelEndpoints(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointTunnelHTTPAcceptsAndValidatesSelectedTransport(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerForwarding()
+	entryNode, exitNode := model.GostNode{Name: "entry"}, model.GostNode{Name: "exit"}
+	for _, node := range []*model.GostNode{&entryNode, &exitNode} {
+		if err := f.db.Create(node).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := model.GostRule{Name: "source", NodeID: &entryNode.ID, ListenPort: 18001}
+	destination := model.GostRule{Name: "destination", NodeID: &exitNode.ID, ListenPort: 18002}
+	for _, rule := range []*model.GostRule{&source, &destination} {
+		if err := f.db.Create(rule).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	tunnel := model.GostTunnel{Name: "tunnel", EntryNodeID: entryNode.ID, ExitNodeID: exitNode.ID,
+		EntryRuleID: &source.ID, ExitRuleID: &destination.ID, Protocol: "tcp", RelayPort: destination.ListenPort,
+		Targets: []string{"origin.test:443"}, Strategy: "round"}
+	if err := f.db.Create(&tunnel).Error; err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/tunnels/%d", tunnel.ID)
+	body := fmt.Sprintf(`{"name":"selected TLS","entry_rule_id":%d,"exit_rule_id":%d,"protocol":"tls"}`, source.ID, destination.ID)
+	updated := handlerData[model.GostTunnel](t, f.request(t, "PUT", path, body, 200))
+	if updated.Protocol != "tls" || updated.RelayPort != destination.ListenPort {
+		t.Fatalf("selected tunnel transport was not accepted: %+v", updated)
+	}
+	invalid := fmt.Sprintf(`{"name":"invalid","entry_rule_id":%d,"exit_rule_id":%d,"protocol":"unsupported"}`, source.ID, destination.ID)
+	f.request(t, "POST", "/tunnels", invalid, 400)
+	f.request(t, "PUT", path, invalid, 400)
+	stored := handlerData[model.GostTunnel](t, f.request(t, "GET", path, "", 200))
+	if stored.Name != "selected TLS" || stored.Protocol != "tls" {
+		t.Fatalf("invalid transport changed the saved tunnel: %+v", stored)
+	}
+}

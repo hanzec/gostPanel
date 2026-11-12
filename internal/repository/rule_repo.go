@@ -98,7 +98,7 @@ func (r *RuleRepository) FindByTunnelID(tunnelID uint) ([]model.GostRule, error)
 // EntranceBindings finds the tunnels selecting any of the listed rule IDs.
 func (r *RuleRepository) EntranceBindings(ruleIDs []uint) ([]model.GostTunnel, error) {
 	var tunnels []model.GostTunnel
-	err := r.DB.Select("id", "entry_rule_id", "exit_rule_id").
+	err := r.DB.Select("id", "entry_rule_id", "exit_rule_id", "status").
 		Where("entry_rule_id IN ? OR exit_rule_id IN ?", ruleIDs, ruleIDs).Find(&tunnels).Error
 	return tunnels, err
 }
@@ -107,8 +107,12 @@ func (r *RuleRepository) EntranceBindings(ruleIDs []uint) ([]model.GostTunnel, e
 func (r *RuleRepository) ListenerConflicts(nodeID uint, protocol model.RuleProtocol, ip string, port int, excludeID ...uint) (bool, error) {
 	var count int64
 	tunnels := r.DB.Model(&model.GostTunnel{}).Select("id").Where("entry_node_id = ?", nodeID)
+	protocols := []string{"tcp", "tls", "mtls", "ws", "mws"}
+	if protocol.ListenerNetwork() == "udp" {
+		protocols = []string{"udp", "quic"}
+	}
 	db := r.DB.Model(&model.GostRule{}).
-		Where("protocol = ? AND listen_port = ?", protocol, port).
+		Where("protocol IN ? AND listen_port = ?", protocols, port).
 		Where("((type = ? AND node_id = ?) OR (type = ? AND tunnel_id IN (?)))",
 			model.RuleTypeForward, nodeID, model.RuleTypeTunnel, tunnels)
 	if ip != "" {

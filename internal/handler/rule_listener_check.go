@@ -44,7 +44,7 @@ func (h *RuleHandler) CheckListener(c *gin.Context) {
 		return
 	}
 
-	reply, err := utils.GetGostClient(rule.Node).CheckListener(c.Request.Context(), string(rule.Protocol), rule.ListenIP, uint32(rule.ListenPort))
+	reply, err := utils.GetGostClient(rule.Node).CheckListener(c.Request.Context(), rule.Protocol.ListenerNetwork(), rule.ListenIP, uint32(rule.ListenPort))
 	if err != nil {
 		if status.Code(err) == codes.Unimplemented {
 			response.Error(c, http.StatusNotImplemented, response.CodeInternalError, "请升级节点的 yagp-daemon 后再检查监听地址")

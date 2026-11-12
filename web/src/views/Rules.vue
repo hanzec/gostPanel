@@ -80,6 +80,7 @@
                 <strong>{{ row.name }}</strong>
                 <span class="rule-secondary">
                   <span class="ops-mono">#{{ row.id }}</span>
+                  <span>{{ endpointRoles[row.role] || '未指定' }}</span>
                   <span v-if="row.tunnel_role">{{ row.tunnel_role === 'entry' ? '隧道源端' : '隧道目的端' }}</span>
                 </span>
               </th>
@@ -113,7 +114,7 @@
               <td class="rule-actions-cell" role="cell" data-label="操作">
                 <div class="rule-row-actions">
                   <el-button
-                    v-if="!row.linked_tunnel_id && !row.use_clash_ruleset && row.targets?.length"
+                    v-if="!row.role && !row.linked_tunnel_id && !row.use_clash_ruleset && row.targets?.length"
                     text
                     :type="row.status === 'running' ? 'warning' : 'success'"
                     :loading="pendingRuleIds.has(row.id)"
@@ -122,7 +123,7 @@
                   >
                     {{ row.status === 'running' ? '停止' : '启动' }}
                   </el-button>
-                  <el-button v-if="!row.linked_tunnel_id" text :aria-label="'编辑 ' + row.name" @click="openDialog(row)">编辑</el-button>
+                  <el-button v-if="!row.linked_tunnel_id || row.role === 'exit' && row.linked_tunnel_status === 'stopped'" text :aria-label="'编辑 ' + row.name" @click="openDialog(row)">编辑</el-button>
                   <RouterLink v-else class="rule-form-link" to="/tunnels">隧道管理</RouterLink>
                   <el-dropdown trigger="click" @command="handleRowCommand(row, $event)">
                     <el-button text :aria-label="row.name + '的更多操作'">
@@ -176,18 +177,26 @@
         <section class="rule-form-section" aria-labelledby="rule-entry-title">
           <header>
             <h3 id="rule-entry-title">端点与监听</h3>
-            <p class="ops-muted">选择节点并设置监听地址。到 <RouterLink class="rule-form-link" to="/tunnels">隧道管理</RouterLink> 选择源端和目的端，再配置目标与策略。</p>
+            <p class="ops-muted">入口接收流量，出口配置目标与策略。到 <RouterLink class="rule-form-link" to="/tunnels">隧道管理</RouterLink> 连接入口与出口。</p>
+            <p v-if="boundExitEdit" class="ops-muted">关联隧道已停止，可修改出口的目标与策略；监听地址保持不变。</p>
           </header>
           <div class="rule-form-grid">
             <el-form-item label="端点名称" prop="name" class="rule-form-wide">
               <el-input v-model.trim="form.name" placeholder="例如 办公网络端点" maxlength="100" />
+            </el-form-item>
+            <el-form-item label="端点方向" prop="role">
+              <el-select v-model="form.role" :disabled="boundExitEdit">
+                <el-option v-if="isEdit && !form.role" label="未指定（旧端点）" value="" disabled />
+                <el-option label="入口" value="entry" />
+                <el-option label="出口" value="exit" />
+              </el-select>
             </el-form-item>
             <el-form-item label="所在节点" prop="node_id">
               <el-select v-model="form.node_id" placeholder="选择监听所在的节点" :loading="nodeOptionsLoading" :disabled="isEdit || nodeOptionsLoading || nodeOptionsError" no-data-text="请先在节点管理中添加节点" filterable>
                 <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
               </el-select>
             </el-form-item>
-            <el-form-item label="协议" prop="protocol">
+            <el-form-item v-if="form.role !== 'exit'" label="协议" prop="protocol">
               <el-select v-model="form.protocol">
                 <el-option label="TCP" value="tcp" />
                 <el-option label="UDP" value="udp" />
@@ -197,6 +206,7 @@
               <el-select
                 :model-value="form.listen_ip"
                 :empty-values="[null, undefined]"
+                :disabled="boundExitEdit"
                 filterable
                 allow-create
                 default-first-option
@@ -213,7 +223,7 @@
               </p>
             </el-form-item>
             <el-form-item label="监听端口" prop="listen_port">
-              <el-input-number v-model="form.listen_port" :min="1" :max="65535" :step-strictly="true" placeholder="填写端口" controls-position="right" aria-describedby="rule-listen-endpoint" />
+              <el-input-number v-model="form.listen_port" :disabled="boundExitEdit" :min="1" :max="65535" :step-strictly="true" placeholder="填写端口" controls-position="right" aria-describedby="rule-listen-endpoint" />
               <p v-if="form.listen_port" id="rule-listen-endpoint" class="rule-form-hint ops-muted">
                 监听地址 <span class="ops-mono">{{ formatEndpoint(form.listen_ip, form.listen_port) }}</span>
                 <span v-if="selectedConnectEndpoint" class="rule-connect-endpoint">
@@ -223,6 +233,42 @@
             </el-form-item>
             <el-form-item label="备注" prop="remark" class="rule-form-wide">
               <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可选，记录用途或维护说明" />
+            </el-form-item>
+          </div>
+        </section>
+        <section v-if="form.role === 'exit'" class="rule-form-section" aria-labelledby="rule-target-title">
+          <header>
+            <h3 id="rule-target-title">目标与策略</h3>
+            <p class="ops-muted">配置随出口保存，连接此出口的隧道会使用这些设置。</p>
+          </header>
+          <div class="rule-form-grid">
+            <el-form-item label="隧道协议" prop="protocol" for="rule-tunnel-protocol">
+              <el-select id="rule-tunnel-protocol" v-model="form.protocol" aria-describedby="rule-protocol-help">
+                <el-option v-for="protocol in tunnelProtocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
+              </el-select>
+              <p id="rule-protocol-help" class="rule-form-hint ops-muted">用于入口节点到出口节点之间的 Gost 隧道传输。</p>
+            </el-form-item>
+            <el-form-item label="目标类型" prop="use_clash_ruleset">
+              <el-select v-model="form.use_clash_ruleset" aria-describedby="rule-target-mode-help">
+                <el-option label="固定目标地址" :value="false" />
+                <el-option label="Clash 规则集（透明分流）" :value="true" />
+              </el-select>
+              <p id="rule-target-mode-help" class="rule-form-hint ops-muted">Clash 分流使用系统规则集，连接的入口须使用 TCP 与 127.0.0.1。</p>
+            </el-form-item>
+            <el-form-item v-if="!form.use_clash_ruleset" label="目标地址" prop="targetList" class="rule-form-wide">
+              <div class="rule-target-list">
+                <div v-for="(item, index) in form.targetList" :key="index" class="rule-target-item">
+                  <el-input v-model.trim="item.address" :aria-label="'目标地址 ' + (index + 1)" aria-describedby="rule-target-address-help" placeholder="例如 example.com:443 或 192.168.1.10:8080" />
+                  <el-button text type="danger" :icon="Remove" :aria-label="'移除目标地址 ' + (index + 1)" @click="removeTarget(index)" />
+                </div>
+                <el-button :icon="Plus" @click="form.targetList.push({ address: '' })">添加目标地址</el-button>
+                <p id="rule-target-address-help" class="rule-form-hint ops-muted">填写域名或 IP 与端口。HTTPS 会透传客户端发送的 SNI，无需额外开启。</p>
+              </div>
+            </el-form-item>
+            <el-form-item v-if="!form.use_clash_ruleset" label="负载均衡" prop="strategy">
+              <el-select v-model="form.strategy">
+                <el-option v-for="(label, value) in strategies" :key="value" :label="label" :value="value" />
+              </el-select>
             </el-form-item>
           </div>
         </section>
@@ -244,7 +290,7 @@ import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { formatEndpoint, mappedConnectEndpoint } from '@/utils/node-address-mapping'
 import { confirmPanelAction } from '@/utils/panel-dialog'
-import { ArrowDown, CircleCheck, Plus, Search, Switch, VideoPause, Warning } from '@element-plus/icons-vue'
+import { ArrowDown, CircleCheck, Plus, Remove, Search, Switch, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import { getRoutingNodes } from '@/api/node'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
@@ -290,16 +336,24 @@ const summary = computed(() => {
 
 const dialogVisible = ref(false)
 const isEdit = ref(false)
+const boundExitEdit = ref(false)
+const endpointRoles = { entry: '入口', exit: '出口' }
+const tunnelProtocols = ['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic']
+const strategies = { round: '轮询', rand: '随机', fifo: '先进先出', hash: '哈希' }
 const editId = ref(null)
 const submitLoading = ref(false)
 const formRef = ref(null)
 const form = reactive({
   node_id: '',
   name: '',
+  role: 'entry',
   protocol: 'tcp',
   listen_ip: '',
   listen_port: null,
-  remark: ''
+  remark: '',
+  use_clash_ruleset: false,
+  targetList: [{ address: '' }],
+  strategy: 'round'
 })
 
 const selectedNode = computed(() => nodeList.value.find(item => item.id === form.node_id))
@@ -322,10 +376,24 @@ const listenAddressOptions = computed(() => {
 })
 
 const formRules = {
+  role: [{ validator: (_rule, value, callback) => callback(!isEdit.value && !value ? new Error('请选择端点方向') : undefined), trigger: 'change' }],
   node_id: [{ required: true, message: '请选择所在节点', trigger: 'change' }],
   name: [{ required: true, message: '请输入端点名称', trigger: 'blur' }],
   protocol: [{ required: true, message: '请选择协议', trigger: 'change' }],
-  listen_port: [{ required: true, message: '请输入监听端口', trigger: 'change' }]
+  listen_port: [{ required: true, message: '请输入监听端口', trigger: 'change' }],
+  listen_ip: [{ validator: (_rule, value, callback) => callback(form.role === 'exit' && (value === '::1' || value.startsWith('127.'))
+    ? new Error('出口须使用可达的本机 IP，或选择所有接口') : undefined), trigger: 'change' }],
+  targetList: [{ validator: (_rule, value, callback) => callback(form.role === 'exit' && !form.use_clash_ruleset && !value.some(item => item.address.trim())
+    ? new Error('请至少填写一个目标地址') : undefined), trigger: 'blur' }]
+}
+
+watch(() => form.role, role => {
+  if (role === 'entry' && !['tcp', 'udp'].includes(form.protocol)) form.protocol = 'tcp'
+})
+
+const removeTarget = index => {
+  form.targetList.splice(index, 1)
+  if (!form.targetList.length) form.targetList.push({ address: '' })
 }
 
 const byteUnits = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
@@ -385,14 +453,19 @@ const clearFilters = () => {
 const openDialog = (row = null, copy = false) => {
   isEdit.value = !!row && !copy
   editId.value = isEdit.value ? row.id : null
+  boundExitEdit.value = isEdit.value && row.role === 'exit' && !!row.linked_tunnel_id
 
   Object.assign(form, {
     node_id: row?.node_id || row?.tunnel?.entry_node_id || '',
     name: row ? row.name + (copy ? '-copy' : '') : '',
+    role: row?.role || (isEdit.value ? '' : 'entry'),
     protocol: row?.protocol || 'tcp',
     listen_ip: row?.listen_ip || '',
     listen_port: isEdit.value ? row.listen_port : null,
-    remark: row?.remark || ''
+    remark: row?.remark || '',
+    use_clash_ruleset: row?.role === 'exit' && !!row.use_clash_ruleset,
+    targetList: row?.role === 'exit' && row.targets?.length ? row.targets.map(address => ({ address })) : [{ address: '' }],
+    strategy: row?.role === 'exit' ? row.strategy || 'round' : 'round'
   })
   dialogVisible.value = true
 }
@@ -415,6 +488,14 @@ const handleSubmit = async () => {
       listen_ip: form.listen_ip,
       listen_port: form.listen_port,
       remark: form.remark
+    }
+    if (form.role) {
+      Object.assign(payload, {
+        role: form.role,
+        targets: form.role === 'exit' && !form.use_clash_ruleset ? form.targetList.map(item => item.address.trim()).filter(Boolean) : [],
+        use_clash_ruleset: form.role === 'exit' && form.use_clash_ruleset,
+        strategy: form.role === 'exit' ? form.strategy : 'round'
+      })
     }
     if (isEdit.value) {
       await updateRule(editId.value, payload)
@@ -506,6 +587,11 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 </script>
 
 <style scoped>
+.rule-target-list { display: grid; gap: 8px; width: 100%; }
+.rule-target-item { display: flex; align-items: center; gap: 8px; }
+.rule-target-item .el-input { min-width: 0; }
+.rule-target-list > .el-button { justify-self: start; }
+.rule-target-list p { margin-bottom: 0; }
 .rule-panel {
   min-width: 0;
 }

@@ -364,10 +364,10 @@ func TestTunnelRejectsInvalidOrUnpersistedAllowlist(t *testing.T) {
 		t.Fatal("updated allowlist for a missing tunnel")
 	}
 	update.AllowlistNodeIDs = []uint{f.entry.ID, f.entry.ID}
-	update.Protocol = "udp"
+	update.RelayPort = 8443
 	_, err := f.service.Update(f.tunnel.ID, update, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrTunnelEndpointsRequired)
-	update.Protocol = ""
+	update.RelayPort = 0
 	update.ExitRuleID = f.source.ID
 	_, err = f.service.Update(f.tunnel.ID, update, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrTunnelEndpointsRequired)

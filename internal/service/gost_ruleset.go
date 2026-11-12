@@ -158,7 +158,12 @@ func (s *GostRulesetService) sync(ctx context.Context, unsaved map[uint]bool) {
 	if err := s.db.WithContext(ctx).Table("tunnels").
 		Distinct("tunnels.entry_node_id").
 		Joins("JOIN rules ON (rules.tunnel_id = tunnels.id OR rules.id = tunnels.entry_rule_id)").
-		Where("((tunnels.entry_rule_id IS NOT NULL AND COALESCE(tunnels.strategy, '') <> '' AND tunnels.use_clash_ruleset = ?) OR ((tunnels.entry_rule_id IS NULL OR COALESCE(tunnels.strategy, '') = '') AND rules.use_clash_ruleset = ?))", true, true).
+		Joins("LEFT JOIN rules AS exit_rules ON exit_rules.id = tunnels.exit_rule_id AND exit_rules.deleted_at IS NULL").
+		Where(`((exit_rules.role = ? AND exit_rules.use_clash_ruleset = ?) OR
+			(COALESCE(exit_rules.role, '') <> ? AND
+				((tunnels.entry_rule_id IS NOT NULL AND COALESCE(tunnels.strategy, '') <> '' AND tunnels.use_clash_ruleset = ?) OR
+				((tunnels.entry_rule_id IS NULL OR COALESCE(tunnels.strategy, '') = '') AND rules.use_clash_ruleset = ?))))`,
+			model.EndpointRoleExit, true, model.EndpointRoleExit, true, true).
 		Where("rules.status = ? AND rules.deleted_at IS NULL AND tunnels.deleted_at IS NULL", model.RuleStatusRunning).
 		Pluck("tunnels.entry_node_id", &entryIDs).Error; err != nil {
 		logger.Warnf("读取使用 Clash 分流的入口失败: %v", err)

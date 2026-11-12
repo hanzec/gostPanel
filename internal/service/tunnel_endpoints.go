@@ -26,7 +26,7 @@ import (
 func (s *TunnelService) createEndpointTunnel(req *dto.CreateTunnelReq, nodeIDs []uint, username, ip, userAgent string) (*model.GostTunnel, error) {
 	tunnel := &model.GostTunnel{
 		Name: req.Name, Remark: req.Remark, Status: model.TunnelStatusStopped,
-		RelaySecret: rand.Text(), AllowlistNodeIDs: nodeIDs,
+		RelaySecret: rand.Text(), AllowlistNodeIDs: nodeIDs, Protocol: req.Protocol,
 	}
 	if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
 		return nil, err
@@ -70,6 +70,9 @@ func (s *TunnelService) setTunnelEndpoints(tunnel *model.GostTunnel, entryID, ex
 	if err != nil {
 		return err
 	}
+	if err := validateTunnelEndpointRoles(entry, exit); err != nil {
+		return err
+	}
 	if entry.Node.ID == exit.Node.ID {
 		return errors.ErrTunnelNodeSame
 	}
@@ -89,11 +92,20 @@ func (s *TunnelService) setTunnelEndpoints(tunnel *model.GostTunnel, entryID, ex
 	tunnel.EntryRule, tunnel.ExitRule = entry, exit
 	tunnel.EntryNodeID, tunnel.ExitNodeID = entry.Node.ID, exit.Node.ID
 	tunnel.EntryNode, tunnel.ExitNode = entry.Node, exit.Node
-	tunnel.Protocol, tunnel.RelayPort = string(exit.Protocol), exit.ListenPort
+	// Explicit exit endpoints own the transport; older clients may still store it on the tunnel.
+	if exit.Role == model.EndpointRoleExit || tunnel.Protocol == "" {
+		tunnel.Protocol = string(exit.Protocol)
+	}
+	tunnel.RelayPort = exit.ListenPort
 	return nil
 }
 
 func setTunnelTargets(t *model.GostTunnel, targets []string, useClash bool, strategy string) error {
+	if t.ExitRule.Role == model.EndpointRoleExit {
+		// Ignore obsolete tunnel-level input: the selected exit is the only source of target policy.
+		t.Targets, t.UseClashRuleset, t.Strategy = nil, false, ""
+		return validateTunnelTargets(t)
+	}
 	if targets != nil || useClash || strategy != "" {
 		t.Targets, t.UseClashRuleset, t.Strategy = targets, useClash, strategy
 	} else if t.Strategy == "" {
@@ -116,13 +128,25 @@ func validateTunnelTargets(t *model.GostTunnel) error {
 	return nil
 }
 
-// Overlay tunnel targets for provisioning without changing the reusable endpoint.
+// Apply the exit policy to the ingress listener without changing either reusable endpoint.
 func endpointTargetRule(t *model.GostTunnel) model.GostRule {
 	rule := *t.EntryRule
-	if t.Strategy != "" {
+	if t.ExitRule != nil && t.ExitRule.Role == model.EndpointRoleExit {
+		rule.Targets, rule.UseClashRuleset, rule.Strategy = t.ExitRule.Targets, t.ExitRule.UseClashRuleset, t.ExitRule.Strategy
+	} else if t.Strategy != "" {
 		rule.Targets, rule.UseClashRuleset, rule.Strategy = t.Targets, t.UseClashRuleset, t.Strategy
 	}
 	return rule
+}
+
+func validateTunnelEndpointRoles(entry, exit *model.GostRule) error {
+	if entry.Role != "" && entry.Role != model.EndpointRoleEntry {
+		return errors.ErrTunnelEntryInvalid
+	}
+	if exit.Role != "" && exit.Role != model.EndpointRoleExit {
+		return errors.ErrTunnelExitInvalid
+	}
+	return nil
 }
 
 func relayBindReachable(ip string) bool {
@@ -146,6 +170,12 @@ func endpointNodesOnline(t *model.GostTunnel) error {
 func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 	if t.EntryRule == nil || t.ExitRule == nil {
 		return errors.ErrTunnelEndpointsRequired
+	}
+	if err := validateTunnelEndpointRoles(t.EntryRule, t.ExitRule); err != nil {
+		return err
+	}
+	if t.ExitRule.Role == model.EndpointRoleExit {
+		t.Protocol, t.RelayPort = string(t.ExitRule.Protocol), t.ExitRule.ListenPort
 	}
 	if err := validateTunnelTargets(t); err != nil {
 		return err
@@ -286,7 +316,7 @@ func (s *TunnelService) commitEndpointTunnel(t *model.GostTunnel, entryClient, e
 		if err := rules.UpdateRuntime(t.ExitRule.ID, t.ServiceID, model.RuleStatusRunning); err != nil {
 			return err
 		}
-		return tx.Model(t).Updates(map[string]any{"service_id": t.ServiceID, "chain_id": t.ChainID, "status": model.TunnelStatusRunning}).Error
+		return tx.Model(t).Updates(map[string]any{"service_id": t.ServiceID, "chain_id": t.ChainID, "protocol": t.Protocol, "relay_port": t.RelayPort, "status": model.TunnelStatusRunning}).Error
 	}); err != nil {
 		return err
 	}

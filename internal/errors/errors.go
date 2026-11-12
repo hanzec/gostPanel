@@ -71,7 +71,10 @@ var (
 	ErrRuleClashInvalid     = New(10111, "Clash 透明分流需要 TCP 和 127.0.0.1 监听，且不能填写固定目标", http.StatusBadRequest)
 	ErrRuleClashUnavailable = New(10112, "请先在系统设置中配置可用的 Clash 规则集", http.StatusBadRequest)
 	ErrRuleTunnelLinked     = New(10113, "端点已绑定隧道，请在隧道管理中操作", http.StatusBadRequest)
-	ErrRuleTargetRequired   = New(10114, "请在隧道管理中配置目标并启动端点", http.StatusBadRequest)
+	ErrRuleTargetRequired   = New(10114, "请在出口端点配置目标，再到隧道管理启动", http.StatusBadRequest)
+	ErrEndpointProtocol     = New(10115, "入口端点仅支持 TCP 或 UDP，其他隧道协议请在出口端点选择", http.StatusBadRequest)
+	ErrEndpointTargets      = New(10116, "入口无需目标；出口须填写固定目标或选择 Clash 规则集，且不能同时使用两者", http.StatusBadRequest)
+	ErrEndpointRole         = New(10117, "请选择有效的入口或出口端点角色", http.StatusBadRequest)
 )
 
 // ==================== 隧道相关错误 (102xx) ====================

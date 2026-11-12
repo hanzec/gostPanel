@@ -23,6 +23,21 @@ const (
 	RuleProtocolUDP RuleProtocol = "udp" // UDP 协议
 )
 
+// ListenerNetwork is the socket transport used by a Gost listener.
+func (p RuleProtocol) ListenerNetwork() string {
+	if p == RuleProtocolUDP || p == "quic" {
+		return "udp"
+	}
+	return "tcp"
+}
+
+type EndpointRole string
+
+const (
+	EndpointRoleEntry EndpointRole = "entry"
+	EndpointRoleExit  EndpointRole = "exit"
+)
+
 // RuleType 规则类型
 type RuleType string
 
@@ -38,14 +53,15 @@ type ObserverCounters struct {
 	Connections int64 `gorm:"not null;default:0"`
 }
 
-// GostRule 是可以独立运行或由隧道选用的节点入口。旧的隧道规则仍使用 TunnelID。
+// GostRule stores an ingress listener or an exit policy. Legacy standalone rules retain an empty Role.
 type GostRule struct {
 	ID         uint         `gorm:"primaryKey" json:"id"`
 	NodeID     *uint        `gorm:"index" json:"node_id"`                         // 入口节点 ID（端口转发时使用）
 	Name       string       `gorm:"size:100;not null" json:"name"`                // 规则名称
 	Type       RuleType     `gorm:"size:20;not null;default:forward" json:"type"` // 规则类型
+	Role       EndpointRole `gorm:"size:10;not null;default:''" json:"role"`      // 空值保留旧端点的行为
 	TunnelID   *uint        `gorm:"index" json:"tunnel_id"`                       // 隧道 ID（隧道转发时使用）
-	Protocol   RuleProtocol `gorm:"size:10;not null;default:tcp" json:"protocol"` // 协议
+	Protocol   RuleProtocol `gorm:"size:10;not null;default:tcp" json:"protocol"` // 入口监听或出口 Relay 协议
 	ListenIP   string       `gorm:"size:45;not null;default:''" json:"listen_ip"` // 监听 IP，空字符串表示所有接口
 	ListenPort int          `gorm:"not null" json:"listen_port"`                  // 监听端口
 
@@ -76,8 +92,9 @@ type GostRule struct {
 	// 关联 - 隧道
 	Tunnel *GostTunnel `gorm:"foreignKey:TunnelID" json:"tunnel,omitempty"`
 	// 隧道选用该入口后，由查询结果填充绑定信息。
-	LinkedTunnelID *uint  `gorm:"-" json:"linked_tunnel_id,omitempty"`
-	TunnelRole     string `gorm:"-" json:"tunnel_role,omitempty"`
+	LinkedTunnelID     *uint        `gorm:"-" json:"linked_tunnel_id,omitempty"`
+	TunnelRole         string       `gorm:"-" json:"tunnel_role,omitempty"`
+	LinkedTunnelStatus TunnelStatus `gorm:"-" json:"linked_tunnel_status,omitempty"`
 }
 
 // TableName 指定表名
