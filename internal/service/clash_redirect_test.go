@@ -1,8 +1,12 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"yagp/internal/dto"
@@ -10,14 +14,19 @@ import (
 	"yagp/internal/model"
 	"yagp/internal/utils"
 	"yagp/pkg/gost"
+	"yagp/pkg/nodegrpc"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *testing.T) {
 	db := newServiceTestDB(t)
 	loadServiceConfig(t, "report:\n  listen: 127.0.0.1:39001\n")
-	entryRemote, exitRemote := &lifecycleNode{t: t}, &lifecycleNode{t: t}
+	entryRemote := &redirectLifecycleNode{lifecycleNode: lifecycleNode{t: t}, dockerAddress: "172.17.0.1", mark: 1234}
+	exitRemote := &redirectLifecycleNode{lifecycleNode: lifecycleNode{t: t}}
 	entry, exit := startServiceTestNode(t, entryRemote), startServiceTestNode(t, exitRemote)
-	exit.Name = "exit"
+	exit.Name, exit.Address = "exit", "198.51.100.21"
 	saveServiceFixtures(t, db, &entry, &exit)
 	a := model.GostRule{Name: "Clash source", NodeID: &entry.ID, Type: model.RuleTypeForward, Protocol: model.RuleProtocolTCP,
 		ListenIP: "127.0.0.1", ListenPort: 10951, UseClashRuleset: true}
@@ -37,6 +46,35 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 	entryRemote.mu.Lock()
 	delete(entryRemote.reject, "POST /config/bypasses")
 	entryRemote.mu.Unlock()
+	if got, _ := entryRemote.savedService(); got != 0 {
+		t.Fatal("failed tunnel provisioning persisted Gost config or enabled redirection")
+	}
+	entryRemote.mu.Lock()
+	entryRemote.prepareCode = codes.FailedPrecondition
+	entryRemote.mu.Unlock()
+	_, err = tunnels.Create(request, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, bizerrors.ErrTunnelTransparentRedirect)
+	entrySaves, _ := entryRemote.savedService()
+	exitSaves, _ := exitRemote.savedService()
+	if entrySaves != 0 || exitSaves != 0 {
+		t.Fatal("mark conflict persisted Gost configuration")
+	}
+	entryRemote.mu.Lock()
+	entryRemote.prepareCode, entryRemote.rejectApply = codes.OK, true
+	entryRemote.mu.Unlock()
+	_, err = tunnels.Create(request, testAdmin, testIP, testAgent)
+	requireServiceError(t, err, bizerrors.ErrTunnelTransparentRedirect)
+	entrySaves, entrySavedService := entryRemote.savedService()
+	exitSaves, exitSavedService := exitRemote.savedService()
+	active, _, _ := entryRemote.redirectStatus()
+	if active || entrySaves == 0 || exitSaves == 0 || entrySavedService || exitSavedService ||
+		entryRemote.service(fmt.Sprintf("rule-%d", a.ID)).Name != "" ||
+		entryRemote.service(dockerEntranceServiceName(a.ID)).Name != "" {
+		t.Fatal("failed redirect installation did not roll back both saved listeners")
+	}
+	entryRemote.mu.Lock()
+	entryRemote.rejectApply = false
+	entryRemote.mu.Unlock()
 	tunnel, err := tunnels.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
 	forward := entryRemote.service(tunnel.EntryRule.ServiceID)
@@ -45,6 +83,27 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 	if forward.Addr != "127.0.0.1:10951" || relay.Addr != ":10952" || forward.Handler.Chain != clashTunnelChainName(tunnel.ID) ||
 		*clash.Hops[0].Nodes[0].Connector.Auth != *relay.Handler.Auth {
 		t.Fatal("selected Clash source and destination do not use the same authenticated Relay")
+	}
+	docker := entryRemote.service(dockerEntranceServiceName(a.ID))
+	if docker.Addr != "172.17.0.1:10951" || docker.Handler.Chain != forward.Handler.Chain ||
+		docker.SockOpts.Mark != int(entryRemote.mark) || forward.SockOpts.Mark != int(entryRemote.mark) ||
+		docker.Listener.Metadata["tproxy"] != true || docker.Handler.Metadata["tproxy"] != nil {
+		t.Fatalf("Docker and loopback listeners do not share the selected mark and chain: %+v, %+v", docker, forward)
+	}
+	var marked struct {
+		Hops []struct {
+			SockOpts gost.SocketOptions
+			Nodes    []struct{ SockOpts gost.SocketOptions }
+		}
+	}
+	entryRemote.read("/config/chains/"+forward.Handler.Chain, &marked)
+	if marked.Hops[0].SockOpts.Mark != int(entryRemote.mark) || marked.Hops[0].Nodes[0].SockOpts.Mark != int(entryRemote.mark) {
+		t.Fatalf("relay chain did not use the selected mark: %+v", marked)
+	}
+	active, savedOnApply, lastRelayHost := entryRemote.redirectStatus()
+	_, exitSavedService = exitRemote.savedService()
+	if !active || !savedOnApply || lastRelayHost != exit.Address || !exitSavedService {
+		t.Fatal("redirect applied before establishing and saving the tunnel")
 	}
 	ruleset.Matchers = []string{".new.test"}
 	requireServiceError(t, db.Save(&ruleset).Error, nil)
@@ -76,6 +135,99 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 	if unsaved[entry.ID] {
 		t.Fatal("retry did not save the changed subscription")
 	}
+	nextHost := "198.51.100.22"
+	base := entryRemote.chain(tunnel.ChainID)
+	NewRuleSyncService(db).syncTunnels(utils.GetGostClient(&entry), entry.ID, []model.GostTunnel{*tunnel},
+		[]gost.ChainConfig{base, clash}, map[uint]string{exit.ID: nextHost})
+	active, _, lastRelayHost = entryRemote.redirectStatus()
+	address, _ := entryRemote.chain(clash.Name).TunnelRelayAddress()
+	if !active || lastRelayHost != nextHost || address != nextHost+":10952" {
+		t.Fatalf("changed relay host did not reach nftables and Gost: active=%v nft=%q Gost=%q", active, lastRelayHost, address)
+	}
+	requireServiceError(t, tunnels.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
+	active, _, _ = entryRemote.redirectStatus()
+	if active || entryRemote.service(forward.Name).Name != "" || entryRemote.service(docker.Name).Name != "" {
+		t.Fatal("stopping the tunnel left an active redirect or listener")
+	}
+}
+
+type redirectLifecycleNode struct {
+	lifecycleNode
+	mark           uint32
+	dockerAddress  string
+	lastRelayHost  string
+	saves          []bool
+	savedOnApply   bool
+	redirectActive bool
+	prepareCode    codes.Code
+	rejectApply    bool
+	removeCode     codes.Code
+	rejectResource string
+}
+
+func (n *redirectLifecycleNode) Execute(ctx context.Context, request *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
+	if request.GetMethod() == http.MethodPost && (request.GetPath() == "/config/services" || request.GetPath() == "/config/chains") {
+		var resource struct{ Name string }
+		n.mu.Lock()
+		rejected := n.rejectResource != "" && json.Unmarshal(request.GetBody(), &resource) == nil && resource.Name == n.rejectResource
+		n.mu.Unlock()
+		if rejected {
+			return &nodegrpc.CommandReply{StatusCode: http.StatusServiceUnavailable}, nil
+		}
+	}
+	reply, err := n.lifecycleNode.Execute(ctx, request)
+	if request.GetMethod() == http.MethodPost && request.GetPath() == "/config?format=yaml" && reply.GetStatusCode() == http.StatusOK {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		hasService := false
+		for name := range n.resources {
+			if strings.HasPrefix(name, "/config/services/") {
+				hasService = true
+				break
+			}
+		}
+		n.saves = append(n.saves, hasService)
+	}
+	return reply, err
+}
+
+func (n *redirectLifecycleNode) ConfigureTransparentRedirect(_ context.Context, request *nodegrpc.TransparentRedirectRequest) (*nodegrpc.TransparentRedirectReply, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	switch request.GetAction() {
+	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_PREPARE:
+		if n.prepareCode != codes.OK {
+			return nil, status.Error(n.prepareCode, "cannot prepare redirect")
+		}
+		return &nodegrpc.TransparentRedirectReply{Mark: n.mark, DockerAddress: n.dockerAddress, Active: n.redirectActive}, nil
+	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY:
+		n.savedOnApply = len(n.saves) > 0 && n.saves[len(n.saves)-1]
+		if n.rejectApply {
+			return nil, status.Error(codes.FailedPrecondition, "cannot apply redirect")
+		}
+		n.lastRelayHost = request.GetRelayHost()
+		n.redirectActive = true
+	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE:
+		if n.removeCode != codes.OK {
+			return nil, status.Error(n.removeCode, "cannot remove redirect")
+		}
+		n.redirectActive = false
+	default:
+		return nil, status.Error(codes.InvalidArgument, "unexpected redirect action")
+	}
+	return &nodegrpc.TransparentRedirectReply{Active: n.redirectActive}, nil
+}
+
+func (n *redirectLifecycleNode) savedService() (int, bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.saves), len(n.saves) > 0 && n.saves[len(n.saves)-1]
+}
+
+func (n *redirectLifecycleNode) redirectStatus() (active, savedOnApply bool, relayHost string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.redirectActive, n.savedOnApply, n.lastRelayHost
 }
 
 func TestClashEntranceUsesSeparateChainAndFollowsExit(t *testing.T) {

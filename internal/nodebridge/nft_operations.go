@@ -29,7 +29,8 @@ func (s *controlServer) GetNftConfig(ctx context.Context, _ *emptypb.Empty) (*no
 	}
 	table, legacy := nftTables(s.config.NodeID, s.config.NftConfigFile)
 	quota, legacyQuota := trafficQuotaTables(s.config)
-	config, err := readLiveNftConfig(ctx, nft, []string{table, legacy, quota, legacyQuota})
+	redirect := nodegrpc.TransparentRedirectTableName(s.config.NodeID)
+	config, err := readLiveNftConfig(ctx, nft, []string{table, legacy, quota, legacyQuota, redirect})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, status.FromContextError(ctx.Err()).Err()

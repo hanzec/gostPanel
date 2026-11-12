@@ -432,16 +432,23 @@ func (s *RuleService) startTunnelRule(rule *model.GostRule, node *model.GostNode
 
 // startSelectedEntrance provisions the ingress against a tunnel's ready relay chain.
 func (s *RuleService) startSelectedEntrance(rule *model.GostRule, node *model.GostNode, tunnel *model.GostTunnel, targets []string) error {
+	client := utils.GetGostClient(node)
+	if err := s.provisionSelectedEntrance(client, rule, node, tunnel, targets, gost.ClashRedirectMark); err != nil {
+		return err
+	}
+	return s.persistStartedService(client, rule, rule.Type == model.RuleTypeForward)
+}
+
+func (s *RuleService) provisionSelectedEntrance(client *gost.Client, rule *model.GostRule, node *model.GostNode, tunnel *model.GostTunnel, targets []string, mark uint32) error {
 	if tunnel.ChainID == "" {
 		_ = s.ruleRepo.UpdateStatus(rule.ID, model.RuleStatusError)
 		return errors.ErrTunnelChainNotFound
 	}
 
 	chainID := tunnel.ChainID
-	client := utils.GetGostClient(node)
 	if rule.UseClashRuleset {
 		var err error
-		chainID, err = s.prepareClashChain(client, tunnel)
+		chainID, err = s.prepareClashChain(client, tunnel, mark)
 		if err != nil {
 			return err
 		}
@@ -449,7 +456,7 @@ func (s *RuleService) startSelectedEntrance(rule *model.GostRule, node *model.Go
 	if targets == nil {
 		targets = rule.Targets
 	}
-	return s.buildAndStartService(client, node, rule, chainID, targets)
+	return s.provisionService(client, node, rule, chainID, targets, mark)
 }
 
 // Stop 停止规则
@@ -560,7 +567,18 @@ func (s *RuleService) setupRuleObserver(client *gost.Client, rule *model.GostRul
 
 // buildAndStartService 构建并启动 Gost 服务 (处理通用逻辑)
 func (s *RuleService) buildAndStartService(client *gost.Client, node *model.GostNode, rule *model.GostRule, chainID string, targets []string) error {
-	serviceName := fmt.Sprintf("rule-%d", rule.ID)
+	if err := s.provisionService(client, node, rule, chainID, targets, gost.ClashRedirectMark); err != nil {
+		return err
+	}
+	return s.persistStartedService(client, rule, rule.Type == model.RuleTypeForward && chainID != "")
+}
+
+func entranceServiceName(id uint) string {
+	return fmt.Sprintf("rule-%d", id)
+}
+
+func (s *RuleService) provisionService(client *gost.Client, node *model.GostNode, rule *model.GostRule, chainID string, targets []string, mark uint32) error {
+	serviceName := entranceServiceName(rule.ID)
 	strategy := rule.Strategy
 	if strategy == "" || len(targets) == 1 {
 		strategy = "round"
@@ -568,7 +586,7 @@ func (s *RuleService) buildAndStartService(client *gost.Client, node *model.Gost
 
 	var svc *gost.ServiceConfig
 	if rule.UseClashRuleset {
-		svc = gost.BuildClashRedirectService(serviceName)
+		svc = gost.BuildMarkedClashRedirectService(serviceName, mark)
 	} else if rule.Protocol == model.RuleProtocolTCP {
 		svc = gost.BuildTCPForwardService(serviceName, rule.ListenPort, targets, strategy)
 	} else {
@@ -594,9 +612,13 @@ func (s *RuleService) buildAndStartService(client *gost.Client, node *model.Gost
 		return errors.ErrRuleStartFailed
 	}
 
-	// The tunnel rolls back the live service if its configuration cannot be saved.
 	rule.ServiceID = serviceName
-	selected := rule.Type == model.RuleTypeForward && chainID != ""
+	return nil
+}
+
+func (s *RuleService) persistStartedService(client *gost.Client, rule *model.GostRule, selected bool) error {
+	serviceName := rule.ServiceID
+	// The tunnel rolls back the live service if its configuration cannot be saved.
 	if err := client.SaveConfig(); err != nil && selected {
 		// Retain the live listener identity if rollback also fails and cleanup is retried after reload.
 		_ = s.ruleRepo.UpdateRuntime(rule.ID, serviceName, model.RuleStatusError)

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	stderrors "errors"
 	"fmt"
@@ -15,7 +16,10 @@ import (
 	"yagp/internal/utils"
 	"yagp/pkg/gost"
 	"yagp/pkg/logger"
+	"yagp/pkg/nodegrpc"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 )
 
@@ -111,22 +115,81 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 	if err := endpointNodesOnline(t); err != nil {
 		return err
 	}
-	if relayHost(t, t.ExitNode.Address) == "" {
+	host := relayHost(t, t.ExitNode.Address)
+	if host == "" {
 		return errors.ErrExtractHostFailed
 	}
-	if err := s.applyEndpointTunnel(t); err != nil {
-		if cleanupErr := s.stopEndpointTunnel(t); cleanupErr != nil {
-			t.Status = model.TunnelStatusError
-			_ = s.tunnelRepo.UpdateStatus(t.ID, t.Status)
-			logger.Warnf("清理隧道 %d 的部分配置失败: %v", t.ID, cleanupErr)
+	if t.Status == model.TunnelStatusError {
+		if err := s.stopEndpointTunnel(t); err != nil {
+			return err
 		}
+	}
+	entryClient, exitClient := utils.GetGostClient(t.EntryNode), utils.GetGostClient(t.ExitNode)
+	redirect, err := prepareEndpointRedirect(t, entryClient, host)
+	if err != nil {
+		return err
+	}
+	if err := s.provisionEndpointTunnel(t, entryClient, exitClient, host, redirect); err != nil {
+		s.rollbackEndpointTunnel(t, false)
+		return err
+	}
+	// Persist both Gost listeners before enabling the redirect, which survives node restarts.
+	if err := s.commitEndpointTunnel(t, entryClient, exitClient, redirect); err != nil {
+		s.rollbackEndpointTunnel(t, true)
 		return err
 	}
 	return nil
 }
 
-func (s *TunnelService) applyEndpointTunnel(t *model.GostTunnel) error {
-	entryClient, exitClient := utils.GetGostClient(t.EntryNode), utils.GetGostClient(t.ExitNode)
+func prepareEndpointRedirect(t *model.GostTunnel, entryClient *gost.Client, host string) (*nodegrpc.TransparentRedirectRequest, error) {
+	if !t.EntryRule.UseClashRuleset {
+		return nil, nil
+	}
+	redirect := transparentRedirectRequest(t.EntryRule, host)
+	prepared, err := entryClient.ConfigureTransparentRedirect(context.Background(), redirect)
+	if err != nil {
+		logger.Warnf("准备隧道 %d 的入口透明分流失败: %v", t.ID, err)
+		return nil, errors.ErrTunnelTransparentRedirect
+	}
+	redirect.Mark, redirect.DockerAddress = prepared.GetMark(), prepared.GetDockerAddress()
+	return redirect, nil
+}
+
+func (s *TunnelService) provisionEndpointTunnel(t *model.GostTunnel, entryClient, exitClient *gost.Client, host string, redirect *nodegrpc.TransparentRedirectRequest) error {
+	if err := s.provisionEndpointRelay(t, entryClient, exitClient, host); err != nil {
+		return err
+	}
+	rules := NewRuleService(s.tunnelRepo.DB)
+	mark := redirect.GetMark()
+	if err := rules.provisionSelectedEntrance(entryClient, t.EntryRule, t.EntryNode, t, nil, mark); err != nil {
+		return err
+	}
+	if redirect.GetDockerAddress() != "" {
+		svc := gost.BuildMarkedClashRedirectService(dockerEntranceServiceName(t.EntryRule.ID), mark)
+		svc.Addr = net.JoinHostPort(redirect.GetDockerAddress(), strconv.Itoa(t.EntryRule.ListenPort))
+		// IP_TRANSPARENT lets Gost start before the bridge address is assigned. The handler reads SO_ORIGINAL_DST for DNAT.
+		svc.Listener.Metadata = map[string]any{"tproxy": true}
+		svc.Handler.Chain = clashTunnelChainName(t.ID)
+		if _, err := createServiceWithTrafficQuota(s.nodeRepo, entryClient, *t.EntryNode, svc); err != nil {
+			logger.Warnf("创建隧道 %d 的 Docker 入口监听失败: %v", t.ID, err)
+			return errors.ErrRuleStartFailed
+		}
+	}
+	return nil
+}
+
+func (s *TunnelService) rollbackEndpointTunnel(t *model.GostTunnel, saved bool) {
+	if cleanupErr := s.cleanupEndpointTunnel(t, saved); cleanupErr != nil {
+		if t.EntryRule.ServiceID != "" {
+			_ = repository.NewRuleRepository(s.tunnelRepo.DB).UpdateRuntime(t.EntryRule.ID, t.EntryRule.ServiceID, model.RuleStatusError)
+		}
+		t.Status = model.TunnelStatusError
+		_ = s.tunnelRepo.UpdateStatus(t.ID, t.Status)
+		logger.Warnf("清理隧道 %d 的部分配置失败: %v", t.ID, cleanupErr)
+	}
+}
+
+func (s *TunnelService) provisionEndpointRelay(t *model.GostTunnel, entryClient, exitClient *gost.Client, host string) error {
 	t.ServiceID, t.ChainID = relayServiceName(t.ID), tunnelChainName(t.ID)
 	auth := &gost.AuthConfig{Username: t.ServiceID, Password: t.RelaySecret}
 	port := strconv.Itoa(t.RelayPort)
@@ -151,30 +214,51 @@ func (s *TunnelService) applyEndpointTunnel(t *model.GostTunnel) error {
 			return err
 		}
 	}
-	chain := newTunnelChain(t.ChainID, net.JoinHostPort(relayHost(t, t.ExitNode.Address), port), t.Protocol, auth)
+	chain := newTunnelChain(t.ChainID, net.JoinHostPort(host, port), t.Protocol, auth)
 	if err := entryClient.CreateChain(chain); err != nil {
 		return errors.ErrTunnelChainCreateFailed
 	}
-	if err := NewRuleService(s.tunnelRepo.DB).startSelectedEntrance(t.EntryRule, t.EntryNode, t, nil); err != nil {
-		return err
+	return nil
+}
+
+func (s *TunnelService) commitEndpointTunnel(t *model.GostTunnel, entryClient, exitClient *gost.Client, redirect *nodegrpc.TransparentRedirectRequest) error {
+	if err := entryClient.SaveConfig(); err != nil {
+		logger.Warnf("保存隧道 %d 入口配置失败: %v", t.ID, err)
+		return errors.ErrRuleStartFailed
 	}
 	if err := exitClient.SaveConfig(); err != nil {
 		logger.Warnf("保存隧道 %d 出口配置失败: %v", t.ID, err)
 		return errors.ErrTunnelEndpointSave
 	}
+	if redirect != nil {
+		redirect.Action = nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY
+		if _, err := entryClient.ConfigureTransparentRedirect(context.Background(), redirect); err != nil {
+			logger.Warnf("应用隧道 %d 的入口透明分流失败: %v", t.ID, err)
+			return errors.ErrTunnelTransparentRedirect
+		}
+	}
 	if err := s.tunnelRepo.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.GostRule{}).Where("id = ?", t.ExitRule.ID).Updates(map[string]any{"service_id": t.ServiceID, "status": model.RuleStatusRunning}).Error; err != nil {
+		rules := repository.NewRuleRepository(tx)
+		if err := rules.UpdateRuntime(t.EntryRule.ID, t.EntryRule.ServiceID, model.RuleStatusRunning); err != nil {
+			return err
+		}
+		if err := rules.UpdateRuntime(t.ExitRule.ID, t.ServiceID, model.RuleStatusRunning); err != nil {
 			return err
 		}
 		return tx.Model(t).Updates(map[string]any{"service_id": t.ServiceID, "chain_id": t.ChainID, "status": model.TunnelStatusRunning}).Error
 	}); err != nil {
 		return err
 	}
+	t.EntryRule.Status = model.RuleStatusRunning
 	t.Status = model.TunnelStatusRunning
 	return nil
 }
 
 func (s *TunnelService) stopEndpointTunnel(t *model.GostTunnel) error {
+	return s.cleanupEndpointTunnel(t, true)
+}
+
+func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) error {
 	if t.EntryRule == nil || t.ExitRule == nil {
 		return errors.ErrTunnelEndpointsRequired
 	}
@@ -182,27 +266,67 @@ func (s *TunnelService) stopEndpointTunnel(t *model.GostTunnel) error {
 		return err
 	}
 	entryClient, exitClient := utils.GetGostClient(t.EntryNode), utils.GetGostClient(t.ExitNode)
+	if save && t.EntryRule.UseClashRuleset {
+		request := &nodegrpc.TransparentRedirectRequest{
+			Action: nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE,
+			Owner:  entranceServiceName(t.EntryRule.ID),
+		}
+		if _, err := entryClient.ConfigureTransparentRedirect(context.Background(), request); err != nil && status.Code(err) != codes.Unimplemented {
+			logger.Warnf("移除隧道 %d 的入口透明分流失败: %v", t.ID, err)
+			return errors.ErrTunnelTransparentRedirect
+		}
+	}
 	// Remove the entrance before its chain so a live transparent listener can't fall back to direct.
-	if err := NewRuleService(s.tunnelRepo.DB).stopSelectedEntrance(t.EntryRule); err != nil {
+	serviceName := t.EntryRule.ServiceID
+	if serviceName == "" {
+		serviceName = entranceServiceName(t.EntryRule.ID)
+	}
+	if err := entryClient.DeleteService(serviceName); err != nil {
 		return err
+	}
+	if t.EntryRule.UseClashRuleset {
+		if err := entryClient.DeleteService(dockerEntranceServiceName(t.EntryRule.ID)); err != nil {
+			return err
+		}
 	}
 	if err := stderrors.Join(entryClient.DeleteChain(tunnelChainName(t.ID)),
 		entryClient.DeleteChain(clashTunnelChainName(t.ID)), exitClient.DeleteService(relayServiceName(t.ID))); err != nil {
 		return err
 	}
-	if err := stderrors.Join(entryClient.SaveConfig(), exitClient.SaveConfig()); err != nil {
-		return errors.ErrTunnelEndpointSave
+	if save {
+		if err := stderrors.Join(entryClient.SaveConfig(), exitClient.SaveConfig()); err != nil {
+			return errors.ErrTunnelEndpointSave
+		}
 	}
 	if err := s.tunnelRepo.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.GostRule{}).Where("id = ?", t.ExitRuleID).Update("status", model.RuleStatusStopped).Error; err != nil {
+		rules := repository.NewRuleRepository(tx)
+		if err := rules.UpdateRuntime(t.EntryRule.ID, "", model.RuleStatusStopped); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.GostRule{}).Where("id = ?", t.ExitRule.ID).Update("status", model.RuleStatusStopped).Error; err != nil {
 			return err
 		}
 		return repository.NewTunnelRepository(tx).UpdateStatus(t.ID, model.TunnelStatusStopped)
 	}); err != nil {
 		return err
 	}
+	t.EntryRule.ServiceID = ""
+	t.EntryRule.Status = model.RuleStatusStopped
 	t.Status = model.TunnelStatusStopped
 	return nil
+}
+
+func transparentRedirectRequest(rule *model.GostRule, host string) *nodegrpc.TransparentRedirectRequest {
+	return &nodegrpc.TransparentRedirectRequest{
+		Action:    nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_PREPARE,
+		Owner:     entranceServiceName(rule.ID),
+		Port:      uint32(rule.ListenPort),
+		RelayHost: host,
+	}
+}
+
+func dockerEntranceServiceName(id uint) string {
+	return entranceServiceName(id) + "-docker"
 }
 
 func relayHost(t *model.GostTunnel, detected string) string {

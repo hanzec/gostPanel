@@ -2,7 +2,12 @@ package gost
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestEnsureClashChainKeepsFixedRouteAndMarksRelay(t *testing.T) {
@@ -36,5 +41,50 @@ func TestEnsureClashChainKeepsFixedRouteAndMarksRelay(t *testing.T) {
 				t.Fatalf("ensure Clash chain: %v, want error %t", err, scenario.fail)
 			}
 		})
+	}
+}
+
+func TestEnsureMarkedClashChainRefreshesAnExistingRoute(t *testing.T) {
+	client, calls := controlFixture(t)
+	const path = "/config/chains/transparent"
+	const source = `{"name":"fixed","hops":[{"name":"hop-0","nodes":[{"name":"exit-relay","addr":"192.0.2.10:443"}]}]}`
+	const current = `{"name":"transparent","hops":[{"name":"hop-0","nodes":[{"name":"exit-relay","addr":"192.0.2.4:443"}]}]}`
+	const updated = `{"name":"transparent","hops":[{"name":"hop-0","bypass":"yagp-transparent-proxy","sockopts":{"mark":100},"nodes":[{"name":"exit-relay","addr":"192.0.2.10:443","sockopts":{"mark":100}}]}]}`
+	for _, tc := range []struct {
+		name      string
+		rpcErr    error
+		wantError string
+	}{
+		{name: "updated"},
+		{name: "node disconnected", rpcErr: status.Error(codes.Unavailable, "node disconnected"), wantError: "node disconnected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls <- gostCommand(http.MethodGet, path, "", http.StatusOK, `{"data":`+current+`}`)
+			calls <- gostCommand(http.MethodGet, "/config/chains/fixed", "", http.StatusOK, `{"data":`+source+`}`)
+			update := gostCommand(http.MethodPut, path, updated, http.StatusOK, `{}`)
+			update.err = tc.rpcErr
+			calls <- update
+			err := client.EnsureMarkedClashChain("fixed", "transparent", 100)
+			if tc.wantError == "" && err != nil || tc.wantError != "" && (err == nil || !strings.Contains(err.Error(), tc.wantError)) {
+				t.Fatalf("ensure marked chain = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestBuildClashRedirectServiceUsesSelectedMark(t *testing.T) {
+	for _, tc := range []struct {
+		service *ServiceConfig
+		name    string
+		mark    int
+	}{
+		{BuildClashRedirectService("rule-7"), "rule-7", ClashRedirectMark},
+		{BuildMarkedClashRedirectService("rule-7-docker", 100), "rule-7-docker", 100},
+	} {
+		service := tc.service
+		if service.Name != tc.name || service.Handler.Type != "red" || service.Listener.Type != "red" ||
+			service.SockOpts.Mark != tc.mark || service.Handler.Metadata["sniffing"] != true {
+			t.Fatalf("unexpected RED service for mark %d: %+v", tc.mark, service)
+		}
 	}
 }

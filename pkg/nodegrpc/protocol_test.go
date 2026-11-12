@@ -21,6 +21,16 @@ type protocolExchange struct {
 	call     func(context.Context, V1Client) (proto.Message, error)
 }
 
+func TestTransparentRedirectTableNameUsesEntireNodeID(t *testing.T) {
+	const id = 1<<64 - 1
+	if got := TransparentRedirectTableName(id); got != "yagp_redirect_18446744073709551615" {
+		t.Fatalf("transparent redirect table name = %q", got)
+	}
+	if got := NftTableName(id); got != "yagp_node_18446744073709551615" {
+		t.Fatalf("legacy node table name = %q", got)
+	}
+}
+
 func exchange[Request, Response proto.Message](
 	method string,
 	call func(V1Client, context.Context, Request, ...grpc.CallOption) (Response, error),
@@ -74,6 +84,13 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 			empty, liveConfig),
 		exchange(V1_ApplyNftConfig_FullMethodName, V1Client.ApplyNftConfig,
 			config, config),
+		exchange(V1_ConfigureTransparentRedirect_FullMethodName, V1Client.ConfigureTransparentRedirect,
+			&TransparentRedirectRequest{
+				Action: TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY,
+				Owner:  "rule-42", Port: 12345, RelayHost: "192.0.2.42", Mark: 100, DockerAddress: "172.17.0.1",
+				RequireActive: true,
+			},
+			&TransparentRedirectReply{Mark: 100, DockerAddress: "172.17.0.1", Active: true}),
 		exchange(V1_SyncTrafficQuota_FullMethodName, V1Client.SyncTrafficQuota,
 			&TrafficQuotaRequest{LimitBytes: 1000, UsedBytes: 123, WindowStart: 456, TcpPorts: []uint32{80, 443}, UdpPorts: []uint32{53}},
 			&TrafficQuotaReply{UsedBytes: 200}),

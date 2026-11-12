@@ -21,20 +21,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	V1_Report_FullMethodName               = "/yagp.v1/Report"
-	V1_GetNodeConfig_FullMethodName        = "/yagp.v1/GetNodeConfig"
-	V1_UpdateNodeIPs_FullMethodName        = "/yagp.v1/UpdateNodeIPs"
-	V1_Execute_FullMethodName              = "/yagp.v1/Execute"
-	V1_CheckListener_FullMethodName        = "/yagp.v1/CheckListener"
-	V1_GetObserverEndpoint_FullMethodName  = "/yagp.v1/GetObserverEndpoint"
-	V1_GetGostServiceStatus_FullMethodName = "/yagp.v1/GetGostServiceStatus"
-	V1_RestartGostService_FullMethodName   = "/yagp.v1/RestartGostService"
-	V1_GetGostLogs_FullMethodName          = "/yagp.v1/GetGostLogs"
-	V1_GetNftConfig_FullMethodName         = "/yagp.v1/GetNftConfig"
-	V1_ApplyNftConfig_FullMethodName       = "/yagp.v1/ApplyNftConfig"
-	V1_SyncTrafficQuota_FullMethodName     = "/yagp.v1/SyncTrafficQuota"
-	V1_GetUpgradeStatus_FullMethodName     = "/yagp.v1/GetUpgradeStatus"
-	V1_StartUpgrade_FullMethodName         = "/yagp.v1/StartUpgrade"
+	V1_Report_FullMethodName                       = "/yagp.v1/Report"
+	V1_GetNodeConfig_FullMethodName                = "/yagp.v1/GetNodeConfig"
+	V1_UpdateNodeIPs_FullMethodName                = "/yagp.v1/UpdateNodeIPs"
+	V1_Execute_FullMethodName                      = "/yagp.v1/Execute"
+	V1_CheckListener_FullMethodName                = "/yagp.v1/CheckListener"
+	V1_GetObserverEndpoint_FullMethodName          = "/yagp.v1/GetObserverEndpoint"
+	V1_GetGostServiceStatus_FullMethodName         = "/yagp.v1/GetGostServiceStatus"
+	V1_RestartGostService_FullMethodName           = "/yagp.v1/RestartGostService"
+	V1_GetGostLogs_FullMethodName                  = "/yagp.v1/GetGostLogs"
+	V1_GetNftConfig_FullMethodName                 = "/yagp.v1/GetNftConfig"
+	V1_ApplyNftConfig_FullMethodName               = "/yagp.v1/ApplyNftConfig"
+	V1_SyncTrafficQuota_FullMethodName             = "/yagp.v1/SyncTrafficQuota"
+	V1_GetUpgradeStatus_FullMethodName             = "/yagp.v1/GetUpgradeStatus"
+	V1_StartUpgrade_FullMethodName                 = "/yagp.v1/StartUpgrade"
+	V1_ConfigureTransparentRedirect_FullMethodName = "/yagp.v1/ConfigureTransparentRedirect"
 )
 
 // V1Client is the client API for V1 service.
@@ -57,6 +58,7 @@ type V1Client interface {
 	SyncTrafficQuota(ctx context.Context, in *TrafficQuotaRequest, opts ...grpc.CallOption) (*TrafficQuotaReply, error)
 	GetUpgradeStatus(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
 	StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opts ...grpc.CallOption) (*NodeUpgradeStatus, error)
+	ConfigureTransparentRedirect(ctx context.Context, in *TransparentRedirectRequest, opts ...grpc.CallOption) (*TransparentRedirectReply, error)
 }
 
 type v1Client struct {
@@ -207,6 +209,16 @@ func (c *v1Client) StartUpgrade(ctx context.Context, in *NodeUpgradeRequest, opt
 	return out, nil
 }
 
+func (c *v1Client) ConfigureTransparentRedirect(ctx context.Context, in *TransparentRedirectRequest, opts ...grpc.CallOption) (*TransparentRedirectReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransparentRedirectReply)
+	err := c.cc.Invoke(ctx, V1_ConfigureTransparentRedirect_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // V1Server is the server API for V1 service.
 // All implementations must embed UnimplementedV1Server
 // for forward compatibility.
@@ -227,6 +239,7 @@ type V1Server interface {
 	SyncTrafficQuota(context.Context, *TrafficQuotaRequest) (*TrafficQuotaReply, error)
 	GetUpgradeStatus(context.Context, *emptypb.Empty) (*NodeUpgradeStatus, error)
 	StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error)
+	ConfigureTransparentRedirect(context.Context, *TransparentRedirectRequest) (*TransparentRedirectReply, error)
 	mustEmbedUnimplementedV1Server()
 }
 
@@ -278,6 +291,9 @@ func (UnimplementedV1Server) GetUpgradeStatus(context.Context, *emptypb.Empty) (
 }
 func (UnimplementedV1Server) StartUpgrade(context.Context, *NodeUpgradeRequest) (*NodeUpgradeStatus, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartUpgrade not implemented")
+}
+func (UnimplementedV1Server) ConfigureTransparentRedirect(context.Context, *TransparentRedirectRequest) (*TransparentRedirectReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ConfigureTransparentRedirect not implemented")
 }
 func (UnimplementedV1Server) mustEmbedUnimplementedV1Server() {}
 func (UnimplementedV1Server) testEmbeddedByValue()            {}
@@ -552,6 +568,24 @@ func _V1_StartUpgrade_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _V1_ConfigureTransparentRedirect_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransparentRedirectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(V1Server).ConfigureTransparentRedirect(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: V1_ConfigureTransparentRedirect_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(V1Server).ConfigureTransparentRedirect(ctx, req.(*TransparentRedirectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // V1_ServiceDesc is the grpc.ServiceDesc for V1 service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -614,6 +648,10 @@ var V1_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StartUpgrade",
 			Handler:    _V1_StartUpgrade_Handler,
+		},
+		{
+			MethodName: "ConfigureTransparentRedirect",
+			Handler:    _V1_ConfigureTransparentRedirect_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

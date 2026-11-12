@@ -55,6 +55,7 @@ if [[ "$action" != install ]]; then
     gost_unit="yagp-gost-$node_id"
     nft_table="yagp_node_$node_id"
     quota_table="yagp_quota_$node_id"
+    redirect_table="yagp_redirect_$node_id"
     if [[ -x "$base_path/yagp-daemon" && -f "$base_path/.runtime-layout" ]] &&
         [[ $(cat "$base_path/.runtime-layout") =~ ^[1-9][0-9]*$ ]]; then
         nft_table=yagp_node
@@ -70,6 +71,8 @@ if [[ "$action" == uninstall ]]; then
     if [[ "$manager" == systemd ]]; then
         systemctl disable --now "$bridge_unit" "$gost_unit" || true
         rm -f -- "/etc/systemd/system/$bridge_unit.service" "/etc/systemd/system/$gost_unit.service"
+        rm -f -- "/etc/systemd/system/$bridge_unit.service.d/50-yagp-network.conf"
+        rmdir -- "/etc/systemd/system/$bridge_unit.service.d" 2>/dev/null || true
         systemctl daemon-reload
     else
         for unit in "$bridge_unit" "$gost_unit"; do
@@ -82,9 +85,12 @@ if [[ "$action" == uninstall ]]; then
         nft list table inet "$nft_table" >/dev/null 2>&1; then
         nft delete table inet "$nft_table"
     fi
-    if command -v nft >/dev/null 2>&1 &&
-        nft list table inet "$quota_table" >/dev/null 2>&1; then
-        nft delete table inet "$quota_table"
+    if command -v nft >/dev/null 2>&1; then
+        for table in "$quota_table" "$redirect_table"; do
+            if nft list table inet "$table" >/dev/null 2>&1; then
+                nft delete table inet "$table"
+            fi
+        done
     fi
     rm -f -- "$base_path/yagp-daemon" "$base_path/gost" "$base_path/.runtime-layout"
     printf '节点 %s 服务已卸载，配置位于 %s\n' "$node_id" "$base_path"
@@ -219,9 +225,13 @@ if [[ "$action" == reenroll ]]; then
     unset token
     [[ "$registered_id" == "$node_id" ]] || die "yagp-daemon 返回了不同的节点 ID"
     mv -fT -- "$candidate" "$base_path/yagp-daemon" || die "节点已重新注册，但未能替换守护进程"
-    if [[ "$manager" == systemd && "$bridge_unit" != yagp-daemon && "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
+    if [[ "$manager" == systemd && "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
         "$base_path/yagp-daemon" update-runtime -c "$base_path/node.yaml" || die '节点已重新注册。服务迁移失败，请检查上面的日志。'
-    else
+    fi
+    if [[ "$manager" != systemd || "$bridge_unit" == yagp-daemon || ! "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
+        if [[ "$manager" == openrc && -x /etc/init.d/nftables ]]; then
+            rc-update add nftables boot
+        fi
         if [[ "$manager" == openrc && "$runtime_layout" =~ ^[1-9][0-9]*$ && ! -f "$base_path/.runtime-layout" ]]; then
             printf '%s\n' "$runtime_layout" > "$base_path/.runtime-layout"
         fi
@@ -277,7 +287,7 @@ write_service() {
         (set -o noclobber; cat > "$unit_path") <<EOF
 [Unit]
 Description=$description
-After=network.target nftables.service
+After=network.target nftables.service docker.service
 
 [Service]
 WorkingDirectory=$base_path
@@ -302,6 +312,7 @@ command_background=true
 pidfile="/run/$name.pid"
 depend() {
     need net
+    use nftables docker
 }
 EOF
         chmod 0755 "$unit_path"
@@ -310,6 +321,9 @@ EOF
 
 write_service "$bridge_unit" "yagp daemon $node_id" yagp-daemon -c node.yaml
 if [[ "$manager" == systemd ]]; then
+    if [[ $(systemctl show --property=LoadState --value nftables.service 2>/dev/null || true) == loaded ]]; then
+        systemctl enable nftables.service
+    fi
     gost_unit_path="/etc/systemd/system/$gost_unit.service"
     gost_unit_existed=false
     if [[ -e "$gost_unit_path" || -L "$gost_unit_path" ]]; then
@@ -327,6 +341,9 @@ if [[ "$manager" == systemd ]]; then
     fi
 else
     write_service "$gost_unit" "yagp node $node_id Gost" gost -C gost.yaml
+    if [[ -x /etc/init.d/nftables ]]; then
+        rc-update add nftables boot
+    fi
     for unit in "$gost_unit" "$bridge_unit"; do
         rc-update add "$unit" default
         rc-service "$unit" restart

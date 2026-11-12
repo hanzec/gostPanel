@@ -224,6 +224,20 @@ func TestGostTypedControlCalls(t *testing.T) {
 	if got, err := client.ApplyNftConfig(ctx, nft.Config); err != nil || !proto.Equal(got, nft) {
 		t.Fatalf("apply nft = %v, %v", got, err)
 	}
+	redirect := &nodegrpc.TransparentRedirectRequest{
+		Action: nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY,
+		Owner:  "rule-7", Port: 12345, RelayHost: "192.0.2.7", Mark: 100, DockerAddress: "172.17.0.1", RequireActive: true,
+	}
+	active := &nodegrpc.TransparentRedirectReply{Mark: 100, DockerAddress: "172.17.0.1", Active: true}
+	calls <- controlCall{method: nodegrpc.V1_ConfigureTransparentRedirect_FullMethodName, request: redirect, response: active}
+	if got, err := client.ConfigureTransparentRedirect(ctx, redirect); err != nil || !proto.Equal(got, active) {
+		t.Fatalf("configure transparent redirect = %v, %v", got, err)
+	}
+	conflict := status.Error(codes.FailedPrecondition, "transparent redirect plan changed")
+	calls <- controlCall{method: nodegrpc.V1_ConfigureTransparentRedirect_FullMethodName, request: redirect, err: conflict}
+	if got, err := client.ConfigureTransparentRedirect(ctx, redirect); got != nil || status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("configure transparent redirect conflict = %v, %v", got, err)
+	}
 	upgrade := &nodegrpc.NodeUpgradeStatus{Supported: true, GostVersion: "3.2.6"}
 	calls <- controlCall{method: nodegrpc.V1_GetUpgradeStatus_FullMethodName, request: &emptypb.Empty{}, response: upgrade}
 	if got, err := client.GetUpgradeStatus(ctx); err != nil || !proto.Equal(got, upgrade) {

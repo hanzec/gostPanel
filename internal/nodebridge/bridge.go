@@ -103,6 +103,14 @@ func run(ctx context.Context, cfg Config, dial func(context.Context, string, str
 		},
 	}
 	defer control.client.CloseIdleConnections()
+	if cfg.ConfigFile != "" {
+		restoreCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		err := control.restoreTransparentRedirect(restoreCtx)
+		cancel()
+		if err != nil {
+			log.Printf("restore transparent redirect: %v", err)
+		}
+	}
 	var current atomic.Pointer[nodegrpc.Session]
 	observation := grpc.NewServer()
 	defer observation.Stop()

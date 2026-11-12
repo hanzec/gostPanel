@@ -15,9 +15,10 @@ import (
 )
 
 const singleNodeLayoutVersion = 1
-const RuntimeLayoutVersion = singleNodeLayoutVersion
+const RuntimeLayoutVersion = 2
 const runtimeLayoutFile = ".runtime-layout"
 const systemdUnitDir = "/etc/systemd/system"
+const redirectOrderDropIn = "50-yagp-network.conf"
 
 func ReadRuntimeLayout(configFile string) int {
 	data, _ := os.ReadFile(filepath.Join(filepath.Dir(configFile), runtimeLayoutFile))
@@ -33,7 +34,7 @@ func (cfg Config) runtimeUnit(component string) string {
 }
 
 func runtimeUpdateRequired(cfg Config, configFile, unitDir string) bool {
-	if cfg.RuntimeLayout >= RuntimeLayoutVersion || !supportsUpgrade(configFile) {
+	if !supportsUpgrade(configFile) || max(cfg.RuntimeLayout, ReadRuntimeLayout(configFile)) >= RuntimeLayoutVersion {
 		return false
 	}
 	if _, err := os.Stat(filepath.Join(unitDir, cfg.runtimeUnit("daemon"))); err != nil {
@@ -81,7 +82,40 @@ func UpdateSystemdRuntime(ctx context.Context, cfg Config, configFile string) er
 	if err := checkSingleNode(dir); err != nil {
 		return err
 	}
+	if cfg.RuntimeLayout >= singleNodeLayoutVersion {
+		return updateSystemdNetworkOrder(ctx, cfg, configFile, systemdUnitDir)
+	}
 	return migrateSystemdUnits(ctx, cfg, configFile, systemdUnitDir)
+}
+
+func enableSystemdNftables(ctx context.Context) error {
+	state, err := exec.CommandContext(ctx, "systemctl", "show", "--property=LoadState", "--value", "nftables.service").Output()
+	if err != nil || strings.TrimSpace(string(state)) != "loaded" {
+		return nil
+	}
+	// Starting nftables now could flush rules already installed by Docker and the administrator.
+	return upgradeCommand(ctx, "systemctl", "enable", "nftables.service")
+}
+
+func updateSystemdNetworkOrder(ctx context.Context, cfg Config, configFile, unitDir string) error {
+	if err := enableSystemdNftables(ctx); err != nil {
+		return err
+	}
+	dir := filepath.Join(unitDir, cfg.runtimeUnit("daemon")+".d")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, redirectOrderDropIn), []byte("[Unit]\nAfter=nftables.service docker.service\n"), 0644); err != nil {
+		return err
+	}
+	if err := upgradeCommand(ctx, "systemctl", "daemon-reload"); err != nil {
+		return err
+	}
+	return saveRuntimeLayout(configFile)
+}
+
+func saveRuntimeLayout(configFile string) error {
+	return WriteNodeFile(filepath.Join(filepath.Dir(configFile), runtimeLayoutFile), []byte(strconv.Itoa(RuntimeLayoutVersion)+"\n"))
 }
 
 func migrateSystemdUnits(ctx context.Context, cfg Config, configFile, unitDir string) (err error) {
@@ -100,6 +134,9 @@ func migrateSystemdUnits(ctx context.Context, cfg Config, configFile, unitDir st
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return statErr
 		}
+	}
+	if err := enableSystemdNftables(ctx); err != nil {
+		return err
 	}
 	marker := filepath.Join(dir, runtimeLayoutFile)
 	var created []string
@@ -140,7 +177,7 @@ func migrateSystemdUnits(ctx context.Context, cfg Config, configFile, unitDir st
 			return err
 		}
 	}
-	if err := WriteNodeFile(marker, []byte(strconv.Itoa(singleNodeLayoutVersion)+"\n")); err != nil {
+	if err := saveRuntimeLayout(configFile); err != nil {
 		return err
 	}
 	if err := upgradeCommand(ctx, "systemctl", "daemon-reload"); err != nil {
@@ -168,7 +205,7 @@ func runtimeUnitDefinitions(dir, configFile string) [2]string {
 	return [2]string{
 		fmt.Sprintf(`[Unit]
 Description=yagp node daemon
-After=network.target nftables.service
+After=network.target nftables.service docker.service
 Wants=yagp-gost.service
 
 [Service]
