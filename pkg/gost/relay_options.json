@@ -1,0 +1,189 @@
+{
+  "protocols": {
+    "tcp": ["tcp_keepalive", "mptcp", "reuse_port"],
+    "mtcp": ["tcp_keepalive", "mptcp", "reuse_port", "backlog", "tcp_handshake", "mux"],
+    "udp": ["udp", "backlog"],
+    "tls": ["tcp_keepalive", "mptcp", "tcp_handshake", "tls", "tls_versions", "tls_alpn"],
+    "mtls": ["tcp_keepalive", "mptcp", "backlog", "tcp_handshake", "mux", "tls", "tls_versions", "tls_alpn"],
+    "ws": ["ws", "ws_tcp_keepalive", "mptcp"],
+    "mws": ["ws", "ws_tcp_keepalive", "mptcp", "mux"],
+    "wss": ["ws", "ws_tcp_keepalive", "mptcp", "tls", "tls_versions", "tls_ws_alpn"],
+    "mwss": ["ws", "ws_tcp_keepalive", "mptcp", "mux", "tls", "tls_versions", "tls_ws_alpn"],
+    "h2": ["h2", "mptcp", "backlog", "tls", "tls_versions", "tls_h2_alpn"],
+    "h2c": ["h2", "mptcp", "backlog"],
+    "grpc": ["grpc", "grpc_tcp_keepalive", "mptcp", "tls", "tls_versions"],
+    "pht": ["pht", "mptcp", "backlog"],
+    "phts": ["pht", "mptcp", "backlog", "tls", "tls_versions", "tls_alpn"],
+    "kcp": ["kcp", "backlog", "tcp_handshake"],
+    "quic": ["quic_timing", "quic", "backlog", "tls"],
+    "h3": ["h3", "quic_timing", "h3_keepalive", "backlog", "tls"],
+    "ohttp": ["ohttp", "mptcp"],
+    "otls": ["otls", "mptcp"]
+  },
+  "groups": {
+    "mptcp": [
+      {"id": "mptcp", "label": "Multipath TCP", "kind": "boolean", "listener": "mptcp", "help": "需出口节点的内核支持。"}
+    ],
+    "reuse_port": [
+      {"id": "reuse_port", "label": "TCP 端口复用", "kind": "boolean", "listener": "reuseport", "help": "影响 Gost 的监听套接字。面板仍会检查已配置的端点端口。"}
+    ],
+    "tcp_keepalive": [
+      {"id": "tcp_keepalive", "label": "TCP 保活", "kind": "boolean", "listener": "keepalive", "dialer": "keepalive"},
+      {"id": "tcp_keepalive_idle", "label": "TCP 保活空闲时间", "kind": "duration", "listener": "keepalive.idle", "dialer": "keepalive.idle", "placeholder": "60s"},
+      {"id": "tcp_keepalive_interval", "label": "TCP 保活探测间隔", "kind": "duration", "listener": "keepalive.interval", "dialer": "keepalive.interval", "placeholder": "15s"},
+      {"id": "tcp_keepalive_count", "label": "TCP 保活探测次数", "kind": "integer", "listener": "keepalive.count", "dialer": "keepalive.count", "min": 1, "max": 255}
+    ],
+    "ws_tcp_keepalive": [
+      {"id": "tcp_keepalive", "label": "TCP 保活", "kind": "boolean", "listener": "keepalive", "dialer": "tcp.keepalive"},
+      {"id": "tcp_keepalive_idle", "label": "TCP 保活空闲时间", "kind": "duration", "listener": "keepalive.idle", "dialer": "tcp.keepalive.idle", "placeholder": "60s"},
+      {"id": "tcp_keepalive_interval", "label": "TCP 保活探测间隔", "kind": "duration", "listener": "keepalive.interval", "dialer": "tcp.keepalive.interval", "placeholder": "15s"},
+      {"id": "tcp_keepalive_count", "label": "TCP 保活探测次数", "kind": "integer", "listener": "keepalive.count", "dialer": "tcp.keepalive.count", "min": 1, "max": 255}
+    ],
+    "grpc_tcp_keepalive": [
+      {"id": "tcp_keepalive", "label": "TCP 保活", "kind": "boolean", "listener": "tcp.keepalive", "dialer": "tcp.keepalive"},
+      {"id": "tcp_keepalive_idle", "label": "TCP 保活空闲时间", "kind": "duration", "listener": "tcp.keepalive.idle", "dialer": "tcp.keepalive.idle", "placeholder": "60s"},
+      {"id": "tcp_keepalive_interval", "label": "TCP 保活探测间隔", "kind": "duration", "listener": "tcp.keepalive.interval", "dialer": "tcp.keepalive.interval", "placeholder": "15s"},
+      {"id": "tcp_keepalive_count", "label": "TCP 保活探测次数", "kind": "integer", "listener": "tcp.keepalive.count", "dialer": "tcp.keepalive.count", "min": 1, "max": 255}
+    ],
+    "backlog": [
+      {"id": "backlog", "label": "等待队列长度", "kind": "integer", "listener": "backlog", "min": 1, "max": 65535, "placeholder": "128"}
+    ],
+    "tcp_handshake": [
+      {"id": "handshake_timeout", "label": "握手超时", "kind": "duration", "dialer": "handshakeTimeout", "placeholder": "10s"}
+    ],
+    "mux": [
+      {"id": "mux_type", "label": "多路复用类型", "kind": "select", "listener": "mux.type", "dialer": "mux.type", "choices": ["smux", "yamux"]},
+      {"id": "mux_version", "label": "SMUX 版本", "kind": "select", "listener": "mux.version", "dialer": "mux.version", "choices": ["1", "2"]},
+      {"id": "mux_keepalive_disabled", "label": "禁用多路复用保活", "kind": "boolean", "listener": "mux.keepaliveDisabled", "dialer": "mux.keepaliveDisabled"},
+      {"id": "mux_keepalive_interval", "label": "多路复用保活间隔", "kind": "duration", "listener": "mux.keepaliveInterval", "dialer": "mux.keepaliveInterval", "placeholder": "10s"},
+      {"id": "mux_keepalive_timeout", "label": "多路复用保活超时", "kind": "duration", "listener": "mux.keepaliveTimeout", "dialer": "mux.keepaliveTimeout", "placeholder": "30s"},
+      {"id": "mux_max_frame_size", "label": "SMUX 最大帧大小（字节）", "kind": "integer", "listener": "mux.maxFrameSize", "dialer": "mux.maxFrameSize", "min": 1, "max": 65535},
+      {"id": "mux_max_receive_buffer", "label": "SMUX 接收缓冲区（字节）", "kind": "integer", "listener": "mux.maxReceiveBuffer", "dialer": "mux.maxReceiveBuffer", "min": 1, "max": 2147483647},
+      {"id": "mux_max_stream_buffer", "label": "SMUX 单流缓冲区（字节）", "kind": "integer", "listener": "mux.maxStreamBuffer", "dialer": "mux.maxStreamBuffer", "min": 1, "max": 2147483647},
+      {"id": "mux_max_stream_window", "label": "YAMUX 单流最大窗口（字节）", "kind": "integer", "listener": "mux.maxStreamWindow", "dialer": "mux.maxStreamWindow", "min": 262144, "max": 2147483647}
+    ],
+    "ws": [
+      {"id": "path", "label": "WebSocket 路径", "kind": "path", "listener": "ws.path", "dialer": "ws.path", "placeholder": "/ws"},
+      {"id": "host", "label": "HTTP Host", "kind": "text", "dialer": "ws.host", "placeholder": "relay.example.com"},
+      {"id": "backlog", "label": "等待队列长度", "kind": "integer", "listener": "ws.backlog", "min": 1, "max": 65535, "placeholder": "128"},
+      {"id": "handshake_timeout", "label": "WebSocket 握手超时", "kind": "duration", "listener": "ws.handshakeTimeout", "dialer": "ws.handshakeTimeout", "placeholder": "10s"},
+      {"id": "read_header_timeout", "label": "读取请求头超时", "kind": "duration", "listener": "ws.readHeaderTimeout", "placeholder": "10s"},
+      {"id": "read_buffer_size", "label": "WebSocket 读缓冲区（字节）", "kind": "integer", "listener": "ws.readBufferSize", "dialer": "ws.readBufferSize", "min": 1, "max": 2147483647},
+      {"id": "write_buffer_size", "label": "WebSocket 写缓冲区（字节）", "kind": "integer", "listener": "ws.writeBufferSize", "dialer": "ws.writeBufferSize", "min": 1, "max": 2147483647},
+      {"id": "compression", "label": "WebSocket 压缩", "kind": "boolean", "listener": "ws.enableCompression", "dialer": "ws.enableCompression"},
+      {"id": "ws_keepalive", "label": "WebSocket 保活", "kind": "boolean", "dialer": "ws.keepalive"},
+      {"id": "ws_keepalive_interval", "label": "WebSocket 保活间隔", "kind": "duration", "dialer": "ttl", "placeholder": "15s"},
+      {"id": "request_headers", "label": "WebSocket 请求头", "kind": "headers", "dialer": "ws.header", "placeholder": "{\"X-Example\": \"value\"}"},
+      {"id": "response_headers", "label": "WebSocket 响应头", "kind": "headers", "listener": "ws.header", "placeholder": "{\"X-Example\": \"value\"}"}
+    ],
+    "h2": [
+      {"id": "path", "label": "HTTP/2 路径", "kind": "path", "listener": "path", "dialer": "path", "placeholder": "/relay"},
+      {"id": "request_headers", "label": "HTTP/2 请求头", "kind": "headers", "dialer": "header", "placeholder": "{\"X-Example\": \"value\"}"}
+    ],
+    "grpc": [
+      {"id": "grpc_service", "label": "gRPC 服务名或方法路径", "kind": "text", "listener": "grpc.path", "dialer": "grpc.path", "placeholder": "GostTunel", "help": "可填写服务名，或 /服务名/方法名。"},
+      {"id": "host", "label": "gRPC Authority", "kind": "text", "dialer": "grpc.authority", "placeholder": "relay.example.com", "help": "启用 TLS 时，Authority 与 TLS 服务端名称须一致。只填写一项即可。"},
+      {"id": "backlog", "label": "等待队列长度", "kind": "integer", "listener": "grpc.backlog", "min": 1, "max": 65535, "placeholder": "128"},
+      {"id": "grpc_insecure", "label": "gRPC 明文传输", "kind": "boolean", "listener": "grpc.insecure", "dialer": "grpc.insecure", "help": "启用时 TLS 参数应留空。"},
+      {"id": "grpc_keepalive", "label": "gRPC 保活", "kind": "boolean", "listener": "grpc.keepalive", "dialer": "grpc.keepalive"},
+      {"id": "grpc_keepalive_time", "label": "gRPC 保活间隔", "kind": "duration", "listener": "grpc.keepalive.time", "dialer": "grpc.keepalive.time", "placeholder": "60s"},
+      {"id": "grpc_keepalive_timeout", "label": "gRPC 保活超时", "kind": "duration", "listener": "grpc.keepalive.timeout", "dialer": "grpc.keepalive.timeout", "placeholder": "30s"},
+      {"id": "grpc_keepalive_without_stream", "label": "无活动流时允许保活", "kind": "boolean", "listener": "grpc.keepalive.permitWithoutStream", "dialer": "grpc.keepalive.permitWithoutStream"},
+      {"id": "grpc_keepalive_min_time", "label": "允许的最短保活间隔", "kind": "duration", "listener": "grpc.keepalive.minTime", "placeholder": "30s"},
+      {"id": "grpc_max_connection_idle", "label": "空闲连接关闭时间", "kind": "duration", "listener": "grpc.keepalive.maxConnectionIdle", "placeholder": "5m"},
+      {"id": "grpc_min_connect_timeout", "label": "最短连接超时", "kind": "duration", "dialer": "grpc.minConnectTimeout", "placeholder": "20s"}
+    ],
+    "pht": [
+      {"id": "push_path", "label": "推送路径", "kind": "path", "listener": "pushPath", "dialer": "pushPath", "placeholder": "/push"},
+      {"id": "pull_path", "label": "拉取路径", "kind": "path", "listener": "pullPath", "dialer": "pullPath", "placeholder": "/pull"},
+      {"id": "authorize_path", "label": "授权路径", "kind": "path", "listener": "authorizePath", "placeholder": "/authorize"},
+      {"id": "host", "label": "HTTP Host", "kind": "text", "dialer": "host", "placeholder": "relay.example.com"},
+      {"id": "request_headers", "label": "HTTP 请求头", "kind": "headers", "dialer": "header", "placeholder": "{\"X-Example\": \"value\"}"}
+    ],
+    "h3": [
+      {"id": "push_path", "label": "推送路径", "kind": "path", "listener": "pht.pushPath", "dialer": "pht.pushPath", "placeholder": "/push"},
+      {"id": "pull_path", "label": "拉取路径", "kind": "path", "listener": "pht.pullPath", "dialer": "pht.pullPath", "placeholder": "/pull"},
+      {"id": "authorize_path", "label": "授权路径", "kind": "path", "listener": "pht.authorizePath", "placeholder": "/authorize"},
+      {"id": "host", "label": "HTTP Host", "kind": "text", "dialer": "host", "placeholder": "relay.example.com"}
+    ],
+    "udp": [
+      {"id": "udp_read_buffer", "label": "UDP 读缓冲区（字节）", "kind": "integer", "listener": "readBufferSize", "min": 1, "max": 65535, "placeholder": "4096"},
+      {"id": "udp_read_queue", "label": "UDP 接收队列", "kind": "integer", "listener": "readQueueSize", "min": 1, "max": 65535, "placeholder": "128"},
+      {"id": "udp_keepalive", "label": "UDP 会话保活", "kind": "boolean", "listener": "keepalive"},
+      {"id": "udp_ttl", "label": "UDP 会话过期时间", "kind": "duration", "listener": "ttl", "placeholder": "5s"},
+      {"id": "udp_stateless", "label": "UDP 无状态模式", "kind": "boolean", "listener": "stateless"}
+    ],
+    "quic_timing": [
+      {"id": "handshake_timeout", "label": "QUIC 握手超时", "kind": "duration", "listener": "handshakeTimeout", "dialer": "handshakeTimeout", "placeholder": "10s"},
+      {"id": "max_idle_timeout", "label": "QUIC 最大空闲时间", "kind": "duration", "listener": "maxIdleTimeout", "dialer": "maxIdleTimeout", "placeholder": "90s"},
+      {"id": "max_streams", "label": "QUIC 最大并发流数", "kind": "integer", "listener": "maxStreams", "dialer": "maxStreams", "min": 1, "max": 2147483647, "placeholder": "100"}
+    ],
+    "quic": [
+      {"id": "quic_keepalive", "label": "QUIC 保活", "kind": "boolean", "listener": "keepAlive", "dialer": "keepAlive"},
+      {"id": "quic_keepalive_period", "label": "QUIC 保活间隔", "kind": "duration", "listener": "ttl", "dialer": "ttl", "placeholder": "10s"},
+      {"id": "quic_datagrams", "label": "启用 QUIC Datagrams", "kind": "boolean", "listener": "quic.enableDatagram", "dialer": "quic.enableDatagram"},
+      {"id": "quic_cipher_key", "label": "QUIC 封包密钥", "kind": "text", "listener": "cipherKey", "dialer": "cipherKey", "secret": true, "help": "使用 16、24 或 32 字节的 AES 密钥。"}
+    ],
+    "h3_keepalive": [
+      {"id": "quic_keepalive", "label": "QUIC 保活", "kind": "boolean", "listener": "keepalive", "dialer": "keepalive"},
+      {"id": "quic_keepalive_period", "label": "QUIC 保活间隔", "kind": "duration", "listener": "ttl", "dialer": "ttl", "placeholder": "10s"}
+    ],
+    "kcp": [
+      {"id": "kcp_key", "label": "KCP 加密密钥", "kind": "text", "listener": "kcp.key", "dialer": "kcp.key", "secret": true},
+      {"id": "kcp_cipher", "label": "KCP 加密算法", "kind": "select", "listener": "kcp.crypt", "dialer": "kcp.crypt", "choices": ["aes", "aes-128", "aes-192", "sm4", "salsa20", "twofish", "blowfish", "cast5", "3des", "tea", "xtea", "xor", "none"]},
+      {"id": "kcp_mode", "label": "KCP 模式", "kind": "select", "listener": "kcp.mode", "dialer": "kcp.mode", "choices": ["normal", "fast", "fast2", "fast3", "manual"], "help": "预设模式会覆盖更新间隔、重传和拥塞控制。选择 manual 可自行设置。"},
+      {"id": "kcp_keepalive", "label": "KCP 保活间隔（秒）", "kind": "integer", "listener": "kcp.keepalive", "dialer": "kcp.keepalive", "min": 1, "max": 65535},
+      {"id": "kcp_interval", "label": "KCP 更新间隔（毫秒）", "kind": "integer", "listener": "kcp.interval", "dialer": "kcp.interval", "min": 10, "max": 5000},
+      {"id": "kcp_mtu", "label": "KCP MTU（字节）", "kind": "integer", "listener": "kcp.mtu", "dialer": "kcp.mtu", "min": 50, "max": 1500, "placeholder": "1350"},
+      {"id": "kcp_receive_window", "label": "KCP 接收窗口", "kind": "integer", "listener": "kcp.rcvwnd", "dialer": "kcp.rcvwnd", "min": 1, "max": 65535},
+      {"id": "kcp_send_window", "label": "KCP 发送窗口", "kind": "integer", "listener": "kcp.sndwnd", "dialer": "kcp.sndwnd", "min": 1, "max": 65535},
+      {"id": "kcp_smux_version", "label": "KCP SMUX 版本", "kind": "select", "listener": "kcp.smuxver", "dialer": "kcp.smuxver", "choices": ["1", "2"]},
+      {"id": "kcp_smux_buffer", "label": "KCP SMUX 缓冲区（字节）", "kind": "integer", "listener": "kcp.smuxbuf", "dialer": "kcp.smuxbuf", "min": 1, "max": 2147483647},
+      {"id": "kcp_stream_buffer", "label": "KCP 单流缓冲区（字节）", "kind": "integer", "listener": "kcp.streambuf", "dialer": "kcp.streambuf", "min": 1, "max": 2147483647},
+      {"id": "kcp_no_compression", "label": "禁用 KCP 压缩", "kind": "boolean", "listener": "kcp.nocomp", "dialer": "kcp.nocomp"},
+      {"id": "kcp_data_shards", "label": "KCP FEC 数据分片", "kind": "integer", "listener": "kcp:datashard", "dialer": "kcp:datashard", "min": 0, "max": 255, "placeholder": "10"},
+      {"id": "kcp_parity_shards", "label": "KCP FEC 校验分片", "kind": "integer", "listener": "kcp:parityshard", "dialer": "kcp:parityshard", "min": 0, "max": 255, "placeholder": "3"},
+      {"id": "kcp_dscp", "label": "KCP DSCP", "kind": "integer", "listener": "kcp:dscp", "dialer": "kcp:dscp", "min": 0, "max": 63, "placeholder": "0"},
+      {"id": "kcp_socket_buffer", "label": "KCP 套接字缓冲区（字节）", "kind": "integer", "listener": "kcp:sockbuf", "dialer": "kcp:sockbuf", "min": 1, "max": 2147483647, "placeholder": "4194304"},
+      {"id": "kcp_ack_no_delay", "label": "KCP 立即发送 ACK", "kind": "boolean", "listener": "kcp:acknodelay", "dialer": "kcp:acknodelay"},
+      {"id": "kcp_no_delay", "label": "KCP 低延迟模式", "kind": "integer", "listener": "kcp:nodelay", "dialer": "kcp:nodelay", "min": 0, "max": 1},
+      {"id": "kcp_resend", "label": "KCP 快速重传阈值", "kind": "integer", "listener": "kcp:resend", "dialer": "kcp:resend", "min": 0, "max": 65535},
+      {"id": "kcp_no_congestion", "label": "KCP 禁用拥塞控制", "kind": "integer", "listener": "kcp:nc", "dialer": "kcp:nc", "min": 0, "max": 1}
+    ],
+    "ohttp": [
+      {"id": "path", "label": "HTTP 路径", "kind": "path", "dialer": "obfs.path", "placeholder": "/"},
+      {"id": "host", "label": "HTTP Host", "kind": "text", "dialer": "obfs.host", "placeholder": "relay.example.com"},
+      {"id": "request_headers", "label": "HTTP 请求头", "kind": "headers", "dialer": "obfs.header", "placeholder": "{\"X-Example\": \"value\"}"},
+      {"id": "response_headers", "label": "HTTP 响应头", "kind": "headers", "listener": "header", "placeholder": "{\"X-Example\": \"value\"}"}
+    ],
+    "otls": [
+      {"id": "host", "label": "握手域名", "kind": "text", "dialer": "host", "placeholder": "relay.example.com"}
+    ],
+    "tls": [
+      {"id": "tls_server_name", "label": "TLS 服务端名称（SNI）", "kind": "text", "dialer": "tls:serverName", "placeholder": "relay.example.com", "help": "用于入口到出口的 TLS 握手。"},
+      {"id": "tls_verify", "label": "校验出口证书和域名", "kind": "boolean", "dialer": "tls:secure"},
+      {"id": "tls_ca_file", "label": "出口证书的 CA 文件", "kind": "file", "dialer": "tls:caFile", "placeholder": "/etc/gost/ca.pem", "help": "填写入口节点上的绝对路径。"},
+      {"id": "tls_server_cert_file", "label": "出口证书文件", "kind": "file", "listener": "tls:certFile", "placeholder": "/etc/gost/server.crt", "help": "填写出口节点上的绝对路径。"},
+      {"id": "tls_server_key_file", "label": "出口私钥文件", "kind": "file", "listener": "tls:keyFile", "placeholder": "/etc/gost/server.key", "help": "填写出口节点上的绝对路径。"},
+      {"id": "tls_client_ca_file", "label": "客户端证书的 CA 文件", "kind": "file", "listener": "tls:caFile", "placeholder": "/etc/gost/client-ca.pem", "help": "与出口证书和私钥搭配，启用客户端证书校验。"},
+      {"id": "tls_client_cert_file", "label": "入口客户端证书", "kind": "file", "dialer": "tls:certFile", "placeholder": "/etc/gost/client.crt", "help": "填写入口节点上的绝对路径。"},
+      {"id": "tls_client_key_file", "label": "入口客户端私钥", "kind": "file", "dialer": "tls:keyFile", "placeholder": "/etc/gost/client.key", "help": "填写入口节点上的绝对路径。"},
+      {"id": "tls_reject_unknown_sni", "label": "拒绝未知 SNI", "kind": "boolean", "listener": "tls:rejectUnknownSNI"},
+      {"id": "tls_allowed_server_names", "label": "允许的 SNI", "kind": "csv", "listener": "tls:serverNames", "placeholder": "relay.example.com, relay2.example.com"}
+    ],
+    "tls_versions": [
+      {"id": "tls_min_version", "label": "最低 TLS 版本", "kind": "select", "listener": "tls:options.minVersion", "dialer": "tls:options.minVersion", "choices": ["VersionTLS12", "VersionTLS13"]},
+      {"id": "tls_max_version", "label": "最高 TLS 版本", "kind": "select", "listener": "tls:options.maxVersion", "dialer": "tls:options.maxVersion", "choices": ["VersionTLS12", "VersionTLS13"]},
+      {"id": "tls_cipher_suites", "label": "TLS 1.2 密码套件", "kind": "csv", "listener": "tls:options.cipherSuites", "dialer": "tls:options.cipherSuites", "placeholder": "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"}
+    ],
+    "tls_alpn": [
+      {"id": "tls_alpn", "label": "TLS ALPN", "kind": "csv", "listener": "tls:options.alpn", "dialer": "tls:options.alpn", "placeholder": "h2, http/1.1"}
+    ],
+    "tls_ws_alpn": [
+      {"id": "tls_alpn", "label": "TLS ALPN", "kind": "csv", "listener": "tls:options.alpn", "dialer": "tls:options.alpn", "placeholder": "http/1.1", "help": "WebSocket 握手使用 http/1.1。"}
+    ],
+    "tls_h2_alpn": [
+      {"id": "tls_alpn", "label": "TLS ALPN", "kind": "csv", "listener": "tls:options.alpn", "dialer": "tls:options.alpn", "placeholder": "h2", "help": "HTTP/2 握手使用 h2。"}
+    ]
+  }
+}

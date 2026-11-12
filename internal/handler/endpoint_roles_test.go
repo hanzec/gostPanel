@@ -22,9 +22,12 @@ func TestEndpointHTTPRolesOwnTargetsAndTransport(t *testing.T) {
 	if entry.Role != model.EndpointRoleEntry || len(entry.Targets) != 0 || entry.UseClashRuleset {
 		t.Fatalf("entry has a target policy: %+v", entry)
 	}
-	for i, protocol := range []string{"tcp", "udp", "tls", "mtls", "ws", "mws", "quic"} {
+	for i, protocol := range []string{
+		"tcp", "mtcp", "udp", "tls", "mtls", "ws", "mws", "wss", "mwss",
+		"h2", "h2c", "grpc", "pht", "phts", "kcp", "quic", "h3", "ohttp", "otls",
+	} {
 		t.Run(protocol, func(t *testing.T) {
-			exit := handlerData[model.GostRule](t, create("exit", protocol, `,"targets":["origin.example:443","[2001:db8::1]:443"],"strategy":"hash"`, 18001+i, 200))
+			exit := handlerData[model.GostRule](t, create("exit", protocol, `,"targets":["origin.example:443","[2001:db8::1]:443"],"strategy":"hash"`, 18100+i, 200))
 			stored := handlerData[model.GostRule](t, f.request(t, "GET", fmt.Sprintf("/rules/%d", exit.ID), "", 200))
 			if stored.Role != model.EndpointRoleExit || string(stored.Protocol) != protocol || stored.Strategy != "hash" || len(stored.Targets) != 2 || stored.Targets[0] != "origin.example:443" {
 				t.Fatalf("exit policy was not saved: %+v", stored)
@@ -39,6 +42,7 @@ func TestEndpointHTTPRolesOwnTargetsAndTransport(t *testing.T) {
 	}
 	for _, invalid := range []struct{ role, protocol, policy string }{
 		{"entry", "tls", ""},
+		{"entry", "kcp", ""},
 		{"entry", "tcp", `,"targets":["origin.example:443"]`},
 		{"entry", "tcp", `,"use_clash_ruleset":true`},
 		{"exit", "tcp", ""},
@@ -47,11 +51,14 @@ func TestEndpointHTTPRolesOwnTargetsAndTransport(t *testing.T) {
 		{"exit", "tls", `,"targets":["origin.example:443"],"listen_ip":"127.0.0.1"`},
 		{"unknown", "tcp", ""},
 		{"exit", "unknown", `,"use_clash_ruleset":true`},
+		{"exit", "red", `,"use_clash_ruleset":true`},
 	} {
 		create(invalid.role, invalid.protocol, invalid.policy, 18010, 400)
 	}
 	// Different Gost transports can occupy the same underlying TCP/UDP socket.
-	create("exit", "tls", `,"targets":["origin.example:443"]`, entry.ListenPort, 400)
+	create("exit", "wss", `,"targets":["origin.example:443"]`, entry.ListenPort, 400)
+	create("exit", "kcp", `,"targets":["origin.example:443"]`, entry.ListenPort, 200)
+	create("exit", "h3", `,"targets":["origin.example:443"]`, entry.ListenPort, 400)
 	create("entry", "udp", "", clash.ListenPort, 400)
 }
 
@@ -74,9 +81,9 @@ func TestEndpointHTTPUpdatesStoppedExitPolicyWithoutRebinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := fmt.Sprintf("/rules/%d", exit.ID)
-	update := `{"name":"updated exit","protocol":"quic","listen_port":18001,"targets":["new.example:443"],"strategy":"fifo"}`
+	update := `{"name":"updated exit","protocol":"kcp","listen_port":18001,"targets":["new.example:443"],"strategy":"fifo"}`
 	stored := handlerData[model.GostRule](t, f.request(t, "PUT", path, update, 200))
-	if stored.Role != model.EndpointRoleExit || stored.Protocol != "quic" || stored.Targets[0] != "new.example:443" || stored.LinkedTunnelStatus != model.TunnelStatusStopped {
+	if stored.Role != model.EndpointRoleExit || stored.Protocol != "kcp" || stored.Targets[0] != "new.example:443" || stored.LinkedTunnelStatus != model.TunnelStatusStopped {
 		t.Fatalf("stopped exit policy update failed: %+v", stored)
 	}
 	page := handlerData[handlerPage[model.GostRule]](t, f.request(t, "GET", "/rules", "", 200))
@@ -85,7 +92,7 @@ func TestEndpointHTTPUpdatesStoppedExitPolicyWithoutRebinding(t *testing.T) {
 			t.Fatalf("list omitted linked tunnel state: %+v", rule)
 		}
 	}
-	f.request(t, "PUT", path, `{"name":"moved exit","protocol":"quic","listen_port":18002}`, 400)
+	f.request(t, "PUT", path, `{"name":"moved exit","protocol":"kcp","listen_port":18002}`, 400)
 	f.request(t, "PUT", path, `{"name":"reversed exit","role":"entry","protocol":"tcp","listen_port":18001}`, 400)
 	f.request(t, "PUT", fmt.Sprintf("/rules/%d", entry.ID), `{"name":"entry","protocol":"tcp","listen_port":18000}`, 400)
 	if err := f.db.Model(&tunnel).Update("status", model.TunnelStatusRunning).Error; err != nil {
@@ -93,7 +100,7 @@ func TestEndpointHTTPUpdatesStoppedExitPolicyWithoutRebinding(t *testing.T) {
 	}
 	f.request(t, "PUT", path, update, 400)
 	stored = handlerData[model.GostRule](t, f.request(t, "GET", path, "", 200))
-	if stored.Role != model.EndpointRoleExit || stored.ListenPort != 18001 || stored.Protocol != "quic" || stored.Targets[0] != "new.example:443" {
+	if stored.Role != model.EndpointRoleExit || stored.ListenPort != 18001 || stored.Protocol != "kcp" || stored.Targets[0] != "new.example:443" {
 		t.Fatalf("rejected update changed the exit: %+v", stored)
 	}
 }

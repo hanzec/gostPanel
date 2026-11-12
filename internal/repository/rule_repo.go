@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"math"
+	"slices"
 
 	"yagp/internal/model"
 
@@ -105,14 +106,9 @@ func (r *RuleRepository) EntranceBindings(ruleIDs []uint) ([]model.GostTunnel, e
 
 // ListenerConflicts checks whether a rule on the same ingress overlaps this bind.
 func (r *RuleRepository) ListenerConflicts(nodeID uint, protocol model.RuleProtocol, ip string, port int, excludeID ...uint) (bool, error) {
-	var count int64
 	tunnels := r.DB.Model(&model.GostTunnel{}).Select("id").Where("entry_node_id = ?", nodeID)
-	protocols := []string{"tcp", "tls", "mtls", "ws", "mws"}
-	if protocol.ListenerNetwork() == "udp" {
-		protocols = []string{"udp", "quic"}
-	}
 	db := r.DB.Model(&model.GostRule{}).
-		Where("protocol IN ? AND listen_port = ?", protocols, port).
+		Where("listen_port = ?", port).
 		Where("((type = ? AND node_id = ?) OR (type = ? AND tunnel_id IN (?)))",
 			model.RuleTypeForward, nodeID, model.RuleTypeTunnel, tunnels)
 	if ip != "" {
@@ -121,11 +117,14 @@ func (r *RuleRepository) ListenerConflicts(nodeID uint, protocol model.RuleProto
 	if len(excludeID) > 0 {
 		db = db.Where("id != ?", excludeID[0])
 	}
-	err := db.Count(&count).Error
-	if err != nil {
+	var protocols []model.RuleProtocol
+	if err := db.Pluck("protocol", &protocols).Error; err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	network := protocol.ListenerNetwork()
+	return slices.ContainsFunc(protocols, func(saved model.RuleProtocol) bool {
+		return saved.ListenerNetwork() == network
+	}), nil
 }
 
 // UpdateStatus 更新规则状态

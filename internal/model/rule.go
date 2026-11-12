@@ -25,10 +25,12 @@ const (
 
 // ListenerNetwork is the socket transport used by a Gost listener.
 func (p RuleProtocol) ListenerNetwork() string {
-	if p == RuleProtocolUDP || p == "quic" {
+	switch p {
+	case RuleProtocolUDP, "kcp", "quic", "h3":
 		return "udp"
+	default:
+		return "tcp"
 	}
-	return "tcp"
 }
 
 type EndpointRole string
@@ -64,6 +66,8 @@ type GostRule struct {
 	Protocol   RuleProtocol `gorm:"size:10;not null;default:tcp" json:"protocol"` // 入口监听或出口 Relay 协议
 	ListenIP   string       `gorm:"size:45;not null;default:''" json:"listen_ip"` // 监听 IP，空字符串表示所有接口
 	ListenPort int          `gorm:"not null" json:"listen_port"`                  // 监听端口
+
+	ProtocolOptions map[string]string `gorm:"type:text;serializer:json" json:"protocol_options"`
 
 	Targets         []string   `gorm:"type:json;serializer:json" json:"targets"` // 多目标列表 (host:port)
 	UseClashRuleset bool       `gorm:"not null;default:false" json:"use_clash_ruleset"`

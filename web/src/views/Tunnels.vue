@@ -203,14 +203,15 @@
             </span>
           </el-form-item>
           <el-form-item v-if="legacyEdit" label="协议" prop="protocol">
-            <el-select v-model="form.protocol">
-              <el-option v-for="protocol in protocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
+            <el-select v-model="form.protocol" filterable @change="form.protocol_options = {}">
+              <el-option v-for="protocol in tunnelProtocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
             </el-select>
           </el-form-item>
           <el-form-item v-if="legacyEdit" label="Relay 端口" prop="relay_port">
             <el-input-number v-model="form.relay_port" :min="1" :max="65535" controls-position="right" />
             <span class="tunnel-form-hint ops-muted">Relay 服务在出口节点监听。</span>
           </el-form-item>
+          <GostTransportOptions v-if="legacyEdit" v-model="form.protocol_options" :protocol="form.protocol" class="inventory-form-wide" />
           <section v-if="exitOwnsTargets" class="tunnel-target-section inventory-form-wide" aria-labelledby="tunnel-exit-policy-title">
             <h3 id="tunnel-exit-policy-title">出口目标与策略</h3>
             <p class="tunnel-dialog-hint ops-muted">以下设置来自所选出口，在端点管理中修改。</p>
@@ -222,6 +223,7 @@
                 <dt>负载均衡</dt><dd>{{ strategies[exitEntrance.strategy] || '轮询' }}</dd>
               </template>
             </dl>
+            <GostTransportOptions :model-value="exitEntrance.protocol_options || {}" :protocol="exitEntrance.protocol" readonly />
             <p v-if="exitEntrance.use_clash_ruleset" class="tunnel-form-hint ops-muted">Clash 分流要求入口使用 TCP 与 127.0.0.1。</p>
           </section>
           <p v-else-if="!legacyEdit && !exitEntrance" class="tunnel-form-hint ops-muted inventory-form-wide">选择出口后查看其目标与策略。</p>
@@ -230,11 +232,12 @@
             <p class="tunnel-dialog-hint ops-muted">此旧端点未指定方向，目标与策略仍随隧道保存。</p>
             <div class="inventory-form-grid">
               <el-form-item label="隧道协议" prop="protocol" class="inventory-form-wide" for="tunnel-protocol">
-                <el-select id="tunnel-protocol" v-model="form.protocol" aria-describedby="tunnel-protocol-help">
-                  <el-option v-for="protocol in protocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
+                <el-select id="tunnel-protocol" v-model="form.protocol" filterable aria-describedby="tunnel-protocol-help" @change="form.protocol_options = {}">
+                  <el-option v-for="protocol in tunnelProtocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
                 </el-select>
                 <p id="tunnel-protocol-help" class="tunnel-form-hint ops-muted">用于源节点到目的节点之间的 Gost 隧道传输。</p>
               </el-form-item>
+              <GostTransportOptions v-model="form.protocol_options" :protocol="form.protocol" class="inventory-form-wide" />
               <el-form-item label="目标类型" prop="use_clash_ruleset" class="inventory-form-wide">
                 <el-select v-model="form.use_clash_ruleset" aria-describedby="tunnel-target-mode-help">
                   <el-option label="固定目标地址" :value="false" />
@@ -320,7 +323,9 @@ import { computed, nextTick, ref, reactive, watch, onMounted, onBeforeUnmount } 
 import { ElMessage } from 'element-plus'
 import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
+import GostTransportOptions from '@/components/GostTransportOptions.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
+import { tunnelProtocols } from '@/utils/gost-protocols'
 import { ArrowDown, Connection, Plus, Remove, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
@@ -334,7 +339,6 @@ const tunnelStates = {
   stopped: { label: '已停止', icon: VideoPause },
   error: { label: '异常', icon: Warning, tone: 'danger' }
 }
-const protocols = ['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic']
 const strategies = { round: '轮询', rand: '随机', fifo: '先进先出', hash: '哈希' }
 
 const nodeList = ref([])
@@ -376,8 +380,9 @@ const submitDisabled = computed(() => allowlistOnly.value
   : !legacyEdit.value && (entryOptionsLoading.value || entryOptionsError.value))
 const dialogTitle = computed(() => allowlistOnly.value ? 'Gost IP 白名单' : (isEdit.value ? '编辑隧道' : '添加隧道'))
 const formRef = ref(null)
-const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', relay_port: null, remark: '', allowlist_node_ids: [], use_clash_ruleset: false, targetList: [{ address: '' }], strategy: 'round' })
+const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', protocol_options: {}, relay_port: null, remark: '', allowlist_node_ids: [], use_clash_ruleset: false, targetList: [{ address: '' }], strategy: 'round' })
 let savedAllowlistNodeIds = []
+let savedProtocolOptions = false
 const missingAllowlistNodes = computed(() => form.allowlist_node_ids.filter(id => !nodeList.value.some(node => node.id === id)))
 const allowlistAddresses = computed(() => [...new Set(nodeList.value
   .filter(node => form.allowlist_node_ids.includes(node.id))
@@ -509,11 +514,13 @@ const openDialog = (row = null, onlyAllowlist = false) => {
   allowlistOnly.value = onlyAllowlist
   allowlistError.value = ''
   savedAllowlistNodeIds = row?.allowlist_node_ids || []
+  savedProtocolOptions = !!row && row.exit_rule?.role !== 'exit' && !!Object.keys(row.protocol_options || {}).length
   Object.assign(form, {
     name: row?.name || '',
     entry_rule_id: row?.entry_rule_id ?? null,
     exit_rule_id: row?.exit_rule_id ?? null,
     protocol: row?.protocol || 'tcp',
+    protocol_options: row?.exit_rule?.role === 'exit' ? {} : { ...row?.protocol_options },
     relay_port: row?.relay_port ?? null,
     remark: row?.remark || '',
     allowlist_node_ids: [...savedAllowlistNodeIds],
@@ -547,6 +554,9 @@ const handleSubmit = async () => {
           ? { name, remark, entry_rule_id, exit_rule_id }
           : { name, remark, entry_rule_id, exit_rule_id, protocol, use_clash_ruleset: form.use_clash_ruleset,
             targets: form.use_clash_ruleset ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.strategy }
+      if (!exitOwnsTargets.value && (savedProtocolOptions || Object.keys(form.protocol_options).length)) {
+        payload.protocol_options = { ...form.protocol_options }
+      }
       if (!isEdit.value || allowlist_node_ids.length !== savedAllowlistNodeIds.length ||
         allowlist_node_ids.some(id => !savedAllowlistNodeIds.includes(id))) {
         payload.allowlist_node_ids = allowlist_node_ids
@@ -622,6 +632,7 @@ const handleTunnelAction = (action, row) => {
     form.remark = row.remark || ''
     if (row.exit_rule?.role !== 'exit') {
       form.protocol = row.protocol || 'tcp'
+      form.protocol_options = { ...row.protocol_options }
       Object.assign(form, targetFields(row))
     }
   }

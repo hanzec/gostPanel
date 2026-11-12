@@ -6,6 +6,7 @@ RUN npm ci
 COPY web/index.html web/vite.config.js ./
 COPY web/src/ ./src/
 COPY web/public/ ./public/
+COPY pkg/gost/relay_options.json /app/pkg/gost/relay_options.json
 RUN npm run build
 
 # 后端构建阶段

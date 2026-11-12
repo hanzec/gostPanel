@@ -68,6 +68,7 @@ func TestEntranceHTTPChecksSavedListenerOnItsNode(t *testing.T) {
 	}
 	for _, transport := range []struct{ protocol, network string }{
 		{"tls", "tcp"}, {"mtls", "tcp"}, {"ws", "tcp"}, {"mws", "tcp"}, {"quic", "udp"},
+		{"kcp", "udp"}, {"h3", "udp"}, {"h2", "tcp"}, {"wss", "tcp"},
 	} {
 		if err := f.db.Model(&rule).Update("protocol", transport.protocol).Error; err != nil {
 			t.Fatal(err)

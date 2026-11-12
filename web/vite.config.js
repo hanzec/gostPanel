@@ -12,6 +12,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    fs: { allow: [__dirname, path.resolve(__dirname, '../pkg/gost/relay_options.json')] },
     proxy: {
       '/api': {
         target: 'http://localhost:39100'

@@ -31,6 +31,12 @@ func (s *TunnelService) createEndpointTunnel(req *dto.CreateTunnelReq, nodeIDs [
 	if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
 		return nil, err
 	}
+	if tunnel.ExitRule.Role != model.EndpointRoleExit {
+		if err := validateRelayProtocolOptions(tunnel.Protocol, req.ProtocolOptions); err != nil {
+			return nil, err
+		}
+		tunnel.ProtocolOptions = req.ProtocolOptions
+	}
 	if err := setTunnelTargets(tunnel, req.Targets, req.UseClashRuleset, req.Strategy); err != nil {
 		return nil, err
 	}
@@ -95,6 +101,9 @@ func (s *TunnelService) setTunnelEndpoints(tunnel *model.GostTunnel, entryID, ex
 	// Explicit exit endpoints own the transport; older clients may still store it on the tunnel.
 	if exit.Role == model.EndpointRoleExit || tunnel.Protocol == "" {
 		tunnel.Protocol = string(exit.Protocol)
+	}
+	if exit.Role == model.EndpointRoleExit {
+		tunnel.ProtocolOptions = nil
 	}
 	tunnel.RelayPort = exit.ListenPort
 	return nil
@@ -176,6 +185,7 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 	}
 	if t.ExitRule.Role == model.EndpointRoleExit {
 		t.Protocol, t.RelayPort = string(t.ExitRule.Protocol), t.ExitRule.ListenPort
+		t.ProtocolOptions = nil
 	}
 	if err := validateTunnelTargets(t); err != nil {
 		return err
@@ -264,9 +274,13 @@ func (s *TunnelService) provisionEndpointRelay(t *model.GostTunnel, entryClient,
 	t.ServiceID, t.ChainID = relayServiceName(t.ID), tunnelChainName(t.ID)
 	auth := &gost.AuthConfig{Username: t.ServiceID, Password: t.RelaySecret}
 	port := strconv.Itoa(t.RelayPort)
+	options := t.ProtocolOptions
+	if t.ExitRule.Role == model.EndpointRoleExit {
+		options = t.ExitRule.ProtocolOptions
+	}
 	relay := &gost.ServiceConfig{
 		Name: t.ServiceID, Addr: net.JoinHostPort(t.ExitRule.ListenIP, port),
-		Listener: &gost.ListenerConfig{Type: t.Protocol},
+		Listener: gost.RelayListener(t.Protocol, options),
 		Handler:  &gost.HandlerConfig{Type: "relay", Auth: auth},
 		Metadata: map[string]any{"enableStats": true},
 	}
@@ -285,7 +299,7 @@ func (s *TunnelService) provisionEndpointRelay(t *model.GostTunnel, entryClient,
 			return err
 		}
 	}
-	chain := newTunnelChain(t.ChainID, net.JoinHostPort(host, port), t.Protocol, auth)
+	chain := newTunnelChain(t.ChainID, net.JoinHostPort(host, port), t.Protocol, options, auth)
 	if err := entryClient.CreateChain(chain); err != nil {
 		return errors.ErrTunnelChainCreateFailed
 	}
@@ -316,7 +330,10 @@ func (s *TunnelService) commitEndpointTunnel(t *model.GostTunnel, entryClient, e
 		if err := rules.UpdateRuntime(t.ExitRule.ID, t.ServiceID, model.RuleStatusRunning); err != nil {
 			return err
 		}
-		return tx.Model(t).Updates(map[string]any{"service_id": t.ServiceID, "chain_id": t.ChainID, "protocol": t.Protocol, "relay_port": t.RelayPort, "status": model.TunnelStatusRunning}).Error
+		return tx.Model(t).Select("ServiceID", "ChainID", "Protocol", "ProtocolOptions", "RelayPort", "Status").Updates(&model.GostTunnel{
+			ServiceID: t.ServiceID, ChainID: t.ChainID, Protocol: t.Protocol, ProtocolOptions: t.ProtocolOptions,
+			RelayPort: t.RelayPort, Status: model.TunnelStatusRunning,
+		}).Error
 	}); err != nil {
 		return err
 	}

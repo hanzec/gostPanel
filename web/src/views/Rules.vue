@@ -197,7 +197,7 @@
               </el-select>
             </el-form-item>
             <el-form-item v-if="form.role !== 'exit'" label="协议" prop="protocol">
-              <el-select v-model="form.protocol">
+              <el-select v-model="form.protocol" @change="form.protocol_options = {}">
                 <el-option label="TCP" value="tcp" />
                 <el-option label="UDP" value="udp" />
               </el-select>
@@ -243,7 +243,7 @@
           </header>
           <div class="rule-form-grid">
             <el-form-item label="隧道协议" prop="protocol" for="rule-tunnel-protocol">
-              <el-select id="rule-tunnel-protocol" v-model="form.protocol" aria-describedby="rule-protocol-help">
+              <el-select id="rule-tunnel-protocol" v-model="form.protocol" filterable aria-describedby="rule-protocol-help" @change="form.protocol_options = {}">
                 <el-option v-for="protocol in tunnelProtocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
               </el-select>
               <p id="rule-protocol-help" class="rule-form-hint ops-muted">用于入口节点到出口节点之间的 Gost 隧道传输。</p>
@@ -255,6 +255,7 @@
               </el-select>
               <p id="rule-target-mode-help" class="rule-form-hint ops-muted">Clash 分流使用系统规则集，连接的入口须使用 TCP 与 127.0.0.1。</p>
             </el-form-item>
+            <GostTransportOptions v-model="form.protocol_options" :protocol="form.protocol" class="rule-form-wide" />
             <el-form-item v-if="!form.use_clash_ruleset" label="目标地址" prop="targetList" class="rule-form-wide">
               <div class="rule-target-list">
                 <div v-for="(item, index) in form.targetList" :key="index" class="rule-target-item">
@@ -288,8 +289,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { ElMessage } from 'element-plus'
 import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
+import GostTransportOptions from '@/components/GostTransportOptions.vue'
 import { formatEndpoint, mappedConnectEndpoint } from '@/utils/node-address-mapping'
 import { confirmPanelAction } from '@/utils/panel-dialog'
+import { tunnelProtocols } from '@/utils/gost-protocols'
 import { ArrowDown, CircleCheck, Plus, Remove, Search, Switch, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import { getRoutingNodes } from '@/api/node'
@@ -338,16 +341,17 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const boundExitEdit = ref(false)
 const endpointRoles = { entry: '入口', exit: '出口' }
-const tunnelProtocols = ['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic']
 const strategies = { round: '轮询', rand: '随机', fifo: '先进先出', hash: '哈希' }
 const editId = ref(null)
 const submitLoading = ref(false)
 const formRef = ref(null)
+let savedProtocolOptions = false
 const form = reactive({
   node_id: '',
   name: '',
   role: 'entry',
   protocol: 'tcp',
+  protocol_options: {},
   listen_ip: '',
   listen_port: null,
   remark: '',
@@ -388,7 +392,10 @@ const formRules = {
 }
 
 watch(() => form.role, role => {
-  if (role === 'entry' && !['tcp', 'udp'].includes(form.protocol)) form.protocol = 'tcp'
+  if (role === 'entry') {
+    if (!['tcp', 'udp'].includes(form.protocol)) form.protocol = 'tcp'
+    form.protocol_options = {}
+  }
 })
 
 const removeTarget = index => {
@@ -454,12 +461,14 @@ const openDialog = (row = null, copy = false) => {
   isEdit.value = !!row && !copy
   editId.value = isEdit.value ? row.id : null
   boundExitEdit.value = isEdit.value && row.role === 'exit' && !!row.linked_tunnel_id
+  savedProtocolOptions = isEdit.value && !!Object.keys(row.protocol_options || {}).length
 
   Object.assign(form, {
     node_id: row?.node_id || row?.tunnel?.entry_node_id || '',
     name: row ? row.name + (copy ? '-copy' : '') : '',
     role: row?.role || (isEdit.value ? '' : 'entry'),
     protocol: row?.protocol || 'tcp',
+    protocol_options: row?.role === 'exit' ? { ...row.protocol_options } : {},
     listen_ip: row?.listen_ip || '',
     listen_port: isEdit.value ? row.listen_port : null,
     remark: row?.remark || '',
@@ -496,6 +505,9 @@ const handleSubmit = async () => {
         use_clash_ruleset: form.role === 'exit' && form.use_clash_ruleset,
         strategy: form.role === 'exit' ? form.strategy : 'round'
       })
+    }
+    if (savedProtocolOptions || Object.keys(form.protocol_options).length) {
+      payload.protocol_options = { ...form.protocol_options }
     }
     if (isEdit.value) {
       await updateRule(editId.value, payload)
