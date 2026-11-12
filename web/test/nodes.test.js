@@ -45,7 +45,10 @@ beforeEach(async () => {
   api.getGostService.mockResolvedValue(response({ unit: 'gost.service', active_state: 'active', load_state: 'loaded' }))
   getPublicSystemConfig.mockResolvedValue(response({ host: 'panel.example.com' }))
   api.issueNodeRegistrationToken.mockImplementation(async () => token())
-  router = createRouter({ history: createMemoryHistory(), routes: [{ name: 'Nodes', path: '/nodes', component: Nodes }] })
+  router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ name: 'Nodes', path: '/nodes', component: Nodes, meta: { title: '节点管理' } }]
+  })
   await router.push('/nodes')
 })
 
@@ -100,12 +103,17 @@ describe('node inventory', () => {
     await flushPromises()
     expect(router.currentRoute.value.query.node).toBe('7')
     expect(api.getNode).toHaveBeenCalledWith(primary.id)
-    expect(view.get('.detail-title h2').text()).toBe(primary.name)
+    const breadcrumb = view.get('nav[aria-label="节点详情导航"] h1')
+    expect(breadcrumb.text()).toBe('节点管理/' + primary.name)
+    expect(breadcrumb.get('[aria-current="page"]').text()).toBe(primary.name)
+    const back = breadcrumb.get('a')
+    expect(back.attributes('href')).toBe('/nodes')
+    expect(document.activeElement).toBe(back.element)
     expect(view.get('.node-region-flag').attributes('aria-label')).toContain('香港')
     expect(view.get('.node-region-flag').text()).toBe('🇭🇰')
     expect(view.get('.detail-traffic p').text()).toBe('1.07 GB / 1.07 GB')
     expect(view.find('tbody').exists()).toBe(false)
-    await view.get('.node-detail-back').trigger('click')
+    await back.trigger('click')
     await flushPromises()
     expect(view.get('#node-keyword').element.value).toBe(primary.name)
     expect(document.activeElement).toBe(view.get('#node-link-7').element)
@@ -119,7 +127,7 @@ describe('node inventory', () => {
     expect(view.get('[role="alert"]').text()).toContain('无法读取节点详情')
     expect(api.getNodeList).not.toHaveBeenCalled()
     await click(view, '重新加载')
-    expect(view.get('.detail-title h2').text()).toBe(primary.name)
+    expect(view.get('[aria-current="page"]').text()).toBe(primary.name)
   })
 
   it('marks cached detail as stale after a polling failure and recovers on retry', async () => {
@@ -129,7 +137,7 @@ describe('node inventory', () => {
     await flushPromises()
     api.getNode.mockRejectedValueOnce(new Error('network'))
     await vi.advanceTimersByTimeAsync(5000)
-    expect(view.get('.detail-title h2').text()).toBe(primary.name)
+    expect(view.get('[aria-current="page"]').text()).toBe(primary.name)
     expect(view.get('[role="alert"]').text()).toContain('当前显示上次获取的数据')
     await vi.advanceTimersByTimeAsync(5000)
     expect(api.getNode).toHaveBeenCalledTimes(2)
@@ -144,7 +152,7 @@ describe('node inventory', () => {
 
     api.getNode.mockRejectedValueOnce({ response: { status: 404 } })
     await vi.advanceTimersByTimeAsync(5000)
-    expect(view.find('.detail-title h2').exists()).toBe(false)
+    expect(view.get('[aria-current="page"]').text()).toBe('节点 #7')
     expect(view.get('[role="alert"]').text()).toContain('无法读取节点详情')
   })
 
@@ -156,12 +164,12 @@ describe('node inventory', () => {
     api.getNode.mockRejectedValueOnce(new Error('poll failed')).mockRejectedValueOnce(new Error('retry failed'))
     await vi.advanceTimersByTimeAsync(5000)
     await click(view, '重新加载')
-    expect(view.get('.detail-title h2').text()).toBe(primary.name)
+    expect(view.get('[aria-current="page"]').text()).toBe(primary.name)
     expect(view.get('[role="alert"]').text()).toContain('当前显示上次获取的数据')
 
     api.getNode.mockRejectedValueOnce({ response: { status: 404 } })
     await click(view, '重新加载')
-    expect(view.find('.detail-title h2').exists()).toBe(false)
+    expect(view.get('[aria-current="page"]').text()).toBe('节点 #7')
     expect(view.get('[role="alert"]').text()).toContain('无法读取节点详情')
     await vi.advanceTimersByTimeAsync(5000)
     expect(api.getNode).toHaveBeenCalledTimes(4)
@@ -169,7 +177,7 @@ describe('node inventory', () => {
     api.getNode.mockResolvedValueOnce(response(offlinePrimary))
     await click(view, '重新加载')
     expect(view.find('[role="alert"]').exists()).toBe(false)
-    expect(view.get('.detail-title h2').text()).toBe(primary.name)
+    expect(view.get('[aria-current="page"]').text()).toBe(primary.name)
     expect(view.text()).toContain('离线')
     await vi.advanceTimersByTimeAsync(5000)
     expect(api.getNode).toHaveBeenCalledTimes(6)
@@ -615,9 +623,8 @@ describe('node actions', () => {
     expect(overview.get('h2').text()).toBe('IP 信息')
     expect(overview.findAll('h2')).toHaveLength(1)
     expect(service.get('h2').text()).toBe('Gost 服务')
-    expect(overview.get('.detail-network').text()).toContain(primary.ipv4)
-    expect(overview.get('.detail-network').text()).toContain(primary.ipv6)
-    const addresses = Object.fromEntries(overview.findAll('.detail-endpoints > div').map(item => [item.get('dt').text(), item.get('dd').text()]))
+    expect(overview.find('time').exists()).toBe(false)
+    const addresses = Object.fromEntries(overview.findAll('dt').map(term => [term.text(), term.element.nextElementSibling.textContent]))
     expect(addresses).toEqual({
       '节点 IP': primary.address, IPv4: primary.ipv4, IPv6: primary.ipv6, '补充 IP': primary.manual_addresses.join(' · ')
     })
@@ -638,20 +645,46 @@ describe('node actions', () => {
     expect(service.get('#node-gost-logs').text()).toContain('启动完成')
   })
 
-  it('opens upgrades separately and previews nft only from node configuration', async () => {
+  it('opens Gost upgrades from the service card and daemon upgrades inside node configuration', async () => {
+    api.getNodeUpgradeStatus.mockResolvedValue(response({
+      available: true, gost_version: 'v3.2.8', daemon_version: '1.0', latest_daemon_version: '1.1'
+    }))
+    const view = open()
+    await flushPromises()
+    await openDetail(view)
+    expect(view.text()).not.toContain('版本与升级')
+    expect(api.getNodeUpgradeStatus).not.toHaveBeenCalled()
+    await click(view.get('#node-gost-service'), '升级 Gost')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(api.getNodeUpgradeStatus).toHaveBeenCalledExactlyOnceWith(primary.id)
+    const gost = dialog(view, `升级 Gost · ${primary.name}`)
+    expect(gost.text()).toContain('v3.2.8')
+    expect(gost.text()).not.toContain('自动升级')
+    await click(gost, '关闭')
+
+    await click(view, '配置')
+    const settings = dialog(view, settingsTitle)
+    expect(api.getNodeUpgradeStatus).toHaveBeenCalledTimes(1)
+    await settings.get('#tab-daemon').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(api.getNodeUpgradeStatus.mock.calls).toEqual([[primary.id], [primary.id]])
+    expect(view.findAll('[role="dialog"]')).toHaveLength(1)
+    const daemon = settings.get('#pane-daemon')
+    expect(daemon.text()).toContain('自动升级')
+    expect(daemon.text()).toContain('1.1')
+    expect(daemon.text()).not.toContain('v3.2.8')
+  })
+
+  it('previews nft only from node configuration', async () => {
     api.getNodeNftConfig.mockResolvedValue(response({
       config: '{"nftables":[{"table":{"family":"inet","name":"yagp_quota"}}]}',
       live: true
     }))
-    api.getNodeUpgradeStatus.mockResolvedValue(response({ available: false }))
     const view = open()
     await flushPromises()
     await openDetail(view)
-    await click(view, '管理升级')
-    await vi.dynamicImportSettled()
-    await flushPromises()
-    expect(api.getNodeUpgradeStatus).toHaveBeenCalledWith(primary.id)
-    await click(dialog(view, `版本与升级 · ${primary.name}`), '关闭')
 
     expect(view.find('#tab-nft').exists()).toBe(false)
     await click(view, '配置')

@@ -1,9 +1,20 @@
 <template>
   <div class="ops-page">
-    <div v-if="detailId" ref="detailPage" class="ops-page">
-      <nav class="node-detail-crumb" aria-label="节点详情导航">
-        <RouterLink :to="nodesLocation" class="node-detail-back"><el-icon aria-hidden="true"><ArrowLeft /></el-icon>返回节点列表</RouterLink>
+    <Teleport :to="headingTarget" :disabled="!headingTarget">
+      <nav v-if="detailId" aria-label="节点详情导航">
+        <h1 class="node-page-heading node-detail-heading">
+          <span class="node-detail-parent">
+            <RouterLink :to="nodesLocation" custom v-slot="{ href, navigate }">
+              <a ref="detailBack" :href="href" class="node-detail-back" @click="navigate">{{ route.meta.title }}</a>
+            </RouterLink>
+            <span aria-hidden="true">/</span>
+          </span>
+          <span class="node-detail-name" :title="detailNode?.name" aria-current="page">{{ detailNode?.name ?? '节点 #' + detailId }}</span>
+        </h1>
       </nav>
+      <h1 v-else-if="headingTarget" class="node-page-heading">{{ route.meta.title }}</h1>
+    </Teleport>
+    <div v-if="detailId" ref="detailPage" class="ops-page">
       <div v-if="detailNode && detailError" class="ops-panel inventory-error" role="alert">
         <span>节点状态更新失败，当前显示上次获取的数据。</span>
         <el-button :loading="detailLoading" @click="fetchDetail()">重新加载</el-button>
@@ -153,8 +164,8 @@
       :title="isEdit ? '节点配置 · ' + editingNode.name : '添加节点'"
       :size="isEdit ? 'wide' : 'standard'"
       :close-on-click-modal="false"
-      :close-on-press-escape="!submitLoading"
-      :show-close="!submitLoading"
+      :close-on-press-escape="!submitLoading && !daemonUpgradePanel?.submitting"
+      :show-close="!submitLoading && !daemonUpgradePanel?.submitting"
       @closed="openCreatedNodeInstall"
     >
       <NodeSettingsForm v-if="!isEdit" ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" :error="submitError" @submit="handleSubmit" />
@@ -187,6 +198,15 @@
         <el-tab-pane label="nft 配置" name="nft" lazy>
           <NodeNftPreview v-if="dialogVisible && settingsTab === 'nft'" :key="editingNode.id" :node="liveEditingNode" />
         </el-tab-pane>
+        <el-tab-pane label="yagp-daemon" name="daemon" lazy>
+          <NodeUpgradePanel
+            v-if="dialogVisible && settingsTab === 'daemon'"
+            ref="daemonUpgradePanel"
+            :key="editingNode.id"
+            :node="liveEditingNode"
+            component="daemon"
+          />
+        </el-tab-pane>
         <el-tab-pane label="流量校准" name="traffic" lazy>
           <NodeTrafficCalibration :key="editingNode.id" :node="liveEditingNode" @saved="refreshCurrentView()" />
         </el-tab-pane>
@@ -199,7 +219,7 @@
         </el-tab-pane>
       </el-tabs>
       <template #footer>
-        <el-button :disabled="submitLoading || deleting" @click="dialogVisible = false">{{ isEdit ? '关闭' : '取消' }}</el-button>
+        <el-button :disabled="submitLoading || deleting || daemonUpgradePanel?.submitting" @click="dialogVisible = false">{{ isEdit ? '关闭' : '取消' }}</el-button>
         <el-button v-if="!isEdit || settingsTab === 'basic'" type="primary" :loading="submitLoading" @click="handleSubmit">{{ isEdit ? '保存更改' : '添加节点' }}</el-button>
       </template>
     </PanelDialog>
@@ -250,7 +270,7 @@
 import { ref, reactive, computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, ArrowRight, CopyDocument, Monitor, Plus, Search } from '@element-plus/icons-vue'
+import { ArrowRight, CopyDocument, Monitor, Plus, Search } from '@element-plus/icons-vue'
 import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import NodeDetails from '@/components/NodeDetails.vue'
@@ -264,6 +284,7 @@ import { formatNodeTrafficUsage, formatTime, nodeStates } from '@/utils/node-dis
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
+const NodeUpgradePanel = defineAsyncComponent(() => import('@/components/NodeUpgradePanel.vue'))
 const NodeNftPreview = defineAsyncComponent(() => import('@/components/NodeNftPreview.vue'))
 const INSTALL_SCRIPT_ROOT = 'https://raw.githubusercontent.com/hanzec/yagp/'
 const NODE_ONLINE_CODE = 10008
@@ -274,6 +295,8 @@ const configTabs = [
 ]
 const GIB = 1024 ** 3
 
+defineProps({ headingTarget: { type: Object, default: null } })
+
 const route = useRoute()
 const router = useRouter()
 const nodesLocation = { name: 'Nodes' }
@@ -283,6 +306,7 @@ const detailId = computed(() => {
   return typeof id === 'string' && /^[1-9]\d{0,9}$/.test(id) ? Number(id) : null
 })
 const detailPage = ref(null)
+const detailBack = ref(null)
 const inventoryPanel = ref(null)
 const detailNode = ref(null)
 const detailLoading = ref(false)
@@ -319,6 +343,7 @@ const submitLoading = ref(false)
 const submitError = ref('')
 const deleting = ref(false)
 const formRef = ref(null)
+const daemonUpgradePanel = ref(null)
 const form = reactive({ name: '', remark: '', manualAddresses: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
@@ -650,7 +675,7 @@ const handleDelete = async (row) => {
 const handleNodeAction = (action, row) => {
   if (action === 'install') showInstallCommand(row)
   if (action === 'config') openDialog(row)
-  if (action === 'upgrade') {
+  if (action === 'upgrade-gost') {
     upgradeNode.value = row
     upgradeDialogVisible.value = true
   }
@@ -688,8 +713,10 @@ watch(detailId, async (id, previous) => {
   if (previous === undefined) return
   if (id && route.hash === '#node-gost-service') return
   await nextTick()
+  // The sticky breadcrumb can take focus without scrolling to the new detail content.
+  if (id) detailPage.value?.scrollIntoView?.()
   const focusTarget = id
-    ? detailPage.value?.querySelector('.node-detail-back')
+    ? detailBack.value
     : inventoryPanel.value?.querySelector('#node-link-' + previous) || inventoryPanel.value?.querySelector('#node-inventory-title')
   focusTarget?.focus()
 }, { immediate: true })
@@ -718,10 +745,14 @@ onBeforeUnmount(() => {
 .node-row-link { width: fit-content; min-height: 30px; color: var(--ops-text); text-decoration: none; }
 .node-row-link:hover, .node-row-link:focus-visible { color: var(--ops-accent); text-decoration: underline; }
 .node-row-arrow { color: var(--ops-accent); flex: none; }
-.node-detail-crumb, .node-detail-back { display: flex; align-items: center; gap: 8px; }
-.node-detail-crumb { color: var(--ops-muted); font-size: var(--ops-text-sm); }
+.node-page-heading { font-size: var(--ops-text-title); white-space: nowrap; }
+.node-detail-heading, .node-detail-parent, .node-detail-back { display: flex; align-items: center; }
+.node-detail-heading { flex-wrap: wrap; column-gap: 8px; }
+.node-detail-parent { gap: 8px; }
+.node-detail-parent > span { color: var(--ops-muted); }
 .node-detail-back { min-height: 44px; color: var(--ops-text); text-decoration: none; }
 .node-detail-back:hover { color: var(--ops-accent); text-decoration: underline; }
+.node-detail-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @media (min-width: 701px) {
   .inventory-table td:first-child { white-space: nowrap; }
   @container (max-width: 720px) {

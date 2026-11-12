@@ -20,7 +20,8 @@
             >
               <el-icon aria-hidden="true"><Menu /></el-icon>
             </button>
-            <h1 v-if="identity === 'ready'" class="console-topbar__title">{{ route.meta.title }}</h1>
+            <div v-if="identity === 'ready' && route.name === 'Nodes'" ref="headingTarget" class="console-topbar__heading"></div>
+            <h1 v-else-if="identity === 'ready'" class="console-topbar__title">{{ route.meta.title }}</h1>
           </div>
 
           <div v-if="username" class="console-identity">
@@ -37,7 +38,10 @@
       </header>
 
       <main id="console-main" ref="mainContent" class="console-main" tabindex="-1">
-        <RouterView v-if="identity === 'ready'" />
+        <RouterView v-if="identity === 'ready'" v-slot="{ Component, route: pageRoute }">
+          <component v-if="pageRoute.name === 'Nodes'" :is="Component" :heading-target="headingTarget" />
+          <component v-else :is="Component" />
+        </RouterView>
         <section v-else-if="identity === 'error'" class="ops-panel console-gate" role="alert">
           <img :src="defaultLogoUrl" alt="" width="32" height="32" />
           <h1>无法确认管理员身份</h1>
@@ -84,6 +88,7 @@ const system = useSystemStore()
 const route = useRoute()
 const upstream = 'https://github.com/code-gopher/gostPanel'
 const mainContent = ref(null)
+const headingTarget = ref(null)
 const mobileMenu = ref(false)
 const username = ref('')
 const identity = ref('loading')
@@ -175,7 +180,7 @@ watch(() => route.path, async () => {
 }
 
 .console-topbar__inner { min-height: 56px; justify-content: space-between; gap: 10px; }
-.console-topbar__location { flex-shrink: 0; }
+.console-topbar__heading { min-width: 0; }
 .console-topbar__title { font-size: var(--ops-text-title); white-space: nowrap; }
 
 .console-identity { gap: 9px; }
