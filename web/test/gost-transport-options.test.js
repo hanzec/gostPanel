@@ -8,12 +8,12 @@ import { choose, mountInventory } from './inventory-fixtures'
 const option = (wrapper, id) => wrapper.get(`[data-protocol-option="${id}"]`)
 const toggle = wrapper => wrapper.get('.gost-transport-options [role="button"]')
 
-const mountOptions = (protocol, options = {}, readonly = false) => mountInventory(defineComponent({
+const mountOptions = (protocol, options = {}, readonly = false, mptcpSupported = false) => mountInventory(defineComponent({
   setup() {
     const form = reactive({ protocol_options: { ...options } })
     return () => h(ElForm, { model: form }, {
       default: () => h(GostTransportOptions, {
-        protocol, readonly, modelValue: form.protocol_options,
+        protocol, readonly, mptcpSupported, modelValue: form.protocol_options,
         'onUpdate:modelValue': value => { form.protocol_options = value }
       })
     })
@@ -21,6 +21,26 @@ const mountOptions = (protocol, options = {}, readonly = false) => mountInventor
 }))
 
 describe('Gost transport options', () => {
+  it('hides Multipath TCP and empty option groups until the exit reports support', () => {
+    const wrapper = mountOptions('ohttp', { mptcp: 'true' })
+    expect(wrapper.find('[data-protocol-option="mptcp"]').exists()).toBe(false)
+    expect(wrapper.find('section[aria-label="连接与监听"]').exists()).toBe(false)
+    expect(toggle(wrapper).text()).not.toContain('项已设置')
+    expect(wrapper.text()).not.toContain('Multipath TCP')
+  })
+
+  it('allows Multipath TCP after the exit reports support', async () => {
+    const wrapper = mountOptions('tcp', {}, false, true)
+    await toggle(wrapper).trigger('click')
+    await choose(option(wrapper, 'mptcp').getComponent(ElSelect), 'true')
+    expect(wrapper.getComponent(GostTransportOptions).props('modelValue')).toEqual({ mptcp: 'true' })
+  })
+
+  it.each([false, true])('uses exit capability for read-only Multipath TCP values: %s', mptcpSupported => {
+    const wrapper = mountOptions('tcp', { mptcp: 'true', keepalive: 'false' }, true, mptcpSupported)
+    expect(wrapper.text().includes('Multipath TCP')).toBe(mptcpSupported)
+  })
+
   it('keeps explicit false and zero values distinct from Gost defaults', async () => {
     const wrapper = mountOptions('kcp')
     expect(toggle(wrapper).attributes('aria-expanded')).toBe('false')

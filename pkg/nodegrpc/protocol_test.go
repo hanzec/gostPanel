@@ -104,7 +104,7 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 		exchange(V1_GetNodeConfig_FullMethodName, V1Client.GetNodeConfig, empty,
 			&NodeConfig{ConfigYaml: []byte("node_id: 42"), NftTemplate: config.GetConfig()}),
 		exchange(V1_UpdateNodeIPs_FullMethodName, V1Client.UpdateNodeIPs,
-			&NodeIPsRequest{NodeId: 42, Ipv4: "203.0.113.42", Ipv6: "2001:db8::42"}, empty),
+			&NodeIPsRequest{NodeId: 42, Ipv4: "203.0.113.42", Ipv6: "2001:db8::42", MptcpSupported: proto.Bool(true)}, empty),
 	}
 	byMethod := make(map[string]protocolExchange, len(calls))
 	for _, call := range calls {

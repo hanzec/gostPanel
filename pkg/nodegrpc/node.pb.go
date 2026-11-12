@@ -1273,6 +1273,7 @@ type NodeIPsRequest struct {
 	Ipv6            string                 `protobuf:"bytes,3,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
 	Addresses       []string               `protobuf:"bytes,4,rep,name=addresses,proto3" json:"addresses,omitempty"`
 	LocalIpSnapshot *LocalIPSnapshot       `protobuf:"bytes,5,opt,name=local_ip_snapshot,json=localIpSnapshot,proto3" json:"local_ip_snapshot,omitempty"`
+	MptcpSupported  *bool                  `protobuf:"varint,6,opt,name=mptcp_supported,json=mptcpSupported,proto3,oneof" json:"mptcp_supported,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1340,6 +1341,13 @@ func (x *NodeIPsRequest) GetLocalIpSnapshot() *LocalIPSnapshot {
 		return x.LocalIpSnapshot
 	}
 	return nil
+}
+
+func (x *NodeIPsRequest) GetMptcpSupported() bool {
+	if x != nil && x.MptcpSupported != nil {
+		return *x.MptcpSupported
+	}
+	return false
 }
 
 // A present snapshot replaces the prior local addresses, including when empty.
@@ -1721,13 +1729,15 @@ const file_node_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12#\n" +
 	"\rrefresh_token\x18\x02 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x03 \x01(\tR\trequestId\"\xba\x01\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\"\xfc\x01\n" +
 	"\x0eNodeIPsRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x12\n" +
 	"\x04ipv4\x18\x02 \x01(\tR\x04ipv4\x12\x12\n" +
 	"\x04ipv6\x18\x03 \x01(\tR\x04ipv6\x12\x1c\n" +
 	"\taddresses\x18\x04 \x03(\tR\taddresses\x12I\n" +
-	"\x11local_ip_snapshot\x18\x05 \x01(\v2\x1d.yagp.node.v1.LocalIPSnapshotR\x0flocalIpSnapshot\"/\n" +
+	"\x11local_ip_snapshot\x18\x05 \x01(\v2\x1d.yagp.node.v1.LocalIPSnapshotR\x0flocalIpSnapshot\x12,\n" +
+	"\x0fmptcp_supported\x18\x06 \x01(\bH\x00R\x0emptcpSupported\x88\x01\x01B\x12\n" +
+	"\x10_mptcp_supported\"/\n" +
 	"\x0fLocalIPSnapshot\x12\x1c\n" +
 	"\taddresses\x18\x01 \x03(\tR\taddresses\"\xa0\x01\n" +
 	"\vStreamFrame\x12\x0e\n" +
@@ -1818,6 +1828,7 @@ func file_node_proto_init() {
 		return
 	}
 	file_node_proto_msgTypes[11].OneofWrappers = []any{}
+	file_node_proto_msgTypes[20].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -192,8 +192,8 @@ func registrationTokenHash(token string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func (s *NodeService) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses, localAddresses []string) error {
-	return s.nodeRepo.UpdateIPs(ctx, node, ipv4, ipv6, addresses, localAddresses)
+func (s *NodeService) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses, localAddresses []string, mptcpSupported bool) error {
+	return s.nodeRepo.UpdateIPs(ctx, node, ipv4, ipv6, addresses, localAddresses, mptcpSupported)
 }
 
 func (s *NodeService) RevokeCredentials(ctx context.Context, id uint) error {

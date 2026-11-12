@@ -251,7 +251,7 @@
               <p id="rule-protocol-help" class="rule-form-hint ops-muted">用于入口节点到出口节点之间的 Gost 隧道传输。</p>
             </el-form-item>
             <TargetRoutingFields v-model:original-target="form.use_original_target" v-model:match-rules="form.match_rules" v-model:ruleset-ids="form.ruleset_ids" v-model:manual-domains-text="form.manualDomainsText" />
-            <GostTransportOptions v-model="form.protocol_options" :protocol="form.protocol" class="rule-form-wide" />
+            <GostTransportOptions v-model="form.protocol_options" :protocol="form.protocol" :mptcp-supported="selectedNode?.mptcp_supported === true" class="rule-form-wide" />
             <el-form-item v-if="!form.use_original_target" label="目标地址" prop="targetList" class="rule-form-wide">
               <div class="rule-target-list">
                 <div v-for="(item, index) in form.targetList" :key="index" class="rule-target-item">
@@ -289,7 +289,7 @@ import GostTransportOptions from '@/components/GostTransportOptions.vue'
 import TargetRoutingFields from '@/components/TargetRoutingFields.vue'
 import { formatEndpoint, mappedConnectEndpoint } from '@/utils/node-address-mapping'
 import { confirmPanelAction } from '@/utils/panel-dialog'
-import { tunnelProtocols } from '@/utils/gost-protocols'
+import { supportedProtocolOptions, tunnelProtocols } from '@/utils/gost-protocols'
 import { targetRoutingFields, targetRoutingPayload, usesOriginalTarget } from '@/utils/target-policy'
 import { ArrowDown, CircleCheck, Plus, Remove, Search, Switch, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
@@ -344,6 +344,7 @@ const editId = ref(null)
 const submitLoading = ref(false)
 const formRef = ref(null)
 let savedProtocolOptions = false
+let savedRelayConfig = null
 let savedOriginalTarget = false
 let savedLegacyClash = false
 let savedRuleSelection = false
@@ -362,7 +363,9 @@ const form = reactive({
 })
 const transparentEntry = computed(() => form.role === 'entry' && form.protocol === 'red')
 
-const selectedNode = computed(() => nodeList.value.find(item => item.id === form.node_id))
+const editingNode = ref(null)
+const selectedNode = computed(() => nodeList.value.find(item => item.id === form.node_id) ||
+  (editingNode.value?.id === form.node_id ? editingNode.value : undefined))
 const selectedConnectEndpoint = computed(() => mappedConnectEndpoint(selectedNode.value, form.listen_ip, form.listen_port))
 const listenAddressOptions = computed(() => {
   const entry = selectedNode.value
@@ -472,6 +475,8 @@ const openDialog = (row = null, copy = false) => {
   editId.value = isEdit.value ? row.id : null
   boundExitEdit.value = isEdit.value && row.role === 'exit' && !!row.linked_tunnel_id
   savedProtocolOptions = isEdit.value && !!Object.keys(row.protocol_options || {}).length
+  savedRelayConfig = isEdit.value ? { nodeId: row.node_id, protocol: row.protocol, mptcp: row.protocol_options?.mptcp } : null
+  editingNode.value = row?.node || null
   savedOriginalTarget = isEdit.value && usesOriginalTarget(row)
   savedLegacyClash = isEdit.value && !!row.use_clash_ruleset
   savedRuleSelection = isEdit.value && !!(row.use_clash_ruleset || row.ruleset_ids?.length || row.manual_domains?.length)
@@ -522,7 +527,8 @@ const handleSubmit = async () => {
       }))
     }
     if (savedProtocolOptions || Object.keys(form.protocol_options).length) {
-      payload.protocol_options = { ...form.protocol_options }
+      payload.protocol_options = supportedProtocolOptions(form.protocol_options, selectedNode.value?.mptcp_supported,
+        savedRelayConfig?.nodeId === form.node_id && savedRelayConfig?.protocol === form.protocol ? savedRelayConfig.mptcp : undefined)
     }
     if (isEdit.value) {
       await updateRule(editId.value, payload)

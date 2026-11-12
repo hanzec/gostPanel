@@ -275,7 +275,7 @@ func TestTunnelStartRollsBackRelayUntilExitReportsAnAddress(t *testing.T) {
 		entryRemote.chain(tunnelChainName(tunnel.ID)).Name != "" {
 		t.Fatal("missing exit address left live tunnel resources")
 	}
-	requireServiceError(t, NewNodeService(db, "").UpdateIPs(t.Context(), &exit, "192.0.2.85", "", nil, nil), nil)
+	requireServiceError(t, NewNodeService(db, "").UpdateIPs(t.Context(), &exit, "192.0.2.85", "", nil, nil, false), nil)
 	requireServiceError(t, service.Start(tunnel.ID, testAdmin, testIP, testAgent), nil)
 	stored, err = service.GetByID(tunnel.ID)
 	requireServiceError(t, err, nil)

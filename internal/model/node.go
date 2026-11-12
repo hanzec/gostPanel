@@ -52,6 +52,7 @@ type GostNode struct {
 
 	// Nil means the daemon has not reported its local interfaces.
 	LocalAddresses []string `gorm:"serializer:json;type:text" json:"local_addresses"`
+	MPTCPSupported bool     `gorm:"column:mptcp_supported;not null;default:false" json:"mptcp_supported"`
 
 	GostVersion          string     `gorm:"size:64;not null;default:''" json:"gost_version"`
 	GostVersionCheckedAt *time.Time `json:"-"`

@@ -137,6 +137,7 @@ message NodeIPsRequest {
   string ipv6 = 3;
   repeated string addresses = 4;
   LocalIPSnapshot local_ip_snapshot = 5;
+  optional bool mptcp_supported = 6;
 }
 
 // A present snapshot replaces the prior local addresses, including when empty.

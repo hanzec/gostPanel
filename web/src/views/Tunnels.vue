@@ -211,7 +211,7 @@
             <el-input-number v-model="form.relay_port" :min="1" :max="65535" controls-position="right" />
             <span class="tunnel-form-hint ops-muted">Relay 服务在出口节点监听。</span>
           </el-form-item>
-          <GostTransportOptions v-if="legacyEdit" v-model="form.protocol_options" :protocol="form.protocol" class="inventory-form-wide" />
+          <GostTransportOptions v-if="legacyEdit" v-model="form.protocol_options" :protocol="form.protocol" :mptcp-supported="mptcpSupported" class="inventory-form-wide" />
           <section v-if="exitOwnsTargets" class="tunnel-target-section inventory-form-wide" aria-labelledby="tunnel-exit-policy-title">
             <h3 id="tunnel-exit-policy-title">出口目标与策略</h3>
             <p class="tunnel-dialog-hint ops-muted">以下设置来自所选出口，在端点管理中修改。</p>
@@ -224,7 +224,7 @@
               </template>
             </dl>
             <TargetRoutingFields v-if="exitRouting.use_original_target" readonly original-target :match-rules="exitRouting.match_rules" :ruleset-ids="exitRouting.ruleset_ids" :manual-domains-text="exitRouting.manualDomainsText" />
-            <GostTransportOptions :model-value="exitEntrance.protocol_options || {}" :protocol="exitEntrance.protocol" readonly />
+            <GostTransportOptions :model-value="exitEntrance.protocol_options || {}" :protocol="exitEntrance.protocol" :mptcp-supported="mptcpSupported" readonly />
             <p v-if="exitRouting.use_original_target" class="tunnel-form-hint ops-muted">此出口需连接“透明转发（HTTP/HTTPS）”入口。</p>
           </section>
           <p v-else-if="!legacyEdit && !exitEntrance" class="tunnel-form-hint ops-muted inventory-form-wide">选择出口后查看其目标与策略。</p>
@@ -238,7 +238,7 @@
                 </el-select>
                 <p id="tunnel-protocol-help" class="tunnel-form-hint ops-muted">用于源节点到目的节点之间的 Gost 隧道传输。</p>
               </el-form-item>
-              <GostTransportOptions v-model="form.protocol_options" :protocol="form.protocol" class="inventory-form-wide" />
+              <GostTransportOptions v-model="form.protocol_options" :protocol="form.protocol" :mptcp-supported="mptcpSupported" class="inventory-form-wide" />
               <TargetRoutingFields v-model:original-target="form.use_original_target" v-model:match-rules="form.match_rules" v-model:ruleset-ids="form.ruleset_ids" v-model:manual-domains-text="form.manualDomainsText" />
               <el-form-item v-if="!form.use_original_target" label="目标地址" prop="targetList" class="inventory-form-wide">
                 <div class="tunnel-target-list">
@@ -319,7 +319,7 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import GostTransportOptions from '@/components/GostTransportOptions.vue'
 import TargetRoutingFields from '@/components/TargetRoutingFields.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
-import { tunnelProtocols } from '@/utils/gost-protocols'
+import { supportedProtocolOptions, tunnelProtocols } from '@/utils/gost-protocols'
 import { isLegacyClashSelection, targetRoutingFields, targetRoutingPayload, usesOriginalTarget } from '@/utils/target-policy'
 import { ArrowDown, Connection, Plus, Remove, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
@@ -378,6 +378,7 @@ const formRef = ref(null)
 const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', protocol_options: {}, relay_port: null, remark: '', allowlist_node_ids: [], ...targetRoutingFields(), targetList: [{ address: '' }], strategy: 'round' })
 let savedAllowlistNodeIds = []
 let savedProtocolOptions = false
+let savedRelayConfig = null
 let savedOriginalTarget = false
 let savedLegacyClash = false
 let savedRuleSelection = false
@@ -390,6 +391,13 @@ const listenEndpoint = rule => formatEndpoint(rule.listen_ip, rule.listen_port)
 const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol === 'red' ? '透明转发（HTTP/HTTPS）' : rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
 const entryEntrance = computed(() => entryList.value.find(rule => rule.id === form.entry_rule_id))
 const exitEntrance = computed(() => entryList.value.find(rule => rule.id === form.exit_rule_id))
+const legacyExitNode = ref(null)
+const mptcpSupported = computed(() => {
+  const reportedExitNode = legacyEdit.value ? legacyExitNode.value : exitEntrance.value?.node
+  const exitNodeId = legacyEdit.value ? reportedExitNode?.id : exitEntrance.value?.node_id
+  const exitNode = nodeList.value.find(node => node.id === exitNodeId) || reportedExitNode
+  return exitNode?.mptcp_supported === true
+})
 const exitOwnsTargets = computed(() => !legacyEdit.value && exitEntrance.value?.role === 'exit')
 const exitRouting = computed(() => targetRoutingFields(exitEntrance.value))
 const legacyTargetEdit = computed(() => !legacyEdit.value && !!exitEntrance.value && !exitOwnsTargets.value)
@@ -517,10 +525,12 @@ const clearFilters = () => {
 const openDialog = (row = null, onlyAllowlist = false) => {
   editId.value = row?.id ?? null
   legacyEdit.value = !!row && !row.entry_rule_id
+  legacyExitNode.value = row?.exit_node || (row?.exit_node_id ? { id: row.exit_node_id } : null)
   allowlistOnly.value = onlyAllowlist
   allowlistError.value = ''
   savedAllowlistNodeIds = row?.allowlist_node_ids || []
   savedProtocolOptions = !!row && row.exit_rule?.role !== 'exit' && !!Object.keys(row.protocol_options || {}).length
+  savedRelayConfig = row ? { exitRuleId: row.exit_rule_id, protocol: row.protocol, mptcp: row.protocol_options?.mptcp } : null
   const config = row?.exit_rule?.role === 'exit' ? row.exit_rule : row?.strategy ? row : row?.entry_rule
   savedOriginalTarget = !!row && usesOriginalTarget(config)
   savedLegacyClash = !!row && !!config?.use_clash_ruleset
@@ -571,7 +581,9 @@ const handleSubmit = async () => {
         }))
       }
       if (!exitOwnsTargets.value && (savedProtocolOptions || Object.keys(form.protocol_options).length)) {
-        payload.protocol_options = { ...form.protocol_options }
+        payload.protocol_options = supportedProtocolOptions(form.protocol_options, mptcpSupported.value,
+          savedRelayConfig?.protocol === protocol && (legacyEdit.value || savedRelayConfig?.exitRuleId === exit_rule_id)
+            ? savedRelayConfig.mptcp : undefined)
       }
       if (!isEdit.value || allowlist_node_ids.length !== savedAllowlistNodeIds.length ||
         allowlist_node_ids.some(id => !savedAllowlistNodeIds.includes(id))) {

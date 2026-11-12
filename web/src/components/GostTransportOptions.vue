@@ -80,11 +80,15 @@ import { protocolOptionFields, protocolOptionGroups } from '@/utils/gost-protoco
 const props = defineProps({
   protocol: { type: String, required: true },
   modelValue: { type: Object, default: () => ({}) },
+  mptcpSupported: Boolean,
   readonly: Boolean
 })
 const emit = defineEmits(['update:modelValue'])
-const fields = computed(() => protocolOptionFields(props.protocol))
-const groups = computed(() => protocolOptionGroups(props.protocol))
+const supportedField = field => field.id !== 'mptcp' || props.mptcpSupported === true
+const fields = computed(() => protocolOptionFields(props.protocol).filter(supportedField))
+const groups = computed(() => protocolOptionGroups(props.protocol)
+  .map(group => ({ ...group, fields: group.fields.filter(supportedField) }))
+  .filter(group => group.fields.length))
 const configuredFields = computed(() => fields.value.filter(field => props.modelValue[field.id]?.trim()))
 const configuredCount = computed(() => configuredFields.value.length)
 const expanded = ref(configuredCount.value ? ['options'] : [])
