@@ -24,24 +24,29 @@
     <MetricStrip v-if="!detailId" label="节点统计" :items="nodeMetrics" />
 
     <section v-if="!detailId" ref="inventoryPanel" class="ops-panel inventory-panel" aria-labelledby="node-inventory-title">
-      <header class="inventory-heading">
-        <h2 id="node-inventory-title" tabindex="-1">节点清单</h2>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
-      </header>
-
-      <form class="ops-toolbar inventory-filters" aria-label="筛选节点" @submit.prevent="handleSearch">
-        <div class="inventory-field">
-          <el-input id="node-keyword" v-model="searchKeyword" aria-label="节点名称" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
-        </div>
-        <div class="inventory-field">
-          <el-select v-model="searchStatus" aria-label="健康状态" placeholder="全部状态" clearable @change="handleSearch">
-            <el-option label="在线" value="online" />
-            <el-option label="离线" value="offline" />
-            <el-option label="异常" value="error" />
-          </el-select>
-        </div>
-        <el-button native-type="submit">筛选</el-button>
-      </form>
+      <InventoryToolbar filter-label="筛选节点" @submit="handleSearch">
+        <template #title>
+          <h2 id="node-inventory-title" tabindex="-1">节点清单</h2>
+        </template>
+        <template #filters>
+          <div class="inventory-toolbar-field">
+            <label for="node-keyword">节点名称</label>
+            <el-input id="node-keyword" v-model="searchKeyword" aria-label="节点名称" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
+          </div>
+          <div class="inventory-toolbar-field">
+            <label for="node-status-filter">健康状态</label>
+            <el-select id="node-status-filter" v-model="searchStatus" aria-label="健康状态" placeholder="全部状态" clearable @change="handleSearch">
+              <el-option label="在线" value="online" />
+              <el-option label="离线" value="offline" />
+              <el-option label="异常" value="error" />
+            </el-select>
+          </div>
+          <el-button native-type="submit">筛选</el-button>
+        </template>
+        <template #actions>
+          <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
+        </template>
+      </InventoryToolbar>
 
       <div v-if="loadError" class="inventory-error" role="alert">
         <span>无法加载节点清单，请重试。</span>
@@ -246,6 +251,7 @@ import { ref, reactive, computed, defineAsyncComponent, nextTick, onMounted, onB
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, ArrowRight, CopyDocument, Monitor, Plus, Search } from '@element-plus/icons-vue'
+import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import NodeDetails from '@/components/NodeDetails.vue'
 import NodeRegionFlag from '@/components/NodeRegionFlag.vue'
@@ -707,8 +713,6 @@ onBeforeUnmount(() => {
 <style scoped src="../inventory.css"></style>
 
 <style scoped>
-.inventory-filters .inventory-field { flex-basis: 180px; }
-.inventory-filters .inventory-field + .inventory-field { flex-basis: 120px; }
 .node-list-row { cursor: pointer; }
 .inventory-table .node-list-row:focus-within { background: var(--ops-raised); }
 .node-row-link { width: fit-content; min-height: 30px; color: var(--ops-text); text-decoration: none; }
@@ -725,8 +729,6 @@ onBeforeUnmount(() => {
   }
 }
 @media (max-width: 700px) {
-  .inventory-filters .inventory-field { flex: 2 1 108px; }
-  .inventory-filters .inventory-field + .inventory-field { flex: 1 1 94px; }
   .node-row-link { min-height: 44px; }
   .inventory-actions-cell { grid-column: 2; align-self: end; }
   .inventory-actions { justify-content: flex-end; }

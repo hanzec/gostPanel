@@ -78,7 +78,9 @@ describe('node inventory', () => {
     const buttons = view.findAll('button').map(item => item.text())
     expect(buttons.filter(label => label === '添加节点')).toHaveLength(1)
     expect(buttons).not.toContain('刷新')
-    await click(view.get('.inventory-heading'), '添加节点')
+    const heading = view.get('section[aria-labelledby="node-inventory-title"] > header')
+    expect(heading.get('form[aria-label="筛选节点"]').find('#node-keyword').exists()).toBe(true)
+    await click(heading, '添加节点')
     await click(dialog(view, '添加节点'), '取消')
 
     await vi.advanceTimersByTimeAsync(5000)

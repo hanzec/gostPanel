@@ -3,32 +3,35 @@
     <MetricStrip label="隧道统计" :items="tunnelMetrics" />
 
     <section class="ops-panel tunnel-panel" aria-labelledby="tunnel-inventory-title">
-      <header class="inventory-heading">
-        <h2 id="tunnel-inventory-title">链路清单</h2>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
-      </header>
-
-      <form class="ops-toolbar inventory-filters" aria-label="筛选隧道" @submit.prevent="handleSearch">
-        <div class="inventory-field">
-          <label for="tunnel-keyword">隧道名称</label>
-          <el-input id="tunnel-keyword" v-model="searchKeyword" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
-        </div>
-        <div class="inventory-field">
-          <label for="tunnel-node">关联节点</label>
-          <el-select id="tunnel-node" v-model="searchNodeId" placeholder="全部节点" :loading="nodeOptionsLoading" clearable @change="handleSearch">
-            <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
-          </el-select>
-        </div>
-        <div class="inventory-field">
-          <label for="inventory-status">运行状态</label>
-          <el-select id="inventory-status" v-model="searchStatus" placeholder="全部状态" clearable @change="handleSearch">
-            <el-option label="运行中" value="running" />
-            <el-option label="已停止" value="stopped" />
-            <el-option label="异常" value="error" />
-          </el-select>
-        </div>
-        <el-button native-type="submit" :icon="Search">筛选</el-button>
-      </form>
+      <InventoryToolbar filter-label="筛选隧道" @submit="handleSearch">
+        <template #title>
+          <h2 id="tunnel-inventory-title">链路清单</h2>
+        </template>
+        <template #filters>
+          <div class="inventory-toolbar-field">
+            <label for="tunnel-keyword">隧道名称</label>
+            <el-input id="tunnel-keyword" v-model="searchKeyword" aria-label="隧道名称" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
+          </div>
+          <div class="inventory-toolbar-field">
+            <label for="tunnel-node">关联节点</label>
+            <el-select id="tunnel-node" v-model="searchNodeId" aria-label="关联节点" placeholder="全部节点" :loading="nodeOptionsLoading" clearable @change="handleSearch">
+              <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
+            </el-select>
+          </div>
+          <div class="inventory-toolbar-field">
+            <label for="inventory-status">运行状态</label>
+            <el-select id="inventory-status" v-model="searchStatus" aria-label="运行状态" placeholder="全部状态" clearable @change="handleSearch">
+              <el-option label="运行中" value="running" />
+              <el-option label="已停止" value="stopped" />
+              <el-option label="异常" value="error" />
+            </el-select>
+          </div>
+          <el-button native-type="submit" :icon="Search">筛选</el-button>
+        </template>
+        <template #actions>
+          <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
+        </template>
+      </InventoryToolbar>
 
       <div v-if="loadError" class="inventory-error" role="alert">
         <span>无法加载链路清单，请重试。</span>
@@ -251,6 +254,7 @@
 <script setup>
 import { computed, nextTick, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
+import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, Connection, Plus, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
@@ -529,8 +533,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 <style scoped src="../inventory.css"></style>
 
 <style scoped>
-.tunnel-panel .inventory-field { flex-basis: 145px; }
-.tunnel-panel .inventory-field:first-child { flex-basis: 200px; }
 .tunnel-route { display: flex; align-items: center; gap: 8px; }
 .tunnel-route-label { display: block; color: var(--ops-muted); font-size: var(--ops-text-xs); margin-bottom: 2px; }
 .tunnel-route-arrow { color: var(--ops-accent); flex: none; }
@@ -545,8 +547,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 @media (max-width: 700px) {
   .tunnel-route-cell { grid-column: 1 / -1; }
   .tunnel-route > span { flex: 1; min-width: 0; }
-  .tunnel-panel .inventory-field { flex-basis: 118px; }
-  .tunnel-panel .inventory-field:first-child { flex-basis: 100%; }
   .tunnel-route { gap: 6px; }
   .tunnel-allowlist-field :deep(.el-select__wrapper) { min-height: 44px; }
 }

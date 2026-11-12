@@ -128,6 +128,7 @@ describe('Relay tunnel inventory', () => {
     expect(actions.filter(label => label === '添加隧道')).toHaveLength(1)
     expect(actions).not.toContain('刷新')
     expect(heading.text()).not.toContain('RELAY')
+    expect(heading.get('form[aria-label="筛选隧道"]').find('#tunnel-keyword').exists()).toBe(true)
     await button(heading, '添加隧道').trigger('click')
     await flushPromises()
     expect(dialog(wrapper).text()).toContain('源端或目的端缺少可用入口')

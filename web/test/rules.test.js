@@ -40,16 +40,18 @@ beforeEach(() => {
 })
 
 describe('forwarding rule inventory', () => {
-  it('offers rule creation in the inventory heading and omits the removed actions', async () => {
+  it('keeps the title, filters and rule creation in one inventory toolbar', async () => {
     getRuleList.mockResolvedValueOnce(result())
     const wrapper = mountInventory(Rules)
     await flushPromises()
-    const heading = wrapper.get('.rule-section-head')
-    expect(heading.get('h2').text()).toBe('入口规则')
+    const toolbar = wrapper.get('section[aria-labelledby="rule-list-title"] > header')
+    expect(toolbar.get('h2').text()).toBe('入口规则')
+    const filters = toolbar.get('form[aria-label="规则筛选"]')
+    expect(button(filters, '应用筛选').attributes('type')).toBe('submit')
     expect(wrapper.findAll('button').filter(item => item.text() === '新建规则')).toHaveLength(1)
     expect(wrapper.text()).not.toMatch(/导入 JSON|导出 JSON|每 5 秒更新/)
     expect(wrapper.findAll('button').some(item => item.text() === '刷新')).toBe(false)
-    await button(heading, '新建规则').trigger('click')
+    await button(toolbar, '新建规则').trigger('click')
     expect(editDialog(wrapper).attributes('aria-label')).toBe('新建入口规则')
   })
 
