@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,28 +112,101 @@ func TestServerMigratesTunnelTargetsToExitEndpoints(t *testing.T) {
 }
 
 func TestEndpointRoleMigrationRollsBackBothEndpoints(t *testing.T) {
-	db := legacyEndpointDatabase(t)
-	stamp := time.Now().UTC()
-	insertLegacyEndpoint(t, db, 11, "source", "tcp", []string{"legacy.example:443"}, false, "hash", stamp)
-	insertLegacyEndpoint(t, db, 12, "destination", "tcp", nil, false, "round", stamp)
-	if err := db.Exec(`INSERT INTO tunnels (id, name, entry_node_id, exit_node_id, entry_rule_id, exit_rule_id, protocol, strategy) VALUES (21, 'existing', 1, 2, 11, 12, 'tls', '')`).Error; err != nil {
-		t.Fatal(err)
+	for _, rejectedID := range []uint{11, 12} {
+		t.Run(fmt.Sprintf("reject endpoint %d", rejectedID), func(t *testing.T) {
+			db := legacyEndpointDatabase(t)
+			stamp := time.Now().UTC()
+			insertLegacyEndpoint(t, db, 11, "source", "tcp", []string{"legacy.example:443"}, false, "hash", stamp)
+			insertLegacyEndpoint(t, db, 12, "destination", "tcp", nil, false, "round", stamp)
+			if err := db.Exec(`INSERT INTO tunnels (id, name, entry_node_id, exit_node_id, entry_rule_id, exit_rule_id, protocol, strategy) VALUES (21, 'existing', 1, 2, 11, 12, 'tls', '')`).Error; err != nil {
+				t.Fatal(err)
+			}
+			trigger := fmt.Sprintf(`CREATE TRIGGER reject_endpoint_migration BEFORE UPDATE ON rules WHEN OLD.id = %d BEGIN SELECT RAISE(ABORT, 'endpoint update failed'); END`, rejectedID)
+			if err := db.Exec(trigger).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := autoMigrate(db); err == nil {
+				t.Fatal("endpoint migration unexpectedly succeeded")
+			}
+			var entry, exit model.GostRule
+			if err := db.First(&entry, 11).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(&exit, 12).Error; err != nil {
+				t.Fatal(err)
+			}
+			if entry.Role != "" || exit.Role != "" || exit.Protocol != "tcp" || len(exit.Targets) != 0 || !slices.Equal(entry.Targets, []string{"legacy.example:443"}) {
+				t.Fatalf("failed migration left partial changes: entry=%+v, exit=%+v", entry, exit)
+			}
+		})
 	}
-	if err := db.Exec(`CREATE TRIGGER reject_entry_migration BEFORE UPDATE ON rules WHEN OLD.id = 11 BEGIN SELECT RAISE(ABORT, 'entry update failed'); END`).Error; err != nil {
-		t.Fatal(err)
+}
+
+func TestEndpointRoleMigrationLeavesIncompleteBindingsUnchanged(t *testing.T) {
+	for _, missingID := range []uint{11, 12} {
+		t.Run(fmt.Sprintf("missing endpoint %d", missingID), func(t *testing.T) {
+			db := legacyEndpointDatabase(t)
+			stamp := time.Now().UTC()
+			insertLegacyEndpoint(t, db, 11, "source", "tcp", []string{"legacy.example:443"}, false, "hash", stamp)
+			insertLegacyEndpoint(t, db, 12, "destination", "tcp", nil, false, "round", stamp)
+			if err := db.Exec(`INSERT INTO tunnels (id, name, entry_node_id, exit_node_id, entry_rule_id, exit_rule_id, protocol, strategy) VALUES (21, 'incomplete', 1, 2, 11, 12, 'tls', '')`).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Exec("DELETE FROM rules WHERE id = ?", missingID).Error; err != nil {
+				t.Fatal(err)
+			}
+			var before model.GostRule
+			if err := db.First(&before).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := autoMigrate(db); err != nil {
+				t.Fatal(err)
+			}
+			var after model.GostRule
+			if err := db.First(&after).Error; err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("incomplete tunnel changed its surviving endpoint: got %+v, want %+v", after, before)
+			}
+		})
 	}
-	if err := autoMigrate(db); err == nil {
-		t.Fatal("endpoint migration unexpectedly succeeded")
-	}
-	var entry, exit model.GostRule
-	if err := db.First(&entry, 11).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.First(&exit, 12).Error; err != nil {
-		t.Fatal(err)
-	}
-	if entry.Role != "" || exit.Role != "" || exit.Protocol != "tcp" || len(exit.Targets) != 0 || !slices.Equal(entry.Targets, []string{"legacy.example:443"}) {
-		t.Fatalf("failed migration left partial changes: entry=%+v, exit=%+v", entry, exit)
+}
+
+func TestEndpointRoleMigrationRejectsInvalidStoredData(t *testing.T) {
+	for _, test := range []struct {
+		name, targets, extraDDL, wantError string
+	}{
+		{name: "malformed targets", targets: "not-json", wantError: "invalid character"},
+		{name: "incomplete earlier allowlist migration", targets: "[]", extraDDL: "CREATE TABLE gost_allowlists (id integer PRIMARY KEY)", wantError: "node_ids"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := legacyEndpointDatabase(t)
+			stamp := time.Now().UTC()
+			insertLegacyEndpoint(t, db, 11, "source", "tcp", []string{"legacy.example:443"}, false, "hash", stamp)
+			insertLegacyEndpoint(t, db, 12, "destination", "tcp", nil, false, "round", stamp)
+			if err := db.Exec(`INSERT INTO tunnels (id, name, entry_node_id, exit_node_id, entry_rule_id, exit_rule_id, protocol, strategy, targets) VALUES (21, 'existing', 1, 2, 11, 12, 'tls', 'round', ?)`, test.targets).Error; err != nil {
+				t.Fatal(err)
+			}
+			if test.extraDDL != "" {
+				if err := db.Exec(test.extraDDL).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := autoMigrate(db); err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("migration error = %v, want %q", err, test.wantError)
+			}
+			var entry, exit model.GostRule
+			if err := db.First(&entry, 11).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(&exit, 12).Error; err != nil {
+				t.Fatal(err)
+			}
+			if entry.Role != "" || exit.Role != "" || exit.Protocol != "tcp" || len(exit.Targets) != 0 || !slices.Equal(entry.Targets, []string{"legacy.example:443"}) {
+				t.Fatalf("invalid stored data caused endpoint changes: entry=%+v, exit=%+v", entry, exit)
+			}
+		})
 	}
 }
 
