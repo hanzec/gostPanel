@@ -73,6 +73,13 @@ func TestRedirectMarkAvoidsForeignMarkRules(t *testing.T) {
 		{"masked assignment", `{"mangle":{"key":{"ct":{"key":"mark"}},"value":{"|":[{"&":[{"ct":{"key":"mark"}},4294901760]},18256]}}}`, func(mark uint32) bool { return mark&0xffff == preferred&0xffff }},
 		{"anonymous interval", `{"match":{"op":"==","left":{"meta":{"key":"mark"}},"right":{"set":[{"range":[1497450300,1497450340]},2]}}}`, func(mark uint32) bool { return mark >= 1497450300 && mark <= 1497450340 || mark == 2 }},
 		{"named set", `{"match":{"op":"==","left":{"meta":{"key":"mark"}},"right":"@assigned"}}`, func(mark uint32) bool { return mark == preferred }},
+		{"less than", `{"match":{"op":"<","left":{"meta":{"key":"mark"}},"right":"0x59414751"}}`, func(mark uint32) bool { return mark < preferred+1 }},
+		{"at most", `{"match":{"op":"<=","left":{"meta":{"key":"mark"}},"right":"0x59414750"}}`, func(mark uint32) bool { return mark <= preferred }},
+		{"greater than", `{"match":{"op":">","left":{"meta":{"key":"mark"}},"right":"0x5941474f"}}`, func(mark uint32) bool { return mark > preferred-1 }},
+		{"at least", `{"match":{"op":">=","left":{"meta":{"key":"mark"}},"right":"0x59414750"}}`, func(mark uint32) bool { return mark >= preferred }},
+		{"exclusive OR", `{"match":{"op":"==","left":{"^":[{"meta":{"key":"mark"}},255]},"right":"0x594147af"}}`, func(mark uint32) bool { return mark == preferred }},
+		{"left shift", `{"match":{"op":"==","left":{"<<":[{"meta":{"key":"mark"}},8]},"right":"0x41475000"}}`, func(mark uint32) bool { return mark&0xffffff == preferred&0xffffff }},
+		{"right shift", `{"match":{"op":"==","left":{">>":[{"meta":{"key":"mark"}},24]},"right":89}}`, func(mark uint32) bool { return mark>>24 == preferred>>24 }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -97,5 +104,44 @@ func TestRedirectMarkReportsUnavailableOrUninspectableRules(t *testing.T) {
 		if mark, err := selectRedirectMark([]byte(ruleset), "yagp_redirect", 100); err == nil || mark != 0 {
 			t.Fatalf("unavailable mark returned %#x, %v", mark, err)
 		}
+	}
+}
+
+func TestRedirectMarkRetainsPreferredValueAcrossMarkCopies(t *testing.T) {
+	ruleset := []byte(`{"nftables":[{"rule":{"family":"inet","table":"firewall","chain":"output","expr":[
+		{"match":{"op":"==","left":{"payload":{"protocol":"tcp","field":"dport"}},"right":100}},
+		{"mangle":{"key":{"ct":{"key":"mark"}},"value":{"meta":{"key":"mark"}}}}
+	]}}]}`)
+	if mark, err := selectRedirectMark(ruleset, "yagp_redirect", 100); err != nil || mark != 100 {
+		t.Fatalf("unrelated port or mark copy changed the preferred mark to %#x, %v", mark, err)
+	}
+}
+
+func TestRedirectMarkRejectsUnsupportedRuleExpressions(t *testing.T) {
+	tests := []struct {
+		expr, diagnostic string
+	}{
+		{`{"match":{"op":"==","left":{"meta":{"key":"mark"}},"right":{"ct":{"key":"mark"}}}}`, "unsupported mark comparison"},
+		{`{"match":{"op":"==","left":{"&":[{"meta":{"key":"mark"}}]},"right":100}}`, "unsupported mark comparison"},
+		{`{"match":{"op":"==","left":{"&":[{"meta":{"key":"mark"}},"0x100000000"]},"right":100}}`, "unsupported mark comparison"},
+		{`{"match":{"op":"==","left":{"&":[{"meta":{"key":"mark"}},{"payload":{"protocol":"tcp","field":"dport"}}]},"right":100}}`, "unsupported mark comparison"},
+		{`{"match":{"op":"==","left":{"+":[{"meta":{"key":"mark"}},1]},"right":100}}`, "unsupported mark comparison"},
+		{`{"match":{"op":">=","left":{"meta":{"key":"mark"}},"right":1.5}}`, "unsupported ordered mark comparison"},
+		{`{"match":{"op":"unknown","left":{"meta":{"key":"mark"}},"right":100}}`, "unsupported mark comparison operator"},
+		{`{"mangle":{"key":{"meta":{"key":"mark"}},"value":{"payload":{"protocol":"tcp","field":"dport"}}}}`, "unsupported mark assignment"},
+		{`{"match":{"op":"==","left":{"meta":{"key":"mark"}},"right":"symbolic"}}`, "unsupported mark match value"},
+		{`{"match":{"op":"==","left":{"meta":{"key":"mark"}},"right":{"invalid":100}}}`, "unsupported mark match value"},
+		{`{"match":{"op":"==","left":{"meta":{"key":"mark"}},"right":{"set":[100,false]}}}`, "unsupported mark match value"},
+	}
+	for _, test := range tests {
+		ruleset := fmt.Sprintf(`{"nftables":[{"rule":{"family":"ip","table":"existing","chain":"output","expr":[%s]}}]}`, test.expr)
+		mark, err := selectRedirectMark([]byte(ruleset), "yagp_redirect", 100)
+		if err == nil || mark != 0 || !strings.Contains(err.Error(), "ip existing output: "+test.diagnostic) {
+			t.Errorf("mark with %s = %#x, %v, want %q", test.expr, mark, err, test.diagnostic)
+		}
+	}
+	if mark, err := selectRedirectMark([]byte("{"), "yagp_redirect", 100); mark != 0 || err == nil ||
+		!strings.Contains(err.Error(), "read nftables marks") {
+		t.Fatalf("malformed ruleset selected %#x, %v", mark, err)
 	}
 }

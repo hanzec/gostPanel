@@ -1,6 +1,7 @@
 package nodebridge
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,10 +22,13 @@ func TestConfigureTransparentRedirectSelectsPersistsAndRemoves(t *testing.T) {
 	t.Setenv("PATH", bin)
 	applied := filepath.Join(bin, "applied")
 	t.Setenv("YAGP_TEST_NFT_APPLIED", applied)
+	live := filepath.Join(bin, "live")
+	t.Setenv("YAGP_TEST_NFT_LIVE", live)
 	nft := filepath.Join(bin, "nft")
 	writeUpgradeFixture(t, nft, `#!/bin/sh
 case "$1" in
-  -j) echo '{"nftables":[{"rule":{"family":"inet","table":"existing","expr":[{"match":{"op":"==","left":{"&":[{"meta":{"key":"mark"}},4278190080]},"right":1493172224}}]}}]}' ;;
+  -j) if [ -f "$YAGP_TEST_NFT_LIVE" ]; then /bin/cat "$YAGP_TEST_NFT_LIVE";
+      else echo '{"nftables":[{"rule":{"family":"inet","table":"existing","expr":[{"match":{"op":"==","left":{"&":[{"meta":{"key":"mark"}},4278190080]},"right":1493172224}}]}}]}'; fi ;;
   -c) /bin/cat >/dev/null ;;
   -f) /bin/cat >"$YAGP_TEST_NFT_APPLIED" ;;
   *) exit 1 ;;
@@ -65,6 +69,33 @@ esac
 	if err != nil || state.Revision != 2 || state.Mark != plan.GetMark() || len(state.RelayIPs) != 1 || state.RelayIPs[0].String() != req.RelayHost {
 		t.Fatalf("updated state = %+v, %v", state, err)
 	}
+	if err := os.Remove(applied); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.ConfigureTransparentRedirect(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if batch, err := os.ReadFile(applied); err != nil || !strings.Contains(string(batch), redirectTableComment(state.Version, state.Revision)) {
+		t.Fatalf("reapplying lost rules should keep their revision: %s, %v", batch, err)
+	}
+	version := redirectTableComment(state.Version, state.Revision)
+	const liveTable = `{"table":{"family":"inet","name":"yagp_redirect_42","comment":%q}}`
+	if err := os.WriteFile(live, []byte(fmt.Sprintf(`{"nftables":[`+liveTable+`]}`, version)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(applied); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := control.ConfigureTransparentRedirect(ctx, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(applied); !os.IsNotExist(err) {
+		t.Fatalf("unchanged live policy was reapplied: %v", err)
+	}
+	req.Action = prepare
+	if active, err := control.ConfigureTransparentRedirect(ctx, req); err != nil || !active.GetActive() || active.GetMark() != state.Mark {
+		t.Fatalf("preparing active ingress returned %v, %v", active, err)
+	}
 	if _, err := control.ConfigureTransparentRedirect(ctx, &nodegrpc.TransparentRedirectRequest{
 		Action: prepare, Owner: "rule-6", Port: 12346, RelayHost: req.RelayHost,
 	}); status.Code(err) != codes.AlreadyExists {
@@ -86,5 +117,57 @@ esac
 	req.Action = apply
 	if _, err := control.ConfigureTransparentRedirect(ctx, req); status.Code(err) != codes.NotFound {
 		t.Fatalf("stale sync returned %v", err)
+	}
+	req.Action = remove
+	if _, err := control.ConfigureTransparentRedirect(ctx, req); err != nil {
+		t.Fatalf("repeat removal returned %v", err)
+	}
+}
+
+func TestConfigureTransparentRedirectRejectsInvalidRequestsAndNodeState(t *testing.T) {
+	const prepare = nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_PREPARE
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
+	control := &controlServer{}
+	ctx := t.Context()
+	if _, err := control.ConfigureTransparentRedirect(ctx, nil); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unconfigured node returned %v", err)
+	}
+	control.config = Config{NodeID: 42, ConfigFile: filepath.Join(t.TempDir(), "node.yaml")}
+	valid := &nodegrpc.TransparentRedirectRequest{Action: prepare, Owner: "rule-5", Port: 12345, RelayHost: "192.0.2.42"}
+	for _, invalid := range []*nodegrpc.TransparentRedirectRequest{
+		{Action: prepare, Owner: "../../node.yaml", Port: valid.Port, RelayHost: valid.RelayHost},
+		{Owner: valid.Owner, Port: valid.Port, RelayHost: valid.RelayHost},
+		{Action: prepare, Owner: valid.Owner, Port: 65536, RelayHost: valid.RelayHost},
+	} {
+		if _, err := control.ConfigureTransparentRedirect(ctx, invalid); status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("invalid request %v returned %v", invalid, err)
+		}
+	}
+	if _, err := control.ConfigureTransparentRedirect(ctx, valid); status.Code(err) != codes.Unimplemented {
+		t.Fatalf("missing nft binary returned %v", err)
+	}
+	path := redirectStatePath(control.config)
+	for _, invalid := range []string{`{`, `{"version":1,"owner":"rule-5","port":12345,"mark":0}`} {
+		if err := os.WriteFile(path, []byte(invalid), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := control.ConfigureTransparentRedirect(ctx, valid); status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "read transparent redirect state") {
+			t.Fatalf("invalid saved state returned %v", err)
+		}
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	nft := filepath.Join(bin, "nft")
+	for _, tc := range []struct{ fixture, message string }{
+		{"echo 'permission denied' >&2; exit 1", "read nftables rules"},
+		{`echo '{"nftables":[{"table":{"family":"inet","name":"yagp_redirect_42"}}]}'`, "does not match"},
+		{`echo '{"nftables":[{"rule":{"family":"inet","table":"other","expr":[{"match":{"op":"!=","left":{"meta":{"key":"mark"}},"right":0}}]}}]}'`, "select transparent redirect mark"},
+	} {
+		writeUpgradeFixture(t, nft, "#!/bin/sh\n"+tc.fixture+"\n")
+		if _, err := control.ConfigureTransparentRedirect(ctx, valid); status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), tc.message) {
+			t.Fatalf("rule listing with %q returned %v", tc.message, err)
+		}
 	}
 }

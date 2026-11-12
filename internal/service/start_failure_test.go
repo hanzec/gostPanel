@@ -63,6 +63,15 @@ func TestRuleStartHandlesNodeObserverAndProvisioningFailures(t *testing.T) {
 		t.Fatal("failed rule start left a forwarding service")
 	}
 
+	requireServiceError(t, db.Exec("CREATE TRIGGER reject_runtime BEFORE UPDATE OF status ON rules WHEN NEW.status = 'running' BEGIN SELECT RAISE(ABORT, 'test write rejected'); END").Error, nil)
+	requireWriteRejected(t, rules.Start(rule.ID, testAdmin, testIP, testAgent))
+	savedAfterFailure, err := rules.GetByID(rule.ID)
+	requireServiceError(t, err, nil)
+	if savedAfterFailure.Status == model.RuleStatusRunning || remote.service(fmt.Sprintf("rule-%d", rule.ID)).Name != "" {
+		t.Fatal("rejected runtime update left a live rule or a running record")
+	}
+	requireServiceError(t, db.Exec("DROP TRIGGER reject_runtime").Error, nil)
+
 	start(nil)
 	running, err := rules.GetByID(rule.ID)
 	requireServiceError(t, err, nil)

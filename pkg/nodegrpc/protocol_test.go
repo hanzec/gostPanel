@@ -21,6 +21,16 @@ type protocolExchange struct {
 	call     func(context.Context, V1Client) (proto.Message, error)
 }
 
+func TestTransparentRedirectTableNameUsesEntireNodeID(t *testing.T) {
+	const id = 1<<64 - 1
+	if got := TransparentRedirectTableName(id); got != "yagp_redirect_18446744073709551615" {
+		t.Fatalf("transparent redirect table name = %q", got)
+	}
+	if got := NftTableName(id); got != "yagp_node_18446744073709551615" {
+		t.Fatalf("legacy node table name = %q", got)
+	}
+}
+
 func exchange[Request, Response proto.Message](
 	method string,
 	call func(V1Client, context.Context, Request, ...grpc.CallOption) (Response, error),

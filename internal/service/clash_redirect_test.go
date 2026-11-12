@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -49,7 +50,7 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 		t.Fatal("failed tunnel provisioning persisted Gost config or enabled redirection")
 	}
 	entryRemote.mu.Lock()
-	entryRemote.rejectPrepare = true
+	entryRemote.prepareCode = codes.FailedPrecondition
 	entryRemote.mu.Unlock()
 	_, err = tunnels.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrTunnelTransparentRedirect)
@@ -59,7 +60,7 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 		t.Fatal("mark conflict persisted Gost configuration")
 	}
 	entryRemote.mu.Lock()
-	entryRemote.rejectPrepare, entryRemote.rejectApply = false, true
+	entryRemote.prepareCode, entryRemote.rejectApply = codes.OK, true
 	entryRemote.mu.Unlock()
 	_, err = tunnels.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrTunnelTransparentRedirect)
@@ -158,11 +159,22 @@ type redirectLifecycleNode struct {
 	saves          []bool
 	savedOnApply   bool
 	redirectActive bool
-	rejectPrepare  bool
+	prepareCode    codes.Code
 	rejectApply    bool
+	removeCode     codes.Code
+	rejectResource string
 }
 
 func (n *redirectLifecycleNode) Execute(ctx context.Context, request *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
+	if request.GetMethod() == http.MethodPost && (request.GetPath() == "/config/services" || request.GetPath() == "/config/chains") {
+		var resource struct{ Name string }
+		n.mu.Lock()
+		rejected := n.rejectResource != "" && json.Unmarshal(request.GetBody(), &resource) == nil && resource.Name == n.rejectResource
+		n.mu.Unlock()
+		if rejected {
+			return &nodegrpc.CommandReply{StatusCode: http.StatusServiceUnavailable}, nil
+		}
+	}
 	reply, err := n.lifecycleNode.Execute(ctx, request)
 	if request.GetMethod() == http.MethodPost && request.GetPath() == "/config?format=yaml" && reply.GetStatusCode() == http.StatusOK {
 		n.mu.Lock()
@@ -184,18 +196,21 @@ func (n *redirectLifecycleNode) ConfigureTransparentRedirect(_ context.Context, 
 	defer n.mu.Unlock()
 	switch request.GetAction() {
 	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_PREPARE:
-		if n.rejectPrepare {
-			return nil, status.Error(codes.FailedPrecondition, "no nonconflicting socket mark")
+		if n.prepareCode != codes.OK {
+			return nil, status.Error(n.prepareCode, "cannot prepare redirect")
 		}
 		return &nodegrpc.TransparentRedirectReply{Mark: n.mark, DockerAddress: n.dockerAddress, Active: n.redirectActive}, nil
 	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY:
 		n.savedOnApply = len(n.saves) > 0 && n.saves[len(n.saves)-1]
-		n.lastRelayHost = request.GetRelayHost()
 		if n.rejectApply {
 			return nil, status.Error(codes.FailedPrecondition, "cannot apply redirect")
 		}
+		n.lastRelayHost = request.GetRelayHost()
 		n.redirectActive = true
 	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE:
+		if n.removeCode != codes.OK {
+			return nil, status.Error(n.removeCode, "cannot remove redirect")
+		}
 		n.redirectActive = false
 	default:
 		return nil, status.Error(codes.InvalidArgument, "unexpected redirect action")

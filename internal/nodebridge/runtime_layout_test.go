@@ -24,6 +24,7 @@ func TestMigrateSystemdRuntime(t *testing.T) {
 		brokenGost bool
 	}{
 		{name: "installed"},
+		{name: "nftables boot enable failed", fail: "enable nftables.service"},
 		{name: "rollback", fail: "enable --now yagp-daemon.service yagp-gost.service"},
 		{name: "rollback when Gost is unhealthy", brokenGost: true},
 	} {
@@ -36,6 +37,9 @@ func TestMigrateSystemdRuntime(t *testing.T) {
 			t.Setenv("TEST_SYSTEMCTL_FAILURE", test.fail)
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
+if [ "$1" = "show" ]; then
+    printf '%s\n' loaded
+fi
 test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 `)
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "nft"), "#!/bin/sh\nexit 0\n")
@@ -51,6 +55,13 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			log, readErr := os.ReadFile(logPath)
 			if readErr != nil {
 				t.Fatal(readErr)
+			}
+			if test.fail == "enable nftables.service" {
+				if err == nil || ReadRuntimeLayout(configPath) != 0 ||
+					string(log) != "show --property=LoadState --value nftables.service\nenable nftables.service\n" {
+					t.Fatalf("nftables failure should leave the old services untouched: %v\n%s", err, log)
+				}
+				return
 			}
 			if test.fail != "" || test.brokenGost {
 				if err == nil || ReadRuntimeLayout(configPath) != 0 || !strings.Contains(string(log), "enable --now yagp-daemon-42.service yagp-gost-42.service") {
@@ -90,44 +101,72 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 }
 
 func TestUpdateSystemdNetworkOrder(t *testing.T) {
-	for _, state := range []string{"loaded", "not-found"} {
-		t.Run(state, func(t *testing.T) {
+	for _, test := range []struct {
+		name, serviceState, rejectedCommand, blockedPath string
+	}{
+		{name: "installed", serviceState: "loaded"},
+		{name: "no nftables service", serviceState: "not-found"},
+		{name: "enable failed", serviceState: "loaded", rejectedCommand: "enable nftables.service"},
+		{name: "reload failed", serviceState: "loaded", rejectedCommand: "daemon-reload"},
+		{name: "drop-in directory blocked", serviceState: "loaded", blockedPath: "directory"},
+		{name: "drop-in file blocked", serviceState: "loaded", blockedPath: "file"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			unitDir, nodeDir := t.TempDir(), t.TempDir()
 			configPath := filepath.Join(nodeDir, "node.yaml")
 			cfg := Config{NodeID: 42, RuntimeLayout: singleNodeLayoutVersion}
 			unit := filepath.Join(unitDir, cfg.runtimeUnit("daemon"))
+			dropIn := filepath.Join(unit+".d", redirectOrderDropIn)
 			logPath := filepath.Join(unitDir, "commands")
 			t.Setenv("PATH", unitDir)
 			t.Setenv("TEST_SYSTEMCTL_LOG", logPath)
-			t.Setenv("TEST_NFTABLES_STATE", state)
+			t.Setenv("TEST_NFTABLES_STATE", test.serviceState)
+			t.Setenv("TEST_SYSTEMCTL_FAILURE", test.rejectedCommand)
 			writeRuntimeTestFile(t, unit, "existing unit")
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
 if [ "$1" = "show" ]; then
     printf '%s\n' "$TEST_NFTABLES_STATE"
 fi
+test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 `)
 			writeRuntimeTestFile(t, filepath.Join(nodeDir, runtimeLayoutFile), "1\n")
-
-			if err := updateSystemdNetworkOrder(t.Context(), cfg, configPath, unitDir); err != nil {
-				t.Fatal(err)
+			switch test.blockedPath {
+			case "directory":
+				writeRuntimeTestFile(t, unit+".d", "unexpected file")
+			case "file":
+				if err := os.MkdirAll(dropIn, 0755); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if version := ReadRuntimeLayout(configPath); version != RuntimeLayoutVersion {
-				t.Fatalf("runtime layout version = %d", version)
+			fail := test.rejectedCommand != "" || test.blockedPath != ""
+			err := updateSystemdNetworkOrder(t.Context(), cfg, configPath, unitDir)
+			if (err != nil) != fail {
+				t.Fatalf("update systemd network order: %v, want failure %t", err, fail)
 			}
-			order, err := os.ReadFile(filepath.Join(unit+".d", redirectOrderDropIn))
-			if err != nil || string(order) != "[Unit]\nAfter=nftables.service docker.service\n" {
-				t.Fatalf("network ordering = %q, %v", order, err)
+			wantVersion := RuntimeLayoutVersion
+			if fail {
+				wantVersion = singleNodeLayoutVersion
+			} else {
+				order, err := os.ReadFile(dropIn)
+				if err != nil || string(order) != "[Unit]\nAfter=nftables.service docker.service\n" {
+					t.Fatalf("network ordering = %q, %v", order, err)
+				}
+			}
+			if version := ReadRuntimeLayout(configPath); version != wantVersion {
+				t.Fatalf("runtime layout version = %d, want %d", version, wantVersion)
 			}
 			current, err := os.ReadFile(unit)
 			if err != nil || string(current) != "existing unit" {
 				t.Fatalf("original unit was changed: %q, %v", current, err)
 			}
 			want := "show --property=LoadState --value nftables.service\n"
-			if state == "loaded" {
+			if test.serviceState == "loaded" {
 				want += "enable nftables.service\n"
 			}
-			want += "daemon-reload\n"
+			if test.rejectedCommand != "enable nftables.service" && test.blockedPath == "" {
+				want += "daemon-reload\n"
+			}
 			log, err := os.ReadFile(logPath)
 			if err != nil || string(log) != want {
 				t.Fatalf("systemctl commands = %q, %v, want %q", log, err, want)
@@ -163,6 +202,35 @@ func TestRuntimeUpdateRequiresAnInstalledSingleNode(t *testing.T) {
 	}
 	if err := UpdateSystemdRuntime(t.Context(), cfg, configPath); err == nil || !strings.Contains(err.Error(), "only one node") {
 		t.Fatalf("migration did not reject a second node: %v", err)
+	}
+}
+
+func TestRuntimeUpdateStatusUsesPersistedVersion(t *testing.T) {
+	if os.Getenv("YAGP_TEST_UPGRADE") != "1" {
+		t.Skip("requires an isolated Linux environment with /run/systemd/system")
+	}
+	unitDir, stateDir := t.TempDir(), t.TempDir()
+	t.Setenv("PATH", unitDir)
+	for _, executable := range []string{"systemctl", "systemd-run"} {
+		writeRuntimeTestFile(t, filepath.Join(unitDir, executable), "#!/bin/sh\nexit 0\n")
+	}
+	nodeDir := filepath.Join(stateDir, "42")
+	if err := os.Mkdir(nodeDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(nodeDir, "node.yaml")
+	cfg := Config{NodeID: 42, RuntimeLayout: singleNodeLayoutVersion}
+	writeRuntimeTestFile(t, filepath.Join(unitDir, cfg.runtimeUnit("daemon")), "installed")
+	writeRuntimeTestFile(t, filepath.Join(nodeDir, runtimeLayoutFile), "1\n")
+
+	if !runtimeUpdateRequired(cfg, configPath, unitDir) {
+		t.Fatal("existing single-node layout did not request network-order migration")
+	}
+	if err := updateSystemdNetworkOrder(t.Context(), cfg, configPath, unitDir); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeUpdateRequired(cfg, configPath, unitDir) {
+		t.Fatal("persisted version did not clear the update status for the running daemon")
 	}
 }
 

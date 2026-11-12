@@ -217,7 +217,7 @@ func TestEndpointTunnelRetainsLinkForRetryIfNodeCannotSave(t *testing.T) {
 }
 
 func TestEndpointTunnelRetriesEntranceCleanupAfterFailedFirstSave(t *testing.T) {
-	for _, action := range []string{"stop", "delete"} {
+	for _, action := range []string{"stop", "delete", "start"} {
 		t.Run(action, func(t *testing.T) {
 			db := newServiceTestDB(t)
 			loadServiceConfig(t, "report:\n  listen: 127.0.0.1:39001\n")
@@ -254,13 +254,27 @@ func TestEndpointTunnelRetriesEntranceCleanupAfterFailedFirstSave(t *testing.T) 
 			if entryRemote.chain(tunnelChainName(tunnel.ID)).Name == "" || exitRemote.service(relayServiceName(tunnel.ID)).Name == "" {
 				t.Fatal("failed entrance rollback must retain its chain and relay")
 			}
+			if action == "start" {
+				if err := svc.Start(tunnel.ID, testAdmin, testIP, testAgent); err == nil {
+					t.Fatal("restart proceeded before the previous partial configuration could be removed")
+				}
+			}
 			entryRemote.mu.Lock()
 			entryRemote.reject = nil
 			entryRemote.mu.Unlock()
-			if action == "stop" {
+			switch action {
+			case "stop":
 				requireServiceError(t, svc.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
-			} else {
+			case "delete":
 				requireServiceError(t, svc.Delete(tunnel.ID, testAdmin, testIP, testAgent), nil)
+			case "start":
+				requireServiceError(t, svc.Start(tunnel.ID, testAdmin, testIP, testAgent), nil)
+				current, err := svc.GetByID(tunnel.ID)
+				requireServiceError(t, err, nil)
+				if current.Status != model.TunnelStatusRunning || entryRemote.service(serviceID).Name == "" {
+					t.Fatalf("restart did not replace the partial configuration: %+v", current)
+				}
+				requireServiceError(t, svc.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
 			}
 			if entryRemote.service(serviceID).Name != "" || entryRemote.chain(tunnelChainName(tunnel.ID)).Name != "" || exitRemote.service(relayServiceName(tunnel.ID)).Name != "" {
 				t.Fatal("retry left a live entrance, chain or relay behind")
