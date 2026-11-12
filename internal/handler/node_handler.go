@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
 	"yagp/internal/dto"
+	"yagp/internal/model"
 	"yagp/internal/service"
+	"yagp/pkg/geoip"
 	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
@@ -16,11 +19,13 @@ import (
 type NodeHandler struct {
 	nodeService    *service.NodeService
 	upgradeService *service.NodeUpgradeService
+	geoIP          *geoip.Database
+	geoIPClient    *http.Client
 }
 
 // NewNodeHandler 创建节点控制器
-func NewNodeHandler(nodeService *service.NodeService, upgradeService *service.NodeUpgradeService) *NodeHandler {
-	return &NodeHandler{nodeService: nodeService, upgradeService: upgradeService}
+func NewNodeHandler(nodeService *service.NodeService, upgradeService *service.NodeUpgradeService, geoIP *geoip.Database) *NodeHandler {
+	return &NodeHandler{nodeService: nodeService, upgradeService: upgradeService, geoIP: geoIP, geoIPClient: http.DefaultClient}
 }
 
 // Create 创建节点
@@ -94,6 +99,7 @@ func (h *NodeHandler) Update(c *gin.Context) {
 		return
 	}
 
+	h.setNodeRegions(c.Request.Context(), node)
 	response.Success(c, node)
 }
 
@@ -129,6 +135,7 @@ func (h *NodeHandler) GetByID(c *gin.Context) {
 		return
 	}
 
+	h.setNodeRegions(c.Request.Context(), node)
 	response.Success(c, withCurrentTrafficUsage(*node, time.Now()))
 }
 
@@ -148,9 +155,12 @@ func (h *NodeHandler) List(c *gin.Context) {
 
 	now := time.Now()
 	items := make([]nodeTrafficResponse, len(nodes))
+	regionTargets := make([]*model.GostNode, len(nodes))
 	for i, node := range nodes {
 		items[i] = withCurrentTrafficUsage(node, now)
+		regionTargets[i] = &items[i].GostNode
 	}
+	h.setNodeRegions(c.Request.Context(), regionTargets...)
 	response.SuccessPage(c, items, total, req.Page, req.PageSize)
 }
 

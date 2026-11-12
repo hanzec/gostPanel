@@ -15,6 +15,7 @@ import (
 	"yagp/internal/model"
 	"yagp/internal/repository"
 	"yagp/internal/service"
+	"yagp/pkg/geoip"
 	"yagp/pkg/logger"
 	"yagp/pkg/response"
 
@@ -27,6 +28,7 @@ import (
 type handlerHTTPFixture struct {
 	engine *gin.Engine
 	db     *gorm.DB
+	geoIP  *geoip.Database
 }
 
 func newHandlerHTTPFixture(t *testing.T) *handlerHTTPFixture {
@@ -106,8 +108,8 @@ type handlerPage[T any] struct {
 	PageSize int   `json:"pageSize"`
 }
 
-func (f *handlerHTTPFixture) registerNodes() {
-	h := NewNodeHandler(service.NewNodeService(f.db, ""), service.NewNodeUpgradeService(f.db))
+func (f *handlerHTTPFixture) registerNodes() *NodeHandler {
+	h := NewNodeHandler(service.NewNodeService(f.db, ""), service.NewNodeUpgradeService(f.db), f.geoIP)
 	f.engine.GET("/nodes", h.List)
 	f.engine.POST("/nodes", h.Create)
 	f.engine.GET("/nodes/:id", h.GetByID)
@@ -123,6 +125,7 @@ func (f *handlerHTTPFixture) registerNodes() {
 	f.engine.GET("/nodes/:id/upgrade", h.GetUpgrade)
 	f.engine.PUT("/nodes/:id/upgrade", h.SetUpgradePolicy)
 	f.engine.POST("/nodes/:id/upgrade/:component", h.StartUpgrade)
+	return h
 }
 
 func (f *handlerHTTPFixture) registerForwarding() {

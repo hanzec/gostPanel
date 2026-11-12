@@ -14,6 +14,7 @@ import (
 	"yagp/internal/model"
 	"yagp/internal/router"
 	"yagp/internal/service"
+	"yagp/pkg/geoip"
 	"yagp/pkg/logger"
 
 	"github.com/gin-gonic/gin"
@@ -93,7 +94,8 @@ func main() {
 	}
 
 	nodeUpgrade := service.NewNodeUpgradeService(db)
-	r, err := router.NewRouter(db, cfg.Authentik, nodeUpgrade, reportFingerprint)
+	geoIP := geoip.NewDatabase(geoip.DefaultDatabasePath, cfg.GeoIP.DownloadURL)
+	r, err := router.NewRouter(db, cfg.Authentik, nodeUpgrade, reportFingerprint, geoIP)
 	if err != nil {
 		logger.Fatalf("Authentik 配置无效: %v", err)
 	}
@@ -118,7 +120,6 @@ func main() {
 	defer stopBackground()
 	go service.NewGostRulesetService(db).Run(backgroundCtx)
 	go nodeUpgrade.Run(backgroundCtx)
-	go service.RunNodeRegions(backgroundCtx, db)
 
 	// 启动自动备份服务
 	backupService := service.NewBackupService(db)
