@@ -97,6 +97,7 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 		values["ipv6"] = node.IPv6
 		values["addresses"] = nil
 		values["local_addresses"] = nil
+		values["mptcp_supported"] = false
 		values["session_generation"] = gorm.Expr("session_generation + 1")
 		result := tx.Model(&model.GostNode{}).
 			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
@@ -112,15 +113,19 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 	})
 }
 
-func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses, localAddresses []string) error {
+func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses, localAddresses []string, mptcpSupported bool) error {
 	// The session keeps its authenticated generation, but the addresses can change while it is connected.
 	query := r.DB.WithContext(ctx).Model(&model.GostNode{}).
 		Where("id = ? AND session_generation = ?", node.ID, node.SessionGeneration)
 	var current model.GostNode
-	if err := query.Session(&gorm.Session{}).Select("ipv4", "ipv6").Take(&current).Error; err != nil {
+	if err := query.Session(&gorm.Session{}).Select("ipv4", "ipv6", "mptcp_supported").Take(&current).Error; err != nil {
 		return err
 	}
 	updates := make(map[string]any)
+	// Older daemons omit capability reports, including after a downgrade.
+	if current.MPTCPSupported != mptcpSupported {
+		updates["mptcp_supported"] = mptcpSupported
+	}
 	// A transient public IP probe failure can hide the IPv4 address of a node behind NAT.
 	if ipv4 == "" {
 		ipv4 = current.IPv4

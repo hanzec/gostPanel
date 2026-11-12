@@ -32,7 +32,7 @@ func TestNodeHTTPAddressMappings(t *testing.T) {
 	path := fmt.Sprintf("/nodes/%d", node.ID)
 	assertUnavailableListenIP("PUT", path, mappings)
 	repo := repository.NewNodeRepository(f.db)
-	if err := repo.UpdateIPs(t.Context(), &node, "192.0.2.8", "", []string{"192.0.2.8"}, []string{"10.0.0.8", "2001:db8::8"}); err != nil {
+	if err := repo.UpdateIPs(t.Context(), &node, "192.0.2.8", "", []string{"192.0.2.8"}, []string{"10.0.0.8", "2001:db8::8"}, false); err != nil {
 		t.Fatal(err)
 	}
 	assertUnavailableListenIP("PUT", path, `{
@@ -58,7 +58,7 @@ func TestNodeHTTPAddressMappings(t *testing.T) {
 			t.Fatalf("mapped IP %s was not searchable: %+v", ip, found)
 		}
 	}
-	if err := repo.UpdateIPs(t.Context(), &node, "192.0.2.8", "", []string{"192.0.2.8"}, []string{"10.0.0.9"}); err != nil {
+	if err := repo.UpdateIPs(t.Context(), &node, "192.0.2.8", "", []string{"192.0.2.8"}, []string{"10.0.0.9"}, false); err != nil {
 		t.Fatal(err)
 	}
 	replaced := handlerData[model.GostNode](t, f.request(t, "PUT", path, `{
@@ -91,7 +91,7 @@ func TestNodeHTTPAddressMappingsUseLegacyReportsUntilLocalSnapshot(t *testing.T)
 		{[]string{ipv4, "2001:db8::8"}, nil, "2001:db8::8", 200},
 		{nil, []string{}, ipv4, 400},
 	} {
-		if err := repo.UpdateIPs(t.Context(), &node, ipv4, "", test.addresses, test.localAddresses); err != nil {
+		if err := repo.UpdateIPs(t.Context(), &node, ipv4, "", test.addresses, test.localAddresses, false); err != nil {
 			t.Fatal(err)
 		}
 		f.request(t, "PUT", path, fmt.Sprintf(`{
@@ -106,7 +106,7 @@ func TestNodeHTTPRejectsInvalidAddressMappings(t *testing.T) {
 	f.registerNodes()
 	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{"name":"mapped"}`, 200))
 	path := fmt.Sprintf("/nodes/%d", node.ID)
-	if err := repository.NewNodeRepository(f.db).UpdateIPs(t.Context(), &node, "", "", nil, []string{"10.0.0.8"}); err != nil {
+	if err := repository.NewNodeRepository(f.db).UpdateIPs(t.Context(), &node, "", "", nil, []string{"10.0.0.8"}, false); err != nil {
 		t.Fatal(err)
 	}
 	node = handlerData[model.GostNode](t, f.request(t, "PUT", path, `{

@@ -24,3 +24,10 @@ export const protocolOptionFields = protocol => {
   const fields = (relayOptions.protocols[protocol] || []).flatMap(group => relayOptions.groups[group] || [])
   return [...new Map(fields.map(field => [field.id, field])).values()]
 }
+
+export const supportedProtocolOptions = (options, mptcpSupported, savedMptcp) => {
+  const supported = { ...options }
+  // Older daemons may not report support; keep an unchanged value saved for this exit.
+  if (mptcpSupported !== true && options.mptcp !== savedMptcp) delete supported.mptcp
+  return supported
+}

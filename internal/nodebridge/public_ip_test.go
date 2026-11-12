@@ -76,6 +76,38 @@ func TestReportLocalIPChangesWithoutPublicAddresses(t *testing.T) {
 	}
 }
 
+func TestReportMultipathTCPChangesAndRetry(t *testing.T) {
+	supported, unsupported := true, false
+	for _, test := range []struct {
+		name   string
+		values []*bool
+		want   []bool
+	}{
+		{"first unsupported report", []*bool{&unsupported, &unsupported, &unsupported}, []bool{false, false}},
+		{"changes and retries", []*bool{&supported, &supported, &supported, &unsupported, &unsupported, &supported, &supported, &supported}, []bool{true, true, false, true, true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var snapshots []nodeIPSnapshot
+			for _, value := range test.values {
+				snapshots = append(snapshots, nodeIPSnapshot{local: []string{"10.0.0.2"}, mptcpSupported: value})
+			}
+			var got []bool
+			for _, request := range runIPReports(t, snapshots) {
+				if request.MptcpSupported == nil {
+					t.Fatal("MPTCP report omitted the detected result")
+				}
+				if request.GetLocalIpSnapshot() == nil {
+					t.Fatal("capability change omitted the available local snapshot needed by older panels")
+				}
+				got = append(got, request.GetMptcpSupported())
+			}
+			if !slices.Equal(got, test.want) {
+				t.Fatalf("MPTCP reports = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func runIPReports(t *testing.T, snapshots []nodeIPSnapshot) []*nodegrpc.NodeIPsRequest {
 	t.Helper()
 	reports := &ipReportRecorder{requests: make(chan *nodegrpc.NodeIPsRequest, 8)}

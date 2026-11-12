@@ -78,6 +78,13 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 		t.Fatalf("metadata update overwrote enrollment or health state: %+v", current)
 	}
 
+	supported := true
+	mustPersist(t, nodes.UpdateIPs(ctx, current, "", "", nil, nil, supported))
+	current, err = nodes.FindByID(current.ID)
+	mustPersist(t, err)
+	if !current.MPTCPSupported {
+		t.Fatal("daemon capability was not saved before re-enrollment")
+	}
 	old := *current
 	mustPersist(t, nodes.UpdateStatus(current.ID, model.NodeStatusOffline))
 	mustPersist(t, nodes.SetRegistrationToken(ctx, current.ID, "second", time.Now().UTC().Add(time.Hour)))
@@ -86,17 +93,20 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	if current.Password != old.Password || current.SessionGeneration != old.SessionGeneration+1 || current.AccessTokenHash != credentials.AccessTokenHash || !slices.Equal(current.ManualAddresses, manual) {
 		t.Fatal("enrollment did not advance public credentials while preserving the Gost password")
 	}
-	if err := nodes.UpdateIPs(ctx, &old, "", "2001:db8::99", nil, nil); !errors.Is(err, gorm.ErrRecordNotFound) {
+	if current.MPTCPSupported {
+		t.Fatal("new enrollment retained the previous daemon's capability")
+	}
+	if err := nodes.UpdateIPs(ctx, &old, "", "2001:db8::99", nil, nil, supported); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("updating addresses with a superseded enrollment: %v", err)
 	}
-	mustPersist(t, nodes.UpdateIPs(ctx, current, "", "2001:db8::1", nil, nil))
+	mustPersist(t, nodes.UpdateIPs(ctx, current, "", "2001:db8::1", nil, nil, false))
 	current, err = nodes.FindByID(current.ID)
 	mustPersist(t, err)
 	if current.Address != "198.51.100.1" || current.IPv6 != "2001:db8::1" {
 		t.Fatalf("IPv6-only update displaced the IPv4 control address: %+v", current)
 	}
-	mustPersist(t, nodes.UpdateIPs(ctx, current, current.IPv4, current.IPv6, nil, nil))
-	mustPersist(t, nodes.UpdateIPs(ctx, current, "198.51.100.2", "2001:db8::2", nil, nil))
+	mustPersist(t, nodes.UpdateIPs(ctx, current, current.IPv4, current.IPv6, nil, nil, false))
+	mustPersist(t, nodes.UpdateIPs(ctx, current, "198.51.100.2", "2001:db8::2", nil, nil, false))
 	mustPersist(t, nodes.UpdateStats(current.ID, 3, 4))
 	mustPersist(t, nodes.UpdateStats(current.ID, 5, 2))
 	mustPersist(t, nodes.SetStats(ctx, current.ID, 2, 9))
@@ -137,19 +147,19 @@ func TestNodeRepositoryKeepsPrimaryIPv4InNewAddressSnapshots(t *testing.T) {
 	ctx := t.Context()
 	node := model.GostNode{Name: "edge"}
 	mustPersist(t, nodes.Create(&node))
-	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::1", []string{"2001:db8::1"}, nil))
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::1", []string{"2001:db8::1"}, nil, false))
 	saved, err := nodes.FindByID(node.ID)
 	mustPersist(t, err)
 	if saved.Address != "2001:db8::1" || saved.IPv4 != "" {
 		t.Fatalf("IPv6-only node did not keep an IPv6 primary address: %+v", saved)
 	}
-	mustPersist(t, nodes.UpdateIPs(ctx, &node, "192.0.2.1", "", []string{"192.0.2.1"}, nil))
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "192.0.2.1", "", []string{"192.0.2.1"}, nil, false))
 	saved, err = nodes.FindByID(node.ID)
 	mustPersist(t, err)
 	if saved.IPv6 != "" || !slices.Equal(saved.Addresses, []string{"192.0.2.1"}) {
 		t.Fatalf("new address snapshot did not clear IPv6: %+v", saved)
 	}
-	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::2", []string{"2001:db8::2"}, nil))
+	mustPersist(t, nodes.UpdateIPs(ctx, &node, "", "2001:db8::2", []string{"2001:db8::2"}, nil, false))
 	saved, err = nodes.FindByID(node.ID)
 	mustPersist(t, err)
 	if saved.Address != "192.0.2.1" || saved.IPv4 != "192.0.2.1" || saved.IPv6 != "2001:db8::2" ||

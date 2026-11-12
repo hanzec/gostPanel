@@ -78,7 +78,7 @@ func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.Nod
 	if err != nil {
 		return nil, err
 	}
-	if ipv4 == "" && ipv6 == "" && request.GetLocalIpSnapshot() == nil {
+	if ipv4 == "" && ipv6 == "" && request.GetLocalIpSnapshot() == nil && request.MptcpSupported == nil {
 		return nil, status.Error(codes.InvalidArgument, "missing node IP addresses")
 	}
 	addresses, err := reportedAddresses(request.GetAddresses(), ipv4, ipv6)
@@ -89,7 +89,7 @@ func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.Nod
 	if err != nil {
 		return nil, err
 	}
-	if err := h.nodes.UpdateIPs(ctx, node, ipv4, ipv6, addresses, localAddresses); err != nil {
+	if err := h.nodes.UpdateIPs(ctx, node, ipv4, ipv6, addresses, localAddresses, request.GetMptcpSupported()); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
 		}

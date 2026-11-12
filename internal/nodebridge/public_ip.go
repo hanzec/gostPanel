@@ -15,8 +15,9 @@ import (
 )
 
 type nodeIPSnapshot struct {
-	ipv4, ipv6    string
-	public, local []string
+	ipv4, ipv6     string
+	public, local  []string
+	mptcpSupported *bool
 }
 
 func reportIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client,
@@ -25,16 +26,19 @@ func reportIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client
 	var lastIPv4, lastIPv6 string
 	var lastAddresses []string
 	var lastLocal []string
+	var lastMPTCP *bool
 	for ctx.Err() == nil {
 		snapshot := detect(ctx)
 		publicChanged := (snapshot.ipv4 != "" && snapshot.ipv4 != lastIPv4) || (snapshot.ipv6 != "" && snapshot.ipv6 != lastIPv6) ||
 			(len(snapshot.public) != 0 && !slices.Equal(snapshot.public, lastAddresses))
 		localChanged := snapshot.local != nil && (lastLocal == nil || !slices.Equal(snapshot.local, lastLocal))
-		if publicChanged || localChanged {
+		mptcpChanged := snapshot.mptcpSupported != nil && (lastMPTCP == nil || *snapshot.mptcpSupported != *lastMPTCP)
+		if publicChanged || localChanged || mptcpChanged {
 			request := &nodegrpc.NodeIPsRequest{NodeId: nodeID, Ipv4: snapshot.ipv4, Ipv6: snapshot.ipv6, Addresses: snapshot.public}
-			if localChanged {
+			if localChanged || (mptcpChanged && snapshot.local != nil) {
 				request.LocalIpSnapshot = &nodegrpc.LocalIPSnapshot{Addresses: snapshot.local}
 			}
+			request.MptcpSupported = snapshot.mptcpSupported
 			rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			_, err := panel.UpdateNodeIPs(rpcCtx, request)
 			cancel()
@@ -55,6 +59,12 @@ func reportIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client
 					lastLocal = snapshot.local
 				}
 			}
+			if mptcpChanged {
+				lastMPTCP = nil
+				if err == nil {
+					lastMPTCP = snapshot.mptcpSupported
+				}
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -68,6 +78,8 @@ func detectNodeIPs(ctx context.Context) nodeIPSnapshot {
 	ipv4, ipv6 := DetectPublicIPs(ctx)
 	interfaces, err := net.InterfaceAddrs()
 	snapshot := collectNodeIPs(ipv4, ipv6, interfaces)
+	mptcpSupported := detectMultipathTCP()
+	snapshot.mptcpSupported = &mptcpSupported
 	if err != nil {
 		snapshot.local = nil
 	}
