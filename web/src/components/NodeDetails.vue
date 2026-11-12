@@ -2,7 +2,7 @@
   <header class="detail-header">
     <div class="detail-identity">
       <div class="detail-title">
-        <h1>{{ node.name }}</h1>
+        <h2>{{ node.name }}</h2>
         <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">{{ nodeStates[node.status]?.label || '未知' }}</span>
         <span class="detail-chip ops-mono">#{{ node.id }}</span>
         <span v-if="node.region" class="detail-chip"><el-icon aria-hidden="true"><Location /></el-icon>{{ formatRegion(node.region) }}</span>
@@ -39,28 +39,21 @@
       <h2 class="ops-section-title" id="node-traffic-title"><el-icon aria-hidden="true"><PieChart /></el-icon>流量统计与配额</h2>
       <span v-if="hasQuota" class="detail-chip">{{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}</span>
     </div>
-    <dl class="ops-inset detail-transfer">
-      <div><dt>累计流量</dt><dd class="ops-mono">{{ formatBytes(node.total_bytes) }}</dd></div>
-      <div><dt>入站</dt><dd class="ops-mono">{{ formatBytes(node.input_bytes) }}</dd></div>
-      <div><dt>出站</dt><dd class="ops-mono">{{ formatBytes(node.output_bytes) }}</dd></div>
-    </dl>
     <div class="detail-quota">
-      <div class="quota-line">
-        <span class="ops-muted">{{ hasQuota && quotaSynced ? '配额用量' : '流量上限' }}</span>
-        <span v-if="hasQuota" class="ops-mono">
-          <template v-if="quotaSynced">{{ formatBytes(node.traffic_quota_used_bytes) }} / </template>{{ formatBytes(node.traffic_limit_bytes) }}
-        </span>
-        <span v-else>未设上限</span>
-      </div>
+      <dl class="quota-line">
+        <div><dt>本期用量</dt><dd class="ops-mono">{{ formatGigabytes(currentUsage) }}</dd></div>
+        <div v-if="hasQuota"><dt>流量上限</dt><dd class="ops-mono">{{ formatGigabytes(node.traffic_limit_bytes) }}</dd></div>
+      </dl>
       <progress
-        v-if="hasQuota && quotaSynced"
+        v-if="currentUsage != null"
         aria-label="流量配额用量"
         :class="{ 'quota-blocked': node.traffic_quota_state === 'blocked' }"
         :max="node.traffic_limit_bytes"
-        :value="Math.min(node.traffic_quota_used_bytes || 0, node.traffic_limit_bytes)"
+        :value="Math.min(currentUsage, node.traffic_limit_bytes)"
       ></progress>
       <span v-if="hasQuota" class="ops-status" :class="quotaState.tone">{{ quotaState.label }}</span>
       <span v-else-if="node.traffic_quota_state" class="ops-muted">解除限制待同步</span>
+      <span v-else class="ops-muted">未设上限</span>
     </div>
   </section>
 
@@ -74,7 +67,7 @@
 import { computed } from 'vue'
 import { Connection, Download, Location, PieChart, Setting } from '@element-plus/icons-vue'
 import NodeGostService from '@/components/NodeGostService.vue'
-import { formatBytes, formatRegion, formatTime, nodeIPs, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
+import { formatGigabytes, formatRegion, formatTime, nodeIPs, nodeStates, nodeTrafficQuotaState, trafficResetPeriods } from '@/utils/node-display'
 
 const props = defineProps({ node: { type: Object, required: true } })
 defineEmits(['action'])
@@ -86,8 +79,8 @@ const endpoints = computed(() => [
   ...(props.node.manual_addresses?.length ? [{ label: '补充 IP', value: props.node.manual_addresses.join(' · ') }] : [])
 ])
 const hasQuota = computed(() => props.node.traffic_limit_bytes > 0)
-const quotaSynced = computed(() => ['active', 'blocked'].includes(props.node.traffic_quota_state))
-const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_state] || trafficQuotaStates.pending)
+const currentUsage = computed(() => props.node.traffic_current_period_used_bytes)
+const quotaState = computed(() => nodeTrafficQuotaState(props.node))
 </script>
 
 <style scoped>
@@ -106,7 +99,6 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .detail-identity { min-width: 0; }
 .detail-identity p { margin-top: 6px; overflow-wrap: anywhere; }
 .detail-title { gap: 8px 12px; }
-.detail-title h1 { font-size: var(--ops-text-page); font-weight: var(--ops-weight-bold); line-height: var(--ops-leading-heading); overflow-wrap: anywhere; }
 .detail-chip {
   display: inline-flex;
   align-items: center;
@@ -146,14 +138,9 @@ const quotaState = computed(() => trafficQuotaStates[props.node.traffic_quota_st
 .detail-endpoints dt, .detail-check dt { flex: none; }
 .detail-endpoints dd, .detail-check dd { text-align: end; }
 .detail-check { padding-top: 4px; }
-.detail-transfer {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-.detail-transfer dd { margin-top: 4px; font-weight: var(--ops-weight-semibold); }
 .detail-quota { display: grid; justify-items: start; gap: 7px; font-size: var(--ops-text-sm); }
 .quota-line { flex-wrap: wrap; width: 100%; }
+.quota-line dd { margin-top: 4px; font-weight: var(--ops-weight-semibold); }
 .detail-quota progress {
   display: block;
   width: 100%;

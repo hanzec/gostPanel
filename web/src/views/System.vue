@@ -1,12 +1,10 @@
 <template>
   <div class="ops-page settings-page">
-    <PageHeader title="系统设置" description="管理面板品牌、通知渠道、数据库备份和 Gost 配置。">
-      <template #actions>
-        <el-button v-if="!activeTab.startsWith('gost-')" type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
-          保存设置
-        </el-button>
-      </template>
-    </PageHeader>
+    <PageActions v-if="!activeTab.startsWith('gost-')">
+      <el-button type="primary" :loading="saving" :disabled="!ready || backupRunning" @click="saveSettings">
+        保存设置
+      </el-button>
+    </PageActions>
 
     <div v-if="loading" class="ops-panel settings-state" role="status" aria-label="正在加载系统设置">
       <el-skeleton :rows="5" animated />
@@ -206,7 +204,7 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { backupSystem, getSystemConfig, sendTestBark, sendTestEmail, updateSystemConfig } from '@/api/system'
 import GostRulesetSettings from '@/components/GostRulesetSettings.vue'
-import PageHeader from '@/components/PageHeader.vue'
+import PageActions from '@/components/PageActions.vue'
 import { useSystemStore } from '@/store/system'
 
 const systemStore = useSystemStore()

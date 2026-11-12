@@ -1,17 +1,11 @@
 <template>
   <div class="ops-page overview">
-    <PageHeader
-      class="ops-panel overview-banner"
-      title="运行总览"
-      description="实时查看隧道出口流量、节点和转发状态。"
-    >
-      <template #actions>
-        <RouterLink class="overview-primary" to="/nodes">
-          查看节点
-          <el-icon aria-hidden="true"><ArrowRight /></el-icon>
-        </RouterLink>
-      </template>
-    </PageHeader>
+    <PageActions>
+      <RouterLink class="overview-primary" to="/nodes">
+        查看节点
+        <el-icon aria-hidden="true"><ArrowRight /></el-icon>
+      </RouterLink>
+    </PageActions>
 
     <div v-if="statsError" class="ops-panel overview-feedback" role="alert">
       <span>{{ stats ? '状态更新失败，当前显示上次获取的数据。' : '暂时无法获取运行状态。' }}</span>
@@ -192,7 +186,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ArrowRight, Connection, Cpu, DataAnalysis, Document, Monitor, Switch } from '@element-plus/icons-vue'
 import { getLogList } from '@/api/log'
 import { getDashboardStats } from '@/api/stats'
-import PageHeader from '@/components/PageHeader.vue'
+import PageActions from '@/components/PageActions.vue'
 
 const stats = ref(null)
 const updatedAt = ref(null)
@@ -316,11 +310,6 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 </script>
 
 <style scoped>
-.overview-banner {
-  align-items: center;
-  padding: var(--ops-card-padding);
-}
-
 .overview-primary,
 .overview-link {
   display: inline-flex;
@@ -565,7 +554,6 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 }
 
 @media (max-width: 700px) {
-  .overview-banner { padding: 16px; }
   .overview-kpis { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .kpi-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; }
   .kpi-value { margin: 0; text-align: end; }

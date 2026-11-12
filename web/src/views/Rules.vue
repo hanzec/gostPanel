@@ -1,15 +1,10 @@
 <template>
   <div class="ops-page">
-    <PageHeader
-      title="入口管理"
-      description="分别配置每个节点的监听端点，再到隧道管理连接源端与目的端。"
-    >
-      <template #actions>
-        <el-button :icon="Upload" @click="showImportDialog">导入 JSON</el-button>
-        <el-button :icon="Download" :loading="exportLoading" @click="handleExport">导出 JSON</el-button>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">新建规则</el-button>
-      </template>
-    </PageHeader>
+    <PageActions>
+      <el-button :icon="Upload" @click="showImportDialog">导入 JSON</el-button>
+      <el-button :icon="Download" :loading="exportLoading" @click="handleExport">导出 JSON</el-button>
+      <el-button type="primary" :icon="Plus" @click="openDialog()">新建规则</el-button>
+    </PageActions>
 
     <MetricStrip label="入口规则摘要" :items="summary" />
 
@@ -348,7 +343,7 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, CopyDocument, Download, Plus, Refresh, Remove, Right, Search, Switch, Upload, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import PageHeader from '@/components/PageHeader.vue'
+import PageActions from '@/components/PageActions.vue'
 import { getRoutingNodes } from '@/api/node'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 

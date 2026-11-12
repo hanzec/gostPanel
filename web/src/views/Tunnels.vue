@@ -1,11 +1,9 @@
 <template>
   <div class="ops-page">
-    <PageHeader title="隧道管理" description="连接已创建的源端入口和目的端入口，统一管理两端的转发配置。">
-      <template #actions>
-        <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
-      </template>
-    </PageHeader>
+    <PageActions>
+      <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
+    </PageActions>
 
     <MetricStrip label="隧道统计" :items="tunnelMetrics" />
 
@@ -266,7 +264,7 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, Connection, Plus, Refresh, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import PageHeader from '@/components/PageHeader.vue'
+import PageActions from '@/components/PageActions.vue'
 import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
 import { getRoutingNodes } from '@/api/node'
 import { getRuleList } from '@/api/rule'

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"time"
 
 	"yagp/internal/dto"
 	"yagp/internal/service"
@@ -128,7 +129,7 @@ func (h *NodeHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, node)
+	response.Success(c, withCurrentTrafficUsage(*node, time.Now()))
 }
 
 // List 获取节点列表
@@ -145,7 +146,12 @@ func (h *NodeHandler) List(c *gin.Context) {
 		return
 	}
 
-	response.SuccessPage(c, nodes, total, req.Page, req.PageSize)
+	now := time.Now()
+	items := make([]nodeTrafficResponse, len(nodes))
+	for i, node := range nodes {
+		items[i] = withCurrentTrafficUsage(node, now)
+	}
+	response.SuccessPage(c, items, total, req.Page, req.PageSize)
 }
 
 // GetConfig 获取节点配置

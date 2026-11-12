@@ -21,12 +21,10 @@
       </section>
     </div>
 
-    <PageHeader v-else title="节点管理">
-      <template #actions>
-        <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
-      </template>
-    </PageHeader>
+    <PageActions v-else>
+      <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
+      <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
+    </PageActions>
 
     <MetricStrip v-if="!detailId" label="节点统计" :items="nodeMetrics" />
 
@@ -71,7 +69,7 @@
               <th scope="col" role="columnheader">实例</th>
               <th scope="col" role="columnheader">节点 IP</th>
               <th scope="col" role="columnheader">状态</th>
-              <th scope="col" role="columnheader">累计流量</th>
+              <th scope="col" role="columnheader">本期用量</th>
               <th scope="col" role="columnheader">Gost 服务</th>
               <th scope="col" role="columnheader">操作</th>
             </tr>
@@ -103,24 +101,14 @@
                 </span>
               </td>
               <td role="cell">
-                <span class="inventory-cell-label" aria-hidden="true">累计流量</span>
-                <strong class="ops-mono">{{ formatBytes(node.total_bytes) }}</strong>
-                <span class="inventory-secondary ops-muted">
-                  入 <span class="ops-mono">{{ formatBytes(node.input_bytes) }}</span>
-                  <span aria-hidden="true"> · </span>
-                  出 <span class="ops-mono">{{ formatBytes(node.output_bytes) }}</span>
-                </span>
+                <span class="inventory-cell-label" aria-hidden="true">本期用量</span>
+                <strong class="ops-mono">{{ formatGigabytes(node.traffic_current_period_used_bytes) }}</strong>
                 <template v-if="node.traffic_limit_bytes > 0">
                   <span class="inventory-secondary ops-muted">
-                    上限 <span class="ops-mono">{{ formatBytes(node.traffic_limit_bytes) }}</span>
-                    · {{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}
+                    {{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}
                   </span>
-                  <span v-if="node.traffic_quota_state === 'active' || node.traffic_quota_state === 'blocked'" class="inventory-secondary ops-muted">
-                    {{ node.traffic_reset_period && node.traffic_reset_period !== 'none' ? '本期用量' : '额度用量' }}
-                    <span class="ops-mono">{{ formatBytes(node.traffic_quota_used_bytes) }}</span>
-                  </span>
-                  <span class="ops-status node-traffic-status" :class="(trafficQuotaStates[node.traffic_quota_state] || trafficQuotaStates.pending).tone">
-                    {{ (trafficQuotaStates[node.traffic_quota_state] || trafficQuotaStates.pending).label }}
+                  <span class="ops-status node-traffic-status" :class="nodeTrafficQuotaState(node).tone">
+                    {{ nodeTrafficQuotaState(node).label }}
                   </span>
                   <span v-if="node.traffic_quota_state === 'unsupported'" class="inventory-secondary ops-muted">
                     需要支持流量配额的 yagp-daemon 和 nftables。
@@ -274,11 +262,11 @@ import MetricStrip from '@/components/MetricStrip.vue'
 import NodeDetails from '@/components/NodeDetails.vue'
 import NodeSettingsForm from '@/components/NodeSettingsForm.vue'
 import NodeTrafficCalibration from '@/components/NodeTrafficCalibration.vue'
-import PageHeader from '@/components/PageHeader.vue'
+import PageActions from '@/components/PageActions.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
-import { formatBytes, formatRegion, formatTime, nodeStates, trafficQuotaStates, trafficResetPeriods } from '@/utils/node-display'
+import { formatGigabytes, formatRegion, formatTime, nodeStates, nodeTrafficQuotaState, trafficResetPeriods } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))

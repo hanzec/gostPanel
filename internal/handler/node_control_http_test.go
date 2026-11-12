@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"yagp/internal/buildinfo"
 	"yagp/internal/model"
@@ -183,6 +184,59 @@ func TestNodeHTTPTrafficCalibration(t *testing.T) {
 	f.request(t, "PUT", path, `{"quota_used_bytes":200}`, 200)
 	if stored := readNode(); stored.TrafficQuotaUsedBytes != 200 || stored.TrafficQuotaState != model.TrafficQuotaBlocked {
 		t.Fatalf("raising usage above the limit failed: %+v", stored)
+	}
+	refreshed := handlerData[nodeTrafficResponse](t, f.request(t, "GET", fmt.Sprintf("/nodes/%d", node.ID), "", 200))
+	if refreshed.CurrentPeriodUsedBytes == nil || *refreshed.CurrentPeriodUsedBytes != 200 {
+		t.Fatalf("node detail did not report the calibrated quota: %+v", refreshed)
+	}
+}
+
+func TestNodeHTTPCurrentPeriodTraffic(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	now := time.Now()
+	currentWindow := model.TrafficQuotaWindow("monthly", now)
+	for _, tc := range []struct {
+		name        string
+		limit       int64
+		state       string
+		window      int64
+		used        uint64
+		wantCurrent bool
+	}{
+		{"current", 100, model.TrafficQuotaBlocked, currentWindow, 120, true},
+		{"empty", 100, model.TrafficQuotaActive, currentWindow, 0, true},
+		{"previous", 100, model.TrafficQuotaActive, currentWindow - 1, 42, false},
+		{"pending", 100, model.TrafficQuotaPending, currentWindow, 42, false},
+		{"disabled", 0, model.TrafficQuotaActive, currentWindow, 42, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := model.GostNode{
+				Name: tc.name, TrafficLimitBytes: tc.limit, TrafficResetPeriod: "monthly",
+				TrafficQuotaState: tc.state, TrafficQuotaWindowStart: tc.window, TrafficQuotaUsedBytes: tc.used,
+				TotalBytes: 250,
+			}
+			if err := f.db.Create(&node).Error; err != nil {
+				t.Fatal(err)
+			}
+			check := func(got nodeTrafficResponse) {
+				t.Helper()
+				if (got.CurrentPeriodUsedBytes != nil) != tc.wantCurrent ||
+					got.CurrentPeriodUsedBytes != nil && *got.CurrentPeriodUsedBytes != tc.used {
+					t.Fatalf("unexpected current-period usage: %v", got.CurrentPeriodUsedBytes)
+				}
+				if got.ID != node.ID || got.TotalBytes != node.TotalBytes || got.TrafficQuotaUsedBytes != tc.used {
+					t.Fatalf("node response lost existing traffic fields: %+v", got)
+				}
+			}
+			path := fmt.Sprintf("/nodes/%d", node.ID)
+			check(handlerData[nodeTrafficResponse](t, f.request(t, "GET", path, "", 200)))
+			page := handlerData[handlerPage[nodeTrafficResponse]](t, f.request(t, "GET", "/nodes?keyword="+tc.name, "", 200))
+			if len(page.List) != 1 {
+				t.Fatalf("expected one node, got %+v", page)
+			}
+			check(page.List[0])
+		})
 	}
 }
 

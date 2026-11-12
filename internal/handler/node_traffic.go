@@ -4,11 +4,28 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
+	"yagp/internal/model"
 	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
+
+type nodeTrafficResponse struct {
+	model.GostNode
+	CurrentPeriodUsedBytes *uint64 `json:"traffic_current_period_used_bytes"`
+}
+
+func withCurrentTrafficUsage(node model.GostNode, now time.Time) nodeTrafficResponse {
+	result := nodeTrafficResponse{GostNode: node}
+	if node.TrafficLimitBytes > 0 &&
+		(node.TrafficQuotaState == model.TrafficQuotaActive || node.TrafficQuotaState == model.TrafficQuotaBlocked) &&
+		node.TrafficQuotaWindowStart == model.TrafficQuotaWindow(node.TrafficResetPeriod, now) {
+		result.CurrentPeriodUsedBytes = &node.TrafficQuotaUsedBytes
+	}
+	return result
+}
 
 func (h *NodeHandler) CalibrateTraffic(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
