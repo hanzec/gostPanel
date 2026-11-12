@@ -360,6 +360,66 @@ func TestReleaseDownloadRejectsUnsupportedInput(t *testing.T) {
 	}
 }
 
+func TestDownloadTrustsGitHubDigestInsteadOfConfiguredProxy(t *testing.T) {
+	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
+		t.Skip("release archives target Linux amd64 and arm64")
+	}
+	t.Setenv("GH_PROXY", "https://proxy.example/")
+	for _, component := range []struct{ name, tag string }{{"gost", "v3.3.3"}, {"daemon", "0.1.100-abcdef1"}} {
+		for _, test := range []struct {
+			name, wantError       string
+			tampered, unavailable bool
+		}{
+			{name: "verified mirror"},
+			{name: "mirror replaces archive and digest", tampered: true, wantError: "SHA-256 or size does not match"},
+			{name: "official digest unavailable", unavailable: true, wantError: "HTTP 503"},
+		} {
+			t.Run(component.name+"/"+test.name, func(t *testing.T) {
+				name, binary := releaseNames(component.name, component.tag, "", runtime.GOARCH)
+				official := buildReleaseTestArchive(t, binary, "official executable")
+				mirror := official
+				if test.tampered {
+					mirror = buildReleaseTestArchive(t, binary, "malicious executable")
+				}
+				metadata := func(data []byte) release {
+					return release{Tag: component.tag, Assets: []asset{{Name: name, Size: int64(len(data)), Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(data))}}}
+				}
+				metadataPath := "/repos/" + repository(component.name) + "/releases/tags/" + component.tag
+				client := localReleaseClient(t, func(w http.ResponseWriter, req *http.Request) {
+					switch {
+					case req.Host == "api.github.com" && req.URL.Path == metadataPath:
+						if test.unavailable {
+							w.WriteHeader(http.StatusServiceUnavailable)
+							return
+						}
+						_ = json.NewEncoder(w).Encode(metadata(official))
+					case req.Host == "proxy.example" && req.URL.Path == "/https://api.github.com"+metadataPath:
+						t.Error("download trusted release metadata supplied by the archive proxy")
+						_ = json.NewEncoder(w).Encode(metadata(mirror))
+					case req.Host == "proxy.example" && req.URL.Path == "/"+releaseArchiveURL(component.name, component.tag, name):
+						if test.unavailable {
+							t.Error("downloaded an archive without trusted metadata")
+						}
+						_, _ = w.Write(mirror)
+					default:
+						t.Errorf("unexpected release request: %s%s", req.Host, req.URL.Path)
+						http.NotFound(w, req)
+					}
+				})
+				var output bytes.Buffer
+				err := client.Download(t.Context(), component.name, component.tag, "", &output)
+				if test.wantError != "" {
+					if err == nil || !strings.Contains(err.Error(), test.wantError) || output.Len() != 0 {
+						t.Fatalf("unverified download = %q, %v; want %q without executable bytes", output.String(), err, test.wantError)
+					}
+				} else if err != nil || output.String() != "official executable" {
+					t.Fatalf("verified mirror download = %q, %v", output.String(), err)
+				}
+			})
+		}
+	}
+}
+
 func TestDownloadAssetRejectsMissingMetadataAndTruncatedBody(t *testing.T) {
 	const archive = "not a complete archive"
 	expectedSize := int64(len(archive) + 20)

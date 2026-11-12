@@ -161,6 +161,8 @@ describe('System settings', () => {
     await button(wrapper, '保存设置').trigger('click')
     expect(ElMessage.warning).toHaveBeenCalledWith('请填写备份保留份数')
     expect(wrapper.get('[aria-selected="true"]').text()).toContain('数据库备份')
+    await flushPromises()
+    expect(document.activeElement).toBe(retention.element)
     expect(api.updateSystemConfig).not.toHaveBeenCalled()
 
     await retention.setValue('12')
@@ -202,11 +204,21 @@ describe('System settings', () => {
     await flushPromises()
     expect(api.sendTestEmail).not.toHaveBeenCalled()
 
+    // Empty email inputs pass native type validation; Element Plus must focus its required-field error.
+    await email.setValue('')
+    await button(wrapper, '发送').trigger('click')
+    await vi.waitFor(() => {
+      expect(wrapper.get('#settings-test-email .el-form-item__error').text()).toBe('请输入收件人邮箱')
+      expect(document.activeElement).toBe(email.element)
+    })
+    expect(api.sendTestEmail).not.toHaveBeenCalled()
+
     const sending = deferred()
     api.sendTestEmail.mockReturnValueOnce(sending.promise).mockResolvedValue({ data: {} })
     await email.setValue('admin@example.test')
     await wrapper.get('#settings-test-email').trigger('submit')
     await flushPromises()
+    await vi.waitFor(() => expect(wrapper.find('#settings-test-email .el-form-item__error').exists()).toBe(false))
     await wrapper.get('#settings-test-email').trigger('submit')
     expect(api.sendTestEmail).toHaveBeenCalledExactlyOnceWith({
       ...settings.email,
@@ -256,11 +268,14 @@ describe('System settings', () => {
     expect(serverUrl.attributes('aria-invalid')).toBe('true')
     await testButton.trigger('click')
     expect(api.sendTestBark).not.toHaveBeenCalled()
+    await flushPromises()
+    expect(document.activeElement).toBe(serverUrl.element)
 
     await serverUrl.setValue('  http://bark.local:8080/notifications  ')
     await deviceKey.setValue('')
     await button(wrapper, '保存设置').trigger('click')
     await vi.waitFor(() => expect(wrapper.text()).toContain('请输入 Bark 设备密钥'))
+    expect(document.activeElement).toBe(deviceKey.element)
     expect(api.updateSystemConfig).not.toHaveBeenCalled()
 
     await deviceKey.setValue('  current-device-key  ')

@@ -2,11 +2,12 @@ import { flushPromises } from '@vue/test-utils'
 import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Rules from '@/views/Rules.vue'
-import { getNodeList } from '@/api/node'
+import { getRoutingNodes } from '@/api/node'
+import request from '@/utils/request'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
-vi.mock('@/api/node', () => ({ getNodeList: vi.fn() }))
+vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
 vi.mock('@/api/rule', () => ({
   checkRuleListener: vi.fn(), createRule: vi.fn(), deleteRule: vi.fn(), getRuleList: vi.fn(),
   startRule: vi.fn(), stopRule: vi.fn(), updateRule: vi.fn()
@@ -32,13 +33,135 @@ const selectField = (wrapper, prop) => field(wrapper, prop).getComponent(ElSelec
 const editDialog = wrapper => wrapper.get('[role="dialog"]')
 
 beforeEach(() => {
-  getNodeList.mockResolvedValue(result([entryNode]))
+  getRoutingNodes.mockResolvedValue([entryNode])
   getRuleList.mockResolvedValue(result(rules, 28))
   checkRuleListener.mockResolvedValue({ data: { available: true } })
   for (const action of [createRule, updateRule, deleteRule, startRule, stopRule]) action.mockResolvedValue({})
 })
 
 describe('forwarding rule inventory', () => {
+  it('shows node option loading and lets the filter and editor retry a failed request', async () => {
+    const pending = Promise.withResolvers()
+    getRoutingNodes.mockReturnValueOnce(pending.promise).mockRejectedValueOnce(new Error('still offline'))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    expect(wrapper.get('.rule-node-status').text()).toContain('正在加载节点选项')
+    expect(select(wrapper, 'rule-node').props('disabled')).toBe(true)
+
+    pending.reject(new Error('nodes unavailable'))
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('无法加载节点选项')
+    await button(wrapper, '重新加载节点').trigger('click')
+    await flushPromises()
+    expect(getRoutingNodes).toHaveBeenCalledTimes(2)
+
+    await button(wrapper, '新建规则').trigger('click')
+    const dialog = editDialog(wrapper)
+    expect(dialog.get('[role="alert"]').text()).toContain('无法加载节点选项')
+    expect(selectField(dialog, 'node_id').props('disabled')).toBe(true)
+    expect(button(dialog, '创建规则').element.disabled).toBe(true)
+    await dialog.get('form').trigger('submit')
+    expect(createRule).not.toHaveBeenCalled()
+
+    const retry = Promise.withResolvers()
+    getRoutingNodes.mockReturnValueOnce(retry.promise)
+    await button(dialog, '重新加载节点').trigger('click')
+    expect(dialog.get('[role="status"]').text()).toContain('正在加载节点选项')
+    retry.resolve([entryNode])
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(select(wrapper, 'rule-node').props('disabled')).toBe(false)
+    expect(selectField(dialog, 'node_id').props('disabled')).toBe(false)
+    expect(button(dialog, '创建规则').element.disabled).toBe(false)
+  })
+
+  it('uses all node pages for filtering and creating an entrance on a later node', async () => {
+    const actualNodeAPI = await vi.importActual('@/api/node')
+    getRoutingNodes.mockImplementationOnce(actualNodeAPI.getRoutingNodes)
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, name: '节点 ' + (index + 1) }))
+    const lastNode = { id: 101, name: '第二页节点', ipv4: '192.0.2.101' }
+    const originalAdapter = request.defaults.adapter
+    const adapter = vi.fn(config => Promise.resolve({
+      status: 200, statusText: 'OK', headers: {}, config,
+      data: { code: 0, data: { total: 101, list: config.params.page === 1 ? firstPage : [lastNode] } }
+    }))
+    request.defaults.adapter = adapter
+    try {
+      const wrapper = mountInventory(Rules)
+      await flushPromises()
+      expect(adapter.mock.calls.map(([config]) => [config.url, config.params])).toEqual([
+        ['/nodes', { page: 1, pageSize: 100 }], ['/nodes', { page: 2, pageSize: 100 }]
+      ])
+      expect(select(wrapper, 'rule-node').findAllComponents(ElOption)).toHaveLength(101)
+      await choose(select(wrapper, 'rule-node'), lastNode.id)
+      await wrapper.get('form[aria-label="规则筛选"]').trigger('submit')
+      await flushPromises()
+      expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', node_id: lastNode.id, status: '' })
+
+      await button(wrapper, '新建规则').trigger('click')
+      const dialog = editDialog(wrapper)
+      await choose(selectField(dialog, 'node_id'), lastNode.id)
+      await field(dialog, 'name').get('input').setValue('后续节点入口')
+      await field(dialog, 'listen_port').get('input').setValue('8080')
+      await button(dialog, '创建规则').trigger('click')
+      await flushPromises()
+      expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ node_id: lastNode.id, name: '后续节点入口', listen_port: 8080 }))
+    } finally {
+      request.defaults.adapter = originalAdapter
+    }
+  })
+
+  it('does not publish partial node options or allow creation when a later node page fails', async () => {
+    const actualNodeAPI = await vi.importActual('@/api/node')
+    getRoutingNodes.mockImplementation(actualNodeAPI.getRoutingNodes)
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => {})
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, name: '节点 ' + (index + 1) }))
+    const lastNode = { id: 101, name: '第二页节点' }
+    const secondPage = Promise.withResolvers()
+    const originalAdapter = request.defaults.adapter
+    let retrying = false
+    const adapter = vi.fn(config => {
+      if (config.params.page === 2 && !retrying) return secondPage.promise
+      return Promise.resolve({
+        status: 200, statusText: 'OK', headers: {}, config,
+        data: { code: 0, data: { total: 101, list: config.params.page === 1 ? firstPage : [lastNode] } }
+      })
+    })
+    request.defaults.adapter = adapter
+    try {
+      const wrapper = mountInventory(Rules)
+      await flushPromises()
+      expect(adapter.mock.calls.map(([config]) => config.params.page)).toEqual([1, 2])
+      await command(row(wrapper, 'DNS'), 'copy')
+      const dialog = editDialog(wrapper)
+      await field(dialog, 'listen_port').get('input').setValue('5354')
+      expect(selectField(dialog, 'node_id').props('modelValue')).toBe(entryNode.id)
+      expect(selectField(dialog, 'node_id').findAllComponents(ElOption)).toHaveLength(0)
+      expect(button(dialog, '创建规则').element.disabled).toBe(true)
+      secondPage.reject(new Error('second page unavailable'))
+      await flushPromises()
+      expect(dialog.get('[role="alert"]').text()).toContain('无法加载节点选项')
+      expect(selectField(dialog, 'node_id').findAllComponents(ElOption)).toHaveLength(0)
+      expect(select(wrapper, 'rule-node').findAllComponents(ElOption)).toHaveLength(0)
+      expect(button(dialog, '创建规则').element.disabled).toBe(true)
+      await dialog.get('form').trigger('submit')
+      await flushPromises()
+      expect(createRule).not.toHaveBeenCalled()
+
+      retrying = true
+      await button(dialog, '重新加载节点').trigger('click')
+      await flushPromises()
+      expect(adapter.mock.calls.map(([config]) => config.params.page)).toEqual([1, 2, 1, 2])
+      expect(dialog.find('[role="alert"]').exists()).toBe(false)
+      expect(selectField(dialog, 'node_id').findAllComponents(ElOption).map(option => option.props('value'))).toEqual([
+        ...firstPage.map(node => node.id), lastNode.id
+      ])
+      expect(button(dialog, '创建规则').element.disabled).toBe(false)
+    } finally {
+      request.defaults.adapter = originalAdapter
+    }
+  })
+
   it('keeps the previous rules on refresh failure and applies filters from page one', async () => {
     const response = Promise.withResolvers()
     getRuleList.mockReturnValueOnce(response.promise)
@@ -87,7 +210,6 @@ describe('forwarding rule inventory', () => {
   it('pauses automatic polling for background tabs or failures and resumes after a manual retry', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
-    getNodeList.mockRejectedValueOnce(new Error('nodes unavailable'))
     getRuleList.mockRejectedValueOnce(new Error('rules unavailable'))
     const wrapper = mountInventory(Rules)
     await flushPromises()
@@ -133,6 +255,7 @@ describe('forwarding rule editor and actions', () => {
     await flushPromises()
     expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['node_id', false, '请选择所在节点'])
     expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['listen_port', false, '请输入监听端口'])
+    expect(document.activeElement).toBe(selectField(dialog, 'node_id').get('input').element)
     expect(createRule).not.toHaveBeenCalled()
     expect(checkRuleListener).not.toHaveBeenCalled()
     await choose(selectField(dialog, 'node_id'), 4)

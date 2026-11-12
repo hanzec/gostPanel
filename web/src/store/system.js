@@ -36,9 +36,13 @@ export const useSystemStore = defineStore('system', () => {
                     localStorage.removeItem('logoUrl')
                 }
 
-                if (config.copyright) {
-                    copyright.value = config.copyright
-                    localStorage.setItem('copyright', config.copyright)
+                if (config.copyright !== undefined) {
+                    copyright.value = config.copyright || ''
+                    if (copyright.value) {
+                        localStorage.setItem('copyright', copyright.value)
+                    } else {
+                        localStorage.removeItem('copyright')
+                    }
                 }
             }
         } catch (error) {

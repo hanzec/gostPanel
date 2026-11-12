@@ -75,7 +75,7 @@ describe('Relay tunnel inventory', () => {
     expect(dialog(wrapper).text()).toContain('无法加载入口选项')
     await button(dialog(wrapper), '重新加载入口').trigger('click')
     await flushPromises()
-    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 1000 })
+    expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 100 })
     expect(dialog(wrapper).text()).not.toContain('无法加载入口选项')
     await button(dialog(wrapper), '重新加载来源节点').trigger('click')
     await flushPromises()
@@ -132,6 +132,74 @@ describe('Relay tunnel inventory', () => {
 })
 
 describe('Relay tunnel configuration', () => {
+  it('loads later entrance pages and preserves a tunnel pair found after the first hundred', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...source, id: index + 1000 }))
+    const secondPage = [destination, mediaSource, mediaDestination]
+    getRuleList.mockResolvedValueOnce(result(firstPage, 103)).mockResolvedValueOnce(result(secondPage, 103))
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
+    expect(getRuleList.mock.calls).toEqual([[{ page: 1, pageSize: 100 }], [{ page: 2, pageSize: 100 }]])
+    expect(selectField(dialog(wrapper), 'exit_rule_id').findAllComponents(ElOption).map(option => option.props('value'))).toContain(destination.id)
+    await button(dialog(wrapper), '取消').trigger('click')
+
+    getRuleList.mockResolvedValueOnce(result(firstPage, 103)).mockResolvedValueOnce(result(secondPage, 103))
+    await command(row(wrapper, 'Media relay'), 'edit')
+    const editor = dialog(wrapper)
+    expect(selectField(editor, 'entry_rule_id').props('modelValue')).toBe(mediaSource.id)
+    expect(selectField(editor, 'exit_rule_id').props('modelValue')).toBe(mediaDestination.id)
+    await button(editor, '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnel).toHaveBeenCalledWith(udpRelay.id, expect.objectContaining({
+      entry_rule_id: mediaSource.id, exit_rule_id: mediaDestination.id
+    }))
+  })
+
+  it('retains the loaded endpoint pair and blocks saving when a later refresh page fails', async () => {
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await command(row(wrapper, 'Media relay'), 'edit')
+    await button(dialog(wrapper), '取消').trigger('click')
+
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...source, id: index + 1000 }))
+    const secondPage = Promise.withResolvers()
+    getRuleList.mockResolvedValueOnce(result(firstPage, 102)).mockReturnValueOnce(secondPage.promise)
+    await command(row(wrapper, 'Media relay'), 'edit')
+    const editor = dialog(wrapper)
+    const entry = selectField(editor, 'entry_rule_id')
+    const exit = selectField(editor, 'exit_rule_id')
+    expect(entry.props('modelValue')).toBe(mediaSource.id)
+    expect(exit.props('modelValue')).toBe(mediaDestination.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).not.toContain(firstPage[0].id)
+    expect(button(editor, '保存更改').element.disabled).toBe(true)
+
+    secondPage.reject(new Error('second page unavailable'))
+    await flushPromises()
+    expect(editor.get('[role="alert"]').text()).toContain('无法加载入口选项')
+    expect(entry.props('modelValue')).toBe(mediaSource.id)
+    expect(exit.props('modelValue')).toBe(mediaDestination.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).toContain(mediaSource.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).not.toContain(firstPage[0].id)
+    await editor.get('form').trigger('submit')
+    await flushPromises()
+    expect(updateTunnel).not.toHaveBeenCalled()
+
+    getRuleList.mockResolvedValueOnce(result(firstPage, 102)).mockResolvedValueOnce(result([mediaSource, mediaDestination], 102))
+    await button(editor, '重新加载入口').trigger('click')
+    await flushPromises()
+    expect(getRuleList.mock.calls.slice(-2)).toEqual([[{ page: 1, pageSize: 100 }], [{ page: 2, pageSize: 100 }]])
+    expect(editor.find('[role="alert"]').exists()).toBe(false)
+    expect(entry.props('modelValue')).toBe(mediaSource.id)
+    expect(exit.props('modelValue')).toBe(mediaDestination.id)
+    expect(entry.findAllComponents(ElOption).map(option => option.props('value'))).toContain(firstPage[0].id)
+    await button(editor, '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnel).toHaveBeenCalledExactlyOnceWith(udpRelay.id, {
+      name: udpRelay.name, entry_rule_id: mediaSource.id, exit_rule_id: mediaDestination.id, remark: ''
+    })
+  })
+
   it('validates endpoint roles and preserves the selected pair after a failed create', async () => {
     const error = new Error('relay already listening')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -144,6 +212,7 @@ describe('Relay tunnel configuration', () => {
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['entry_rule_id', false, '请选择源端入口'])
+    expect(document.activeElement).toBe(selectField(editor, 'entry_rule_id').get('input').element)
     expect(createTunnel).not.toHaveBeenCalled()
 
     const sourceSelect = selectField(editor, 'entry_rule_id')

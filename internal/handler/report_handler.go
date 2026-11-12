@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"yagp/internal/model"
+	"yagp/internal/repository"
 	"yagp/internal/service"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
@@ -174,6 +175,9 @@ func (h *streamReports) Report(ctx context.Context, request *nodegrpc.ReportRequ
 		return nil, err
 	}
 	if err := h.traffic.RecordTraffic(ctx, node.ID, samples); err != nil {
+		if errors.Is(err, repository.ErrTrafficCounterOverflow) {
+			return nil, status.Error(codes.InvalidArgument, "traffic totals exceed supported range")
+		}
 		if errors.Is(err, service.ErrReportNodeMismatch) {
 			return nil, status.Error(codes.PermissionDenied, err.Error())
 		}

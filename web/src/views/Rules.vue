@@ -34,7 +34,7 @@
         </div>
         <div class="rule-filter">
           <label for="rule-node">入口节点</label>
-          <el-select id="rule-node" v-model="filters.node_id" aria-label="入口节点" placeholder="所有节点" clearable>
+          <el-select id="rule-node" v-model="filters.node_id" aria-label="入口节点" placeholder="所有节点" :loading="nodeOptionsLoading" :disabled="nodeOptionsLoading || nodeOptionsError" clearable>
             <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
           </el-select>
         </div>
@@ -51,6 +51,12 @@
           <el-button native-type="submit" :icon="Search">应用筛选</el-button>
         </div>
       </form>
+
+      <p v-if="nodeOptionsLoading && !dialogVisible" class="rule-node-status ops-muted" role="status">正在加载节点选项…</p>
+      <div v-else-if="nodeOptionsError && !dialogVisible" class="rule-error" role="alert">
+        <span>无法加载节点选项，请重新加载后按节点筛选或创建规则。</span>
+        <el-button @click="fetchNodes">重新加载节点</el-button>
+      </div>
 
       <div v-if="listError" class="rule-error" role="alert">
         <div>
@@ -187,6 +193,11 @@
       :close-on-click-modal="false"
       destroy-on-close
     >
+      <p v-if="nodeOptionsLoading" class="rule-dialog-node-status ops-muted" role="status">正在加载节点选项…</p>
+      <div v-else-if="nodeOptionsError" class="rule-error rule-dialog-node-status" role="alert">
+        <span>无法加载节点选项，请重新加载后选择所在节点。</span>
+        <el-button @click="fetchNodes">重新加载节点</el-button>
+      </div>
       <el-form ref="formRef" class="rule-editor" :model="form" :rules="formRules" label-position="top" @submit.prevent="handleSubmit">
         <section class="rule-form-section" aria-labelledby="rule-entry-title">
           <header>
@@ -198,7 +209,7 @@
               <el-input v-model.trim="form.name" placeholder="例如 办公网络入口" maxlength="100" />
             </el-form-item>
             <el-form-item label="所在节点" prop="node_id">
-              <el-select v-model="form.node_id" placeholder="选择监听所在的节点" :disabled="isEdit" filterable>
+              <el-select v-model="form.node_id" placeholder="选择监听所在的节点" :loading="nodeOptionsLoading" :disabled="isEdit || nodeOptionsLoading || nodeOptionsError" no-data-text="请先在节点管理中添加节点" filterable>
                 <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
               </el-select>
             </el-form-item>
@@ -289,7 +300,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">
+        <el-button type="primary" :loading="submitLoading" :disabled="!isEdit && (nodeOptionsLoading || nodeOptionsError)" @click="handleSubmit">
           {{ isEdit ? '保存规则' : '创建规则' }}
         </el-button>
       </template>
@@ -331,17 +342,19 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, CopyDocument, Download, Plus, Refresh, Remove, Right, Search, Switch, Upload, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import PageHeader from '@/components/PageHeader.vue'
-import { getNodeList } from '@/api/node'
+import { getRoutingNodes } from '@/api/node'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 
 const nodeList = ref([])
+const nodeOptionsLoading = ref(false)
+const nodeOptionsError = ref(false)
 const ruleList = ref([])
 const loading = ref(false)
 const listError = ref(false)
@@ -436,6 +449,19 @@ const formatBytes = (bytes = 0) => {
   return Math.round((bytes / 1024 ** index) * 100) / 100 + ' ' + byteUnits[index]
 }
 
+const fetchNodes = async () => {
+  if (nodeOptionsLoading.value) return
+  nodeOptionsLoading.value = true
+  nodeOptionsError.value = false
+  try {
+    nodeList.value = await getRoutingNodes()
+  } catch {
+    nodeOptionsError.value = true
+  } finally {
+    nodeOptionsLoading.value = false
+  }
+}
+
 let latestRequest = 0
 const fetchData = async (silent = false) => {
   const request = ++latestRequest
@@ -489,9 +515,13 @@ const openDialog = (row = null, copy = false) => {
 }
 
 const handleSubmit = async () => {
-  if (!formRef.value || submitLoading.value) return
+  if (!formRef.value || submitLoading.value || (!isEdit.value && (nodeOptionsLoading.value || nodeOptionsError.value))) return
   const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
+  if (!valid) {
+    await nextTick()
+    formRef.value.$el.querySelector('.el-form-item.is-error input, .el-form-item.is-error textarea')?.focus()
+    return
+  }
 
   submitLoading.value = true
   try {
@@ -699,7 +729,7 @@ const removeTarget = index => form.targetList.splice(index, 1)
 let refreshTimer
 watch([page, pageSize], () => fetchData())
 onMounted(() => {
-  getNodeList({ pageSize: 100 }).then(({ data }) => { nodeList.value = data.list || [] }).catch(() => {})
+  fetchNodes()
   fetchData()
   refreshTimer = setInterval(() => {
     if (!document.hidden && !loading.value && !listError.value) fetchData(true)
@@ -947,6 +977,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-error {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
@@ -955,6 +986,10 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   color: var(--ops-warning);
   font-size: var(--ops-text-body);
 }
+
+.rule-node-status { padding: 12px 20px; font-size: .875rem; }
+.rule-dialog-node-status { margin: 0 0 14px; }
+.rule-error.rule-dialog-node-status { border: 1px solid var(--ops-border); border-radius: 8px; background: var(--ops-inset); }
 
 .rule-editor {
   display: grid;
@@ -1038,6 +1073,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   .rule-section-head,
   .rule-filters,
   .rule-pagination,
+  .rule-node-status,
   .rule-error {
     padding-left: var(--ops-card-padding);
     padding-right: var(--ops-card-padding);

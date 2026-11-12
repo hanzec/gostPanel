@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -296,7 +298,7 @@ func TestNodeSessionWithGeneratedTLSOrInternalProxy(t *testing.T) {
 				}
 			}
 			client := testPanelHTTPClient(t, address, trust)
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), server.server.ReadTimeout+5*time.Second)
 			defer cancel()
 			_, err = panel.DialSession(ctx, client, uint64(node.ID), "invalid")
 			assertReportHTTPStatus(t, err, http.StatusUnauthorized)
@@ -335,6 +337,48 @@ func TestNodeSessionWithGeneratedTLSOrInternalProxy(t *testing.T) {
 			}
 			if err := yaml.Unmarshal(configuration.GetConfigYaml(), &settings); err != nil || settings.NodeID != node.ID {
 				t.Fatalf("node ID in configuration = %d, %v", settings.NodeID, err)
+			}
+			if !proxied {
+				if server.server.ReadTimeout != 10*time.Second {
+					t.Fatalf("public HTTP body timeout = %s", server.server.ReadTimeout)
+				}
+				afterReadDeadline := time.Now().Add(server.server.ReadTimeout + 100*time.Millisecond)
+				rejections := []struct {
+					method, path string
+					want         int
+				}{
+					{http.MethodPost, "/unknown", http.StatusNotFound},
+					{http.MethodPut, nodegrpc.RegisterPath, http.StatusMethodNotAllowed},
+				}
+				var connections []net.Conn
+				for _, rejection := range rejections {
+					conn, err := tls.Dial("tcp", address, trust)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer conn.Close()
+					if err := conn.SetDeadline(time.Now().Add(server.server.ReadTimeout + 3*time.Second)); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := fmt.Fprintf(conn, "%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1\r\n\r\n", rejection.method, rejection.path); err != nil {
+						t.Fatal(err)
+					}
+					connections = append(connections, conn)
+				}
+				for i, conn := range connections {
+					response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+					if err != nil {
+						t.Fatalf("mux rejection left a slow body open: %v", err)
+					}
+					response.Body.Close()
+					if response.StatusCode != rejections[i].want {
+						t.Fatalf("mux rejection = HTTP %d, want %d", response.StatusCode, rejections[i].want)
+					}
+				}
+				time.Sleep(time.Until(afterReadDeadline))
+				if _, err := nodeClient.GetNodeConfig(ctx, &emptypb.Empty{}); err != nil {
+					t.Fatalf("HTTP body timeout expired the upgraded WebSocket: %v", err)
+				}
 			}
 			refreshed := &nodegrpc.NodeCredentials{}
 			refresh := &nodegrpc.RefreshNodeRequest{

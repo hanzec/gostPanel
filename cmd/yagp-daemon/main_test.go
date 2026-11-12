@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -197,19 +198,25 @@ func TestNftTemplateCLIPrintsCachedTemplate(t *testing.T) {
 }
 
 func TestInstallGostBinaryPreservesInstalledVersionOnReadFailure(t *testing.T) {
+	write := func(source io.Reader) func(io.Writer) error {
+		return func(dest io.Writer) error {
+			_, err := io.Copy(dest, source)
+			return err
+		}
+	}
 	target := filepath.Join(t.TempDir(), "gost")
-	if err := installGostBinary(target, strings.NewReader("working binary")); err != nil {
+	if err := installGostBinary(target, write(strings.NewReader("working binary"))); err != nil {
 		t.Fatal(err)
 	}
 	interrupted := errors.New("download interrupted")
-	if err := installGostBinary(target, iotest.ErrReader(interrupted)); !errors.Is(err, interrupted) {
+	if err := installGostBinary(target, write(iotest.ErrReader(interrupted))); !errors.Is(err, interrupted) {
 		t.Fatalf("interrupted install = %v", err)
 	}
 	got, err := os.ReadFile(target)
 	if err != nil || string(got) != "working binary" {
 		t.Fatalf("installed binary = %q, %v", got, err)
 	}
-	if err := installGostBinary(filepath.Join(target, "missing", "gost"), strings.NewReader("binary")); err == nil {
+	if err := installGostBinary(filepath.Join(target, "missing", "gost"), write(strings.NewReader("binary"))); err == nil {
 		t.Fatal("invalid installation directory accepted")
 	}
 }

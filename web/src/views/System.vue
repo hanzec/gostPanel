@@ -81,6 +81,7 @@
                   <div class="settings-fields settings-bark-fields">
                     <el-form-item label="Bark 服务器地址" prop="serverUrl" :error="barkErrors.serverUrl">
                       <el-input
+                        ref="barkServerInput"
                         v-model.trim="barkForm.serverUrl"
                         inputmode="url"
                         placeholder="https://api.day.app"
@@ -91,6 +92,7 @@
                     </el-form-item>
                     <el-form-item label="Bark 设备密钥" prop="deviceKey" :error="barkErrors.deviceKey">
                       <el-input
+                        ref="barkKeyInput"
                         v-model.trim="barkForm.deviceKey"
                         :type="barkDeviceKeyVisible ? 'text' : 'password'"
                         autocomplete="new-password"
@@ -133,8 +135,8 @@
                       <el-switch v-model="backupForm.autoBackup" aria-label="自动备份" />
                       <span class="settings-field-hint">启用后每天生成一份备份。</span>
                     </el-form-item>
-                    <el-form-item label="保留份数" prop="retentionCount">
-                      <el-input-number v-model="backupForm.retentionCount" :min="1" :max="100" :step="1" controls-position="right" />
+                    <el-form-item label="保留份数" prop="retentionCount" :error="backupRetentionError">
+                      <el-input-number ref="backupRetentionInput" v-model="backupForm.retentionCount" :min="1" :max="100" :step="1" controls-position="right" @change="backupRetentionError = ''" />
                       <span class="settings-field-hint">保留最近生成的备份文件。</span>
                     </el-form-item>
                   </div>
@@ -197,7 +199,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { Bell, Coin, Connection, InfoFilled, Message, Monitor } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import PanelDialog from '@/components/PanelDialog.vue'
@@ -215,6 +217,10 @@ const loadError = ref(false)
 const saveError = ref(false)
 const backupSupported = ref(false)
 const backupRunning = ref(false)
+const backupRetentionInput = ref(null)
+const backupRetentionError = ref('')
+const barkServerInput = ref(null)
+const barkKeyInput = ref(null)
 const testEmailVisible = ref(false)
 const testEmailSending = ref(false)
 const testEmailError = ref(false)
@@ -289,11 +295,15 @@ async function saveSettings() {
   if (!ready.value || saving.value || backupRunning.value) return
   if (backupSupported.value && backupForm.retentionCount == null) {
     activeTab.value = 'backup'
+    backupRetentionError.value = '请填写备份保留份数'
     ElMessage.warning('请填写备份保留份数')
+    await nextTick()
+    backupRetentionInput.value?.focus()
     return
   }
   if (!validateBarkConfig()) {
     activeTab.value = 'email'
+    await focusBarkError()
     return
   }
 
@@ -327,7 +337,12 @@ function openTestEmail() {
 }
 
 async function confirmTestEmail() {
-  if (testEmailSending.value || !await testEmailFormRef.value.validate().catch(() => false)) return
+  if (testEmailSending.value) return
+  if (!await testEmailFormRef.value.validate().catch(() => false)) {
+    await nextTick()
+    testEmailFormRef.value.$el.querySelector('.is-error input')?.focus()
+    return
+  }
   testEmailSending.value = true
   testEmailError.value = false
   try {
@@ -376,8 +391,18 @@ function validateBarkConfig(required = false) {
   return !barkErrors.serverUrl && !barkErrors.deviceKey
 }
 
+async function focusBarkError() {
+  await nextTick()
+  const input = barkErrors.serverUrl ? barkServerInput.value : barkKeyInput.value
+  input?.focus()
+}
+
 async function testBark() {
-  if (saving.value || testBarkSending.value || !validateBarkConfig(true)) return
+  if (saving.value || testBarkSending.value) return
+  if (!validateBarkConfig(true)) {
+    await focusBarkError()
+    return
+  }
   testBarkSending.value = true
   testBarkError.value = ''
   try {

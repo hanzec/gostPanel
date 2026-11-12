@@ -323,7 +323,7 @@ func requireServiceError(t *testing.T, got, want error) {
 	}
 }
 
-// lifecycleNode serves Gost resource responses over a real gRPC stream.
+// lifecycleNode serves Gost resource responses over a real node WebSocket session.
 type lifecycleNode struct {
 	nodegrpc.UnimplementedV1Server
 	t           *testing.T

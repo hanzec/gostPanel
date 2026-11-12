@@ -4,11 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"sync/atomic"
+	"net/url"
+	"runtime"
 	"testing"
 )
 
@@ -32,26 +34,38 @@ func gostTestArchive(t *testing.T, name string) []byte {
 	return data.Bytes()
 }
 
-func TestDownloadGostRetriesGatewayTimeout(t *testing.T) {
-	archive := gostTestArchive(t, "gost")
-	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if requests.Add(1) == 1 {
-			http.Error(w, "temporary gateway timeout", http.StatusGatewayTimeout)
-			return
-		}
-		_, _ = w.Write(archive)
-	}))
-	t.Cleanup(server.Close)
+// Keep the production URLs and proxy boundary visible to a real local HTTP server.
+type gostReleaseTransport struct {
+	origin *url.URL
+	next   http.RoundTripper
+}
 
-	output := filepath.Join(t.TempDir(), "gost")
-	if err := downloadGostWithCurl(t.Context(), server.URL, output); err != nil {
+func (tr gostReleaseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	local := req.Clone(req.Context())
+	local.Host = req.URL.Host
+	local.URL.Scheme, local.URL.Host = tr.origin.Scheme, tr.origin.Host
+	return tr.next.RoundTrip(local)
+}
+
+func routeGostDownloads(t *testing.T, server *httptest.Server) {
+	t.Helper()
+	origin, err := url.Parse(server.URL)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("download made %d requests, want 2", got)
-	}
-	if data, err := os.ReadFile(output); err != nil || string(data) != "binary" {
-		t.Fatalf("installed Gost = %q, %v", data, err)
-	}
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	http.DefaultTransport = gostReleaseTransport{origin: origin, next: server.Client().Transport}
+	t.Setenv("GH_PROXY", "https://proxy.test/")
+}
+
+func writeGostReleaseMetadata(w http.ResponseWriter, archive []byte) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"tag_name": "v3.3.3",
+		"assets": []map[string]any{{
+			"name":   "gost_3.3.3_linux_" + runtime.GOARCH + ".tar.gz",
+			"digest": fmt.Sprintf("sha256:%x", sha256.Sum256(archive)),
+			"size":   len(archive),
+		}},
+	})
 }

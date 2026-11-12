@@ -67,16 +67,18 @@ func TestRuleStartHandlesNodeObserverAndProvisioningFailures(t *testing.T) {
 	running, err := rules.GetByID(rule.ID)
 	requireServiceError(t, err, nil)
 	remote.rejectCommand("DELETE /config/services/"+running.ServiceID, http.StatusServiceUnavailable)
-	requireServiceError(t, rules.Stop(rule.ID, testAdmin, testIP, testAgent), nil)
+	if err := rules.Stop(rule.ID, testAdmin, testIP, testAgent); err == nil {
+		t.Fatal("stop ignored the unavailable node API")
+	}
 	saved, err := rules.GetByID(rule.ID)
 	requireServiceError(t, err, nil)
-	if saved.Status != model.RuleStatusStopped {
+	if saved.Status != model.RuleStatusRunning || saved.ServiceID != running.ServiceID {
 		t.Fatalf("stop with unavailable node API persisted %q", saved.Status)
 	}
-	updateServiceFields(t, db, rule, map[string]any{"node_id": 99})
+	updateServiceFields(t, db, rule, map[string]any{"node_id": 99, "status": model.RuleStatusError})
 	start(bizerrors.ErrNodeNotFound)
 	updateServiceFields(t, db, rule, map[string]any{"status": model.RuleStatusRunning})
-	requireServiceError(t, rules.Stop(rule.ID, testAdmin, testIP, testAgent), nil)
+	requireServiceError(t, rules.Stop(rule.ID, testAdmin, testIP, testAgent), bizerrors.ErrNodeNotFound)
 }
 
 func TestTunnelRuleRejectsMissingTunnelOrChain(t *testing.T) {

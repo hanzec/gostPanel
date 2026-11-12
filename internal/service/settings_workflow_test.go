@@ -123,6 +123,10 @@ func TestBackupCreatesReadableSnapshotAndAppliesRetention(t *testing.T) {
 		requireServiceError(t, os.WriteFile(path, []byte("old file"), 0o600), nil)
 	}
 	synctest.Test(t, func(t *testing.T) {
+		// A process exit during VACUUM may leave an unfinished snapshot. It must
+		// neither suppress today's backup nor count toward published retention.
+		unfinished := filepath.Join("backups", ".gost_panel_"+time.Now().Format("20060102")+"_235959-123.tmp")
+		requireServiceError(t, os.WriteFile(unfinished, []byte("unfinished snapshot"), 0o600), nil)
 		backup := NewBackupService(db)
 		if !backup.Supported() {
 			t.Fatal("SQLite backups should be supported")
@@ -148,8 +152,10 @@ func TestBackupCreatesReadableSnapshotAndAppliesRetention(t *testing.T) {
 		if saved.Name != "saved node" {
 			t.Fatalf("snapshot node name = %q", saved.Name)
 		}
-		if _, err := os.Stat(other); err != nil {
-			t.Fatalf("retention touched manual backup: %v", err)
+		for _, excluded := range []string{other, unfinished} {
+			if _, err := os.Stat(excluded); err != nil {
+				t.Fatalf("retention touched excluded file %s: %v", excluded, err)
+			}
 		}
 		backup.processAutoBackup()
 		sameFiles, err := filepath.Glob(filepath.Join("backups", "gost_panel_*.db"))
@@ -160,7 +166,7 @@ func TestBackupCreatesReadableSnapshotAndAppliesRetention(t *testing.T) {
 	})
 }
 
-func TestBackupDirectoryFailureAndCopy(t *testing.T) {
+func TestBackupDirectoryFailure(t *testing.T) {
 	t.Chdir(t.TempDir())
 	cfg := loadServiceConfig(t, "database:\n  path: live.db\n")
 	service := NewBackupService(newServiceTestDB(t))
@@ -182,27 +188,13 @@ func TestBackupDirectoryFailureAndCopy(t *testing.T) {
 	requireServiceError(t, os.WriteFile("backups", []byte("not a directory"), 0o600), nil)
 	requireServiceError(t, service.CreateBackup(), bizerrors.ErrBackupDirCreateFailed)
 	service.processAutoBackup()
-	if err := copyFile("missing.db", "new.db"); !os.IsNotExist(err) {
-		t.Fatalf("copy missing file = %v", err)
-	}
-	requireServiceError(t, os.WriteFile("source.db", []byte("test contents"), 0o600), nil)
-	if err := copyFile("source.db", "missing/new.db"); !os.IsNotExist(err) {
-		t.Fatalf("copy to missing directory = %v", err)
-	}
-	requireServiceError(t, copyFile("source.db", "new.db"), nil)
-	content, err := os.ReadFile("new.db")
-	requireServiceError(t, err, nil)
-	if string(content) != "test contents" {
-		t.Fatalf("copied contents = %q", content)
-	}
 }
 
-func TestBackupFailsWhenDatabaseCannotBeSnapshottedOrCopied(t *testing.T) {
+func TestBackupFailsWhenDatabaseCannotBeSnapshotted(t *testing.T) {
 	t.Chdir(t.TempDir())
 	loadServiceConfig(t, "database:\n  path: missing-source.db\n")
 	db := newServiceTestDB(t)
-	// SQLite refuses VACUUM in a transaction. The configured fallback file
-	// is intentionally missing, so neither backup path can report success.
+	// SQLite refuses VACUUM in a transaction. A failed snapshot must not publish a file.
 	requireServiceError(t, db.Exec("BEGIN").Error, nil)
 	defer db.Exec("ROLLBACK")
 	service := NewBackupService(db)

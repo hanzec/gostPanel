@@ -33,15 +33,39 @@ import (
 
 func TestTunnelChainUpdatesAllowed(t *testing.T) {
 	for name, want := range map[string]bool{
-		"tunnel-42-chain":   true,
-		"custom-chain":      false,
-		"tunnel-0-chain":    false,
-		"tunnel-042-chain":  false,
-		"tunnel-42-chain-1": false,
+		"tunnel-42-chain":             true,
+		"tunnel-42-clash-chain":       true,
+		"custom-chain":                false,
+		"tunnel-0-chain":              false,
+		"tunnel-042-chain":            false,
+		"tunnel-42-chain-1":           false,
+		"tunnel-0-clash-chain":        false,
+		"tunnel-042-clash-chain":      false,
+		"tunnel-42-clash-chain-1":     false,
+		"tunnel-42-clash-clash-chain": false,
 	} {
 		if got := allowedCommand(http.MethodPut, "/config/chains/"+name); got != want {
 			t.Errorf("PUT chain %s allowed = %t, want %t", name, got, want)
 		}
+	}
+}
+
+func TestControlUpdatesClashTunnelChain(t *testing.T) {
+	const payload = `{"name":"tunnel-42-clash-chain","hops":[]}`
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if r.Method != http.MethodPut || r.URL.Path != "/api/config/chains/tunnel-42-clash-chain" || err != nil || string(body) != payload {
+			t.Errorf("unexpected chain update: %s %s %s (%v)", r.Method, r.URL.Path, body, err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer admin.Close()
+	control := controlServer{config: Config{AdminAddress: strings.TrimPrefix(admin.URL, "http://")}, client: admin.Client()}
+	reply, err := control.Execute(t.Context(), &nodegrpc.CommandRequest{
+		Method: http.MethodPut, Path: "/config/chains/tunnel-42-clash-chain", Body: []byte(payload),
+	})
+	if err != nil || reply.GetStatusCode() != http.StatusOK {
+		t.Fatalf("Clash chain update = %v, %v", reply, err)
 	}
 }
 

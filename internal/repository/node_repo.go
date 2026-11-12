@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"slices"
 	"time"
 	"yagp/internal/model"
@@ -274,12 +275,19 @@ func (r *NodeRepository) CountAll() (int64, error) {
 
 // UpdateStats 累加节点流量
 func (r *NodeRepository) UpdateStats(id uint, inputBytes, outputBytes int64) error {
-	return r.DB.Model(&model.GostNode{}).Where("id = ?", id).
+	result := r.DB.Model(&model.GostNode{}).Where("id = ?", id).
+		Where("input_bytes <= ? AND output_bytes <= ? AND total_bytes <= ?",
+			math.MaxInt64-inputBytes, math.MaxInt64-outputBytes, math.MaxInt64-inputBytes-outputBytes).
 		Updates(map[string]interface{}{
 			"input_bytes":  gorm.Expr("input_bytes + ?", inputBytes),
 			"output_bytes": gorm.Expr("output_bytes + ?", outputBytes),
 			"total_bytes":  gorm.Expr("total_bytes + ?", inputBytes+outputBytes),
-		}).Error
+		})
+	// A zero delta may be a MySQL no-op rather than a rejected increment.
+	if result.Error == nil && result.RowsAffected == 0 && (inputBytes != 0 || outputBytes != 0) {
+		return ErrTrafficCounterOverflow
+	}
+	return result.Error
 }
 
 func (r *NodeRepository) SetStats(ctx context.Context, id uint, inputBytes, outputBytes int64) error {

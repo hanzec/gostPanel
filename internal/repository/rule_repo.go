@@ -1,10 +1,15 @@
 package repository
 
 import (
+	"errors"
+	"math"
+
 	"yagp/internal/model"
 
 	"gorm.io/gorm"
 )
+
+var ErrTrafficCounterOverflow = errors.New("traffic counter limit exceeded")
 
 // RuleRepository 规则仓库
 type RuleRepository struct {
@@ -179,7 +184,11 @@ func (r *RuleRepository) StopByNodeID(nodeID uint) error {
 
 // UpdateTrafficSample atomically stores the observer checkpoint and increments rule totals.
 func (r *RuleRepository) UpdateTrafficSample(id uint, delta, observed model.ObserverCounters) error {
-	return r.DB.Model(&model.GostRule{}).Where("id = ?", id).
+	// Guard the addition in SQL so an overflowing report cannot corrupt SQLite's integer columns.
+	result := r.DB.Model(&model.GostRule{}).Where("id = ?", id).
+		Where("input_bytes <= ? AND output_bytes <= ? AND total_bytes <= ? AND total_requests <= ?",
+			math.MaxInt64-delta.InputBytes, math.MaxInt64-delta.OutputBytes,
+			math.MaxInt64-delta.InputBytes-delta.OutputBytes, math.MaxInt64-delta.Connections).
 		Updates(map[string]interface{}{
 			"input_bytes":           gorm.Expr("input_bytes + ?", delta.InputBytes),
 			"output_bytes":          gorm.Expr("output_bytes + ?", delta.OutputBytes),
@@ -188,7 +197,12 @@ func (r *RuleRepository) UpdateTrafficSample(id uint, delta, observed model.Obse
 			"observer_input_bytes":  observed.InputBytes,
 			"observer_output_bytes": observed.OutputBytes,
 			"observer_connections":  observed.Connections,
-		}).Error
+		})
+	// MySQL can report zero changed rows for an unchanged snapshot; only a positive delta can overflow.
+	if result.Error == nil && result.RowsAffected == 0 && (delta.InputBytes != 0 || delta.OutputBytes != 0 || delta.Connections != 0) {
+		return ErrTrafficCounterOverflow
+	}
+	return result.Error
 }
 
 // StopByTunnelIDs 停止指定隧道列表关联的所有规则

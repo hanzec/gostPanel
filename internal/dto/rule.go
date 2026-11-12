@@ -38,13 +38,13 @@ type UpdateRuleReq struct {
 
 // RuleListReq 规则列表请求
 type RuleListReq struct {
-	Page     int    `form:"page" binding:"omitempty,min=1"`              // 页码
-	PageSize int    `form:"pageSize" binding:"omitempty,min=1,max=1000"` // 每页数量
-	NodeID   uint   `form:"node_id"`                                     // 节点 ID 筛选
-	TunnelID uint   `form:"tunnel_id"`                                   // 隧道 ID 筛选
-	Type     string `form:"type"`                                        // 规则类型筛选
-	Status   string `form:"status"`                                      // 状态筛选
-	Keyword  string `form:"keyword"`                                     // 关键词搜索
+	Page     int    `form:"page" binding:"omitempty,min=1"`             // 页码
+	PageSize int    `form:"pageSize" binding:"omitempty,min=1,max=100"` // 每页数量
+	NodeID   uint   `form:"node_id"`                                    // 节点 ID 筛选
+	TunnelID uint   `form:"tunnel_id"`                                  // 隧道 ID 筛选
+	Type     string `form:"type"`                                       // 规则类型筛选
+	Status   string `form:"status"`                                     // 状态筛选
+	Keyword  string `form:"keyword"`                                    // 关键词搜索
 }
 
 // SetDefaults 设置默认值
