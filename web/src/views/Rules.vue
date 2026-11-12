@@ -1,25 +1,11 @@
 <template>
   <div class="ops-page">
-    <PageActions>
-      <el-button :icon="Upload" @click="showImportDialog">导入 JSON</el-button>
-      <el-button :icon="Download" :loading="exportLoading" @click="handleExport">导出 JSON</el-button>
-      <el-button type="primary" :icon="Plus" @click="openDialog()">新建规则</el-button>
-    </PageActions>
-
     <MetricStrip label="入口规则摘要" :items="summary" />
 
     <section class="ops-panel rule-panel" aria-labelledby="rule-list-title" :aria-busy="loading">
       <header class="rule-section-head">
-        <div>
-          <h2 id="rule-list-title">入口规则</h2>
-          <p class="ops-muted">按节点和运行状态定位规则</p>
-        </div>
-        <div class="rule-section-actions">
-          <span class="ops-status" :class="listError ? 'is-warning' : 'is-success'">
-            {{ listError ? '更新暂停' : '每 5 秒更新' }}
-          </span>
-          <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
-        </div>
+        <h2 id="rule-list-title">入口规则</h2>
+        <el-button type="primary" :icon="Plus" @click="openDialog()">新建规则</el-button>
       </header>
 
       <form class="ops-toolbar rule-filters" aria-label="规则筛选" @submit.prevent="applyFilters">
@@ -67,7 +53,6 @@
         <strong>{{ hasFilters ? '没有匹配的规则' : '还没有入口规则' }}</strong>
         <p>{{ hasFilters ? '调整条件，或清除当前筛选查看全部规则。' : '创建规则以设置入口监听地址和转发路径。' }}</p>
         <el-button v-if="hasFilters" @click="clearFilters">清除筛选</el-button>
-        <el-button v-else :icon="Plus" @click="openDialog()">新建规则</el-button>
       </div>
 
       <div
@@ -300,39 +285,6 @@
         </el-button>
       </template>
     </PanelDialog>
-
-    <PanelDialog
-      v-model="exportDialogVisible"
-      title="导出规则"
-      description="复制导出的规则配置，可在另一面板中通过 JSON 导入。"
-    >
-      <el-input v-model="exportJsonData" class="rule-json" type="textarea" :rows="12" aria-label="导出的 JSON 配置" readonly />
-      <template #footer>
-        <el-button @click="exportDialogVisible = false">关闭</el-button>
-        <el-button type="primary" :icon="CopyDocument" @click="copyExportData">复制 JSON</el-button>
-      </template>
-    </PanelDialog>
-
-    <PanelDialog
-      v-model="importDialogVisible"
-      title="导入规则"
-      description="粘贴 JSON 对象或数组以创建规则。导入前请检查入口与监听端口。"
-    >
-      <el-input
-        v-model="importJsonData"
-        class="rule-json"
-        type="textarea"
-        :rows="12"
-        aria-label="要导入的 JSON 配置"
-        :aria-describedby="importError ? 'rule-import-error' : undefined"
-        placeholder="粘贴从规则页导出的 JSON"
-      />
-      <p v-if="importError" id="rule-import-error" class="rule-inline-error" role="alert">{{ importError }}</p>
-      <template #footer>
-        <el-button @click="importDialogVisible = false">取消</el-button>
-        <el-button type="primary" :icon="Upload" :loading="importLoading" @click="handleImport">创建导入规则</el-button>
-      </template>
-    </PanelDialog>
   </div>
 </template>
 
@@ -341,9 +293,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { ElMessage } from 'element-plus'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
-import { ArrowDown, CircleCheck, CopyDocument, Download, Plus, Refresh, Remove, Right, Search, Switch, Upload, VideoPause, Warning } from '@element-plus/icons-vue'
+import { ArrowDown, CircleCheck, Plus, Remove, Right, Search, Switch, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import PageActions from '@/components/PageActions.vue'
 import { getRoutingNodes } from '@/api/node'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 
@@ -428,14 +379,6 @@ const formRules = {
     trigger: 'change'
   }]
 }
-
-const exportDialogVisible = ref(false)
-const exportJsonData = ref('')
-const exportLoading = ref(false)
-const importDialogVisible = ref(false)
-const importJsonData = ref('')
-const importLoading = ref(false)
-const importError = ref('')
 
 const byteUnits = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 const formatBytes = (bytes = 0) => {
@@ -608,116 +551,6 @@ const handleRowCommand = async (row, command) => {
   await runRuleAction(row, deleteRule, '规则已删除')
 }
 
-const handleExport = async () => {
-  exportLoading.value = true
-  try {
-    const rows = []
-    const batchSize = 100
-    for (let exportPage = 1; ; exportPage++) {
-      const { data } = await getRuleList({ page: exportPage, pageSize: batchSize })
-      const batch = data.list || []
-      rows.push(...batch)
-      if (rows.length >= data.total || batch.length < batchSize) break
-    }
-    if (!rows.length) {
-      ElMessage.warning('没有可导出的规则')
-      return
-    }
-
-    exportJsonData.value = JSON.stringify(rows.map(rule => ({
-      name: rule.name,
-      node_id: rule.node_id,
-      type: rule.type,
-      tunnel_id: rule.tunnel_id,
-      protocol: rule.protocol,
-      listen_ip: rule.listen_ip ?? '',
-      listen_port: rule.listen_port,
-      use_clash_ruleset: rule.use_clash_ruleset ?? false,
-      targets: rule.targets,
-      strategy: rule.strategy,
-      remark: rule.remark || ''
-    })), null, 2)
-    exportDialogVisible.value = true
-  } catch {
-    // The request interceptor displays the backend error.
-  } finally {
-    exportLoading.value = false
-  }
-}
-
-const copyExportData = async () => {
-  try {
-    await navigator.clipboard.writeText(exportJsonData.value)
-    ElMessage.success('已复制 JSON')
-  } catch {
-    ElMessage.warning('剪贴板不可用，请选中文本手动复制。')
-  }
-}
-
-const showImportDialog = () => {
-  importJsonData.value = ''
-  importError.value = ''
-  importDialogVisible.value = true
-}
-
-const handleImport = async () => {
-  importError.value = ''
-  if (!importJsonData.value.trim()) {
-    importError.value = '请粘贴规则配置。'
-    return
-  }
-
-  let rows
-  try {
-    const parsed = JSON.parse(importJsonData.value)
-    rows = Array.isArray(parsed) ? parsed : [parsed]
-  } catch {
-    importError.value = 'JSON 格式有误，请检查括号和引号。'
-    return
-  }
-  if (!rows.length || rows.some(rule => !rule || typeof rule !== 'object' || Array.isArray(rule))) {
-    importError.value = '请输入规则对象或非空的规则数组。'
-    return
-  }
-
-  importLoading.value = true
-  let successCount = 0
-  for (const rule of rows) {
-    try {
-      await createRule({
-        name: rule.name || '导入规则',
-        node_id: rule.node_id,
-        type: rule.type,
-        tunnel_id: rule.tunnel_id,
-        protocol: rule.protocol || 'tcp',
-        listen_ip: rule.listen_ip ?? '',
-        listen_port: rule.listen_port || 0,
-        use_clash_ruleset: rule.use_clash_ruleset ?? false,
-        targets: rule.targets || [],
-        strategy: rule.strategy || 'round',
-        remark: rule.remark || ''
-      })
-      successCount++
-    } catch {
-      // Keep importing the remaining records.
-    }
-  }
-  importLoading.value = false
-
-  if (!successCount) {
-    importError.value = '导入失败。请核对节点和监听端口。'
-    return
-  }
-  importDialogVisible.value = false
-  const failedCount = rows.length - successCount
-  if (failedCount) {
-    ElMessage.warning('已导入 ' + successCount + ' 条，失败 ' + failedCount + ' 条')
-  } else {
-    ElMessage.success('已导入 ' + successCount + ' 条规则')
-  }
-  fetchData()
-}
-
 const addTarget = () => form.targetList.push({ address: '' })
 const removeTarget = index => form.targetList.splice(index, 1)
 
@@ -739,7 +572,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 }
 
 .rule-section-head,
-.rule-section-actions,
 .rule-filter-actions {
   display: flex;
   align-items: center;
@@ -759,7 +591,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   font-weight: var(--ops-weight-semibold);
 }
 
-.rule-section-head p,
 .rule-form-section header p {
   margin: 4px 0 0;
   font-size: var(--ops-text-body);
@@ -1044,15 +875,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   justify-self: start;
 }
 
-.rule-json :deep(textarea) {
-  font-family: var(--ops-mono);
-}
-
-.rule-inline-error {
-  margin: 8px 0 0;
-  color: var(--ops-danger);
-}
-
 @media (max-width: 1160px) {
   .rule-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1135,7 +957,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   .rule-filter-actions .el-button,
   .rule-filters :deep(.el-input__wrapper),
   .rule-filters :deep(.el-select__wrapper),
-  .rule-section-actions .el-button,
+  .rule-section-head .el-button,
   .rule-editor :deep(.el-input__wrapper),
   .rule-editor :deep(.el-select__wrapper),
   .rule-target-item .el-button,

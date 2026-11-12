@@ -40,6 +40,19 @@ beforeEach(() => {
 })
 
 describe('forwarding rule inventory', () => {
+  it('offers rule creation in the inventory heading and omits the removed actions', async () => {
+    getRuleList.mockResolvedValueOnce(result())
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    const heading = wrapper.get('.rule-section-head')
+    expect(heading.get('h2').text()).toBe('入口规则')
+    expect(wrapper.findAll('button').filter(item => item.text() === '新建规则')).toHaveLength(1)
+    expect(wrapper.text()).not.toMatch(/导入 JSON|导出 JSON|每 5 秒更新/)
+    expect(wrapper.findAll('button').some(item => item.text() === '刷新')).toBe(false)
+    await button(heading, '新建规则').trigger('click')
+    expect(editDialog(wrapper).attributes('aria-label')).toBe('新建入口规则')
+  })
+
   it('shows node option loading and lets the filter and editor retry a failed request', async () => {
     const pending = Promise.withResolvers()
     getRoutingNodes.mockReturnValueOnce(pending.promise).mockRejectedValueOnce(new Error('still offline'))
@@ -162,7 +175,9 @@ describe('forwarding rule inventory', () => {
     }
   })
 
-  it('keeps the previous rules on refresh failure and applies filters from page one', async () => {
+  it('keeps the previous rules on polling failure and applies filters from page one', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
     const response = Promise.withResolvers()
     getRuleList.mockReturnValueOnce(response.promise)
     const wrapper = mountInventory(Rules)
@@ -187,8 +202,7 @@ describe('forwarding rule inventory', () => {
     await changePage(wrapper, 2)
     expect(getRuleList).toHaveBeenLastCalledWith({ page: 2, pageSize: 10, keyword: '', node_id: '', status: '' })
     getRuleList.mockRejectedValueOnce(new Error('offline'))
-    await button(wrapper, '刷新').trigger('click')
-    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
     expect(wrapper.get('[role="alert"]').text()).toContain('下方保留了上次获取的结果。')
     expect(row(wrapper, 'HTTPS').exists()).toBe(true)
 
@@ -242,7 +256,6 @@ describe('forwarding rule inventory', () => {
     expect(wrapper.get('tbody').text()).not.toContain('HTTPS')
   })
 })
-
 describe('forwarding rule editor and actions', () => {
   it('creates a standalone endpoint after validating the node and port, then checks that listener', async () => {
     const wrapper = mountInventory(Rules)
@@ -406,129 +419,5 @@ describe('forwarding rule editor and actions', () => {
     await command(row(wrapper, 'DNS'), 'delete')
     expect(deleteRule).toHaveBeenCalledWith(2)
     expect(ElMessage.success).toHaveBeenCalledWith('规则已删除')
-  })
-})
-
-describe('forwarding rule JSON exchange', () => {
-  it('exports every page with only editable fields and handles clipboard failure', async () => {
-    const wrapper = mountInventory(Rules)
-    await flushPromises()
-    const batch = Array.from({ length: 100 }, (_, index) => ({ ...direct, id: index + 1 }))
-    getRuleList.mockResolvedValueOnce(result(batch, 101)).mockResolvedValueOnce(result([relayRule], 101))
-    await button(wrapper, '导出 JSON').trigger('click')
-    await flushPromises()
-    expect(getRuleList).toHaveBeenLastCalledWith({ page: 2, pageSize: 100 })
-    const dialog = editDialog(wrapper)
-    const json = dialog.get('textarea[aria-label="导出的 JSON 配置"]').element.value
-    const exported = JSON.parse(json)
-    expect(exported).toHaveLength(101)
-    expect(exported[0]).toEqual({
-      name: 'HTTPS', node_id: 4, protocol: 'tcp',
-      listen_ip: '192.0.2.10', listen_port: 443, use_clash_ruleset: false,
-      targets: direct.targets, strategy: 'rand', remark: 'Office'
-    })
-    expect(exported.at(-1)).toMatchObject({ name: 'DNS', node_id: 4, remark: '' })
-    const writeText = vi.fn().mockResolvedValueOnce().mockRejectedValueOnce(new Error('denied'))
-    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
-    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
-    try {
-      await button(dialog, '复制 JSON').trigger('click')
-      await flushPromises()
-      expect(writeText).toHaveBeenCalledWith(json)
-      expect(ElMessage.success).toHaveBeenCalledWith('已复制 JSON')
-      await button(dialog, '复制 JSON').trigger('click')
-      await flushPromises()
-      expect(ElMessage.warning).toHaveBeenCalledWith('剪贴板不可用，请选中文本手动复制。')
-    } finally {
-      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard)
-      else delete navigator.clipboard
-    }
-    await button(dialog, '关闭').trigger('click')
-    getRuleList.mockResolvedValueOnce(result())
-    await button(wrapper, '导出 JSON').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
-    expect(ElMessage.warning).toHaveBeenCalledWith('没有可导出的规则')
-    getRuleList.mockRejectedValueOnce(new Error('offline'))
-    await button(wrapper, '导出 JSON').trigger('click')
-    await flushPromises()
-    expect(button(wrapper, '导出 JSON').classes()).not.toContain('is-loading')
-  })
-
-  it('preserves legacy tunnel routing when exported rules are imported again', async () => {
-    const legacy = {
-      ...relayRule, type: 'tunnel', node_id: null, tunnel_id: 8,
-      tunnel: { id: 8, entry_node_id: entryNode.id }
-    }
-    const standalone = { ...direct, type: 'forward', tunnel_id: null }
-    getRuleList.mockResolvedValue(result([legacy, standalone]))
-    const wrapper = mountInventory(Rules)
-    await flushPromises()
-    await button(wrapper, '导出 JSON').trigger('click')
-    await flushPromises()
-    const json = editDialog(wrapper).get('textarea').element.value
-    const exported = JSON.parse(json)
-    expect(exported[0]).toMatchObject({ type: 'tunnel', tunnel_id: 8, node_id: null })
-    expect(exported[0]).not.toHaveProperty('tunnel')
-    expect(exported[1]).toMatchObject({ type: 'forward', tunnel_id: null, node_id: entryNode.id })
-    await button(editDialog(wrapper), '关闭').trigger('click')
-    await button(wrapper, '导入 JSON').trigger('click')
-    await editDialog(wrapper).get('textarea').setValue(json)
-    await button(editDialog(wrapper), '创建导入规则').trigger('click')
-    await flushPromises()
-    expect(createRule).toHaveBeenCalledTimes(2)
-    expect(createRule).toHaveBeenNthCalledWith(1, {
-      ...exported[0], strategy: 'round'
-    })
-    expect(createRule).toHaveBeenNthCalledWith(2, exported[1])
-    expect(startRule).not.toHaveBeenCalled()
-    expect(ElMessage.success).toHaveBeenCalledWith('已导入 2 条规则')
-  })
-
-  it('validates JSON and reports complete, partial and unsuccessful imports', async () => {
-    const wrapper = mountInventory(Rules)
-    await flushPromises()
-    const importJson = async source => {
-      const dialog = editDialog(wrapper)
-      await dialog.get('textarea').setValue(source)
-      await button(dialog, '创建导入规则').trigger('click')
-      await flushPromises()
-    }
-
-    await button(wrapper, '导入 JSON').trigger('click')
-    for (const [source, error] of [
-      ['  ', '请粘贴规则配置。'],
-      ['{ invalid', 'JSON 格式有误'],
-      ['[null]', '请输入规则对象'],
-      ['[]', '请输入规则对象']
-    ]) {
-      await importJson(source)
-      expect(editDialog(wrapper).get('#rule-import-error').text()).toContain(error)
-    }
-    expect(createRule).not.toHaveBeenCalled()
-
-    createRule.mockRejectedValueOnce(new Error('invalid port'))
-    await importJson('{"listen_port":0}')
-    expect(editDialog(wrapper).get('#rule-import-error').text()).toContain('导入失败。')
-    expect(createRule).toHaveBeenLastCalledWith({
-      name: '导入规则', node_id: undefined,
-      protocol: 'tcp', listen_ip: '', listen_port: 0, use_clash_ruleset: false,
-      targets: [], strategy: 'round', remark: ''
-    })
-    createRule.mockRejectedValueOnce(new Error('port conflict'))
-    await importJson('[{"name":"duplicate"},{"name":"new proxy","node_id":4,"protocol":"tcp","listen_ip":"127.0.0.1","listen_port":443,"use_clash_ruleset":true,"strategy":"hash","remark":"TLS"}]')
-    expect(createRule).toHaveBeenLastCalledWith({
-      name: 'new proxy', node_id: 4, protocol: 'tcp',
-      listen_ip: '127.0.0.1', listen_port: 443, use_clash_ruleset: true,
-      targets: [], strategy: 'hash', remark: 'TLS'
-    })
-    expect(ElMessage.warning).toHaveBeenCalledWith('已导入 1 条，失败 1 条')
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
-
-    await button(wrapper, '导入 JSON').trigger('click')
-    expect(editDialog(wrapper).get('textarea').element.value).toBe('')
-    await importJson('{"name":"web","node_id":4,"listen_port":80}')
-    expect(ElMessage.success).toHaveBeenCalledWith('已导入 1 条规则')
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 })

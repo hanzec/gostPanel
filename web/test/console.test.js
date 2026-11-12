@@ -14,7 +14,7 @@ const adapter = vi.fn()
 const reply = (config, data, code = 0, message = '') => ({
   status: 200, statusText: 'OK', headers: {}, config, data: { code, data, message }
 })
-const branding = { siteTitle: 'Edge 管理台', logoUrl: '/edge-logo.svg', copyright: '网络运维' }
+const branding = { siteTitle: 'Edge 管理台', logoUrl: '/edge-logo.svg', copyright: '网络运维', version: '0.1.149-abcdef0' }
 const stats = {
   nodes: { total: 2, online: 1, offline: 1 },
   rules: { total: 4, running: 3, stopped: 1 },
@@ -67,6 +67,7 @@ describe('console routing and Authentik gate', () => {
     })
 
     expect(wrapper.get('[role="status"]').text()).toContain('正在确认管理员身份')
+    expect(wrapper.find('.console-nav__foot').exists()).toBe(false)
     expect(wrapper.get('.console-brand__mark img').attributes('src')).toBe('/favicon.svg')
     expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/info'])
     answer()
@@ -84,6 +85,7 @@ describe('console routing and Authentik gate', () => {
     expect(wrapper.get('.console-topbar h1').text()).toBe('运行总览')
     expect(wrapper.find('main h1').exists()).toBe(false)
     expect(wrapper.get('.console-footer').text()).toContain(branding.copyright)
+    expect(wrapper.get('.console-sidebar .console-nav__foot').text()).toBe('版本 ' + branding.version)
     expect(document.title).toBe(branding.siteTitle)
 
     const logo = wrapper.get('.console-brand__mark')
@@ -99,6 +101,7 @@ describe('console routing and Authentik gate', () => {
     const openMenu = wrapper.get('button[aria-label="打开管理导航"]')
     await openMenu.trigger('click')
     expect(openMenu.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('aside[aria-label="管理导航"] .console-nav__foot').text()).toBe('版本 ' + branding.version)
     await wrapper.get('aside[aria-label="管理导航"] a.console-brand').trigger('click')
     expect(openMenu.attributes('aria-expanded')).toBe('false')
     await openMenu.trigger('click')

@@ -14,6 +14,7 @@ export const useSystemStore = defineStore('system', () => {
     const siteTitle = ref(localStorage.getItem('siteTitle') || 'yagp')
     const logoUrl = ref(logoOverride(localStorage.getItem('logoUrl')))
     const copyright = ref(localStorage.getItem('copyright') || '')
+    const version = ref('')
 
     // Actions
     async function fetchSystemConfig() {
@@ -21,6 +22,7 @@ export const useSystemStore = defineStore('system', () => {
             const res = await getPublicSystemConfig()
             if (res.data) {
                 const config = res.data
+                version.value = config.version || ''
 
                 // Update state
                 if (config.siteTitle) {
@@ -59,6 +61,7 @@ export const useSystemStore = defineStore('system', () => {
         siteTitle,
         logoUrl,
         copyright,
+        version,
         fetchSystemConfig
     }
 })

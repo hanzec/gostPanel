@@ -21,30 +21,27 @@
       </section>
     </div>
 
-    <PageActions v-else>
-      <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
-      <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
-    </PageActions>
-
     <MetricStrip v-if="!detailId" label="节点统计" :items="nodeMetrics" />
 
     <section v-if="!detailId" ref="inventoryPanel" class="ops-panel inventory-panel" aria-labelledby="node-inventory-title">
-      <div class="inventory-heading">
+      <header class="inventory-heading">
         <h2 id="node-inventory-title" tabindex="-1">节点清单</h2>
-        <form class="inventory-filters" aria-label="筛选节点" @submit.prevent="handleSearch">
-          <div class="inventory-field">
-            <el-input id="node-keyword" v-model="searchKeyword" aria-label="节点名称" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
-          </div>
-          <div class="inventory-field">
-            <el-select v-model="searchStatus" aria-label="健康状态" placeholder="全部状态" clearable @change="handleSearch">
-              <el-option label="在线" value="online" />
-              <el-option label="离线" value="offline" />
-              <el-option label="异常" value="error" />
-            </el-select>
-          </div>
-          <el-button native-type="submit">筛选</el-button>
-        </form>
-      </div>
+        <el-button type="primary" :icon="Plus" @click="openDialog()">添加节点</el-button>
+      </header>
+
+      <form class="ops-toolbar inventory-filters" aria-label="筛选节点" @submit.prevent="handleSearch">
+        <div class="inventory-field">
+          <el-input id="node-keyword" v-model="searchKeyword" aria-label="节点名称" :prefix-icon="Search" clearable placeholder="搜索名称" @clear="handleSearch" />
+        </div>
+        <div class="inventory-field">
+          <el-select v-model="searchStatus" aria-label="健康状态" placeholder="全部状态" clearable @change="handleSearch">
+            <el-option label="在线" value="online" />
+            <el-option label="离线" value="offline" />
+            <el-option label="异常" value="error" />
+          </el-select>
+        </div>
+        <el-button native-type="submit">筛选</el-button>
+      </form>
 
       <div v-if="loadError" class="inventory-error" role="alert">
         <span>无法加载节点清单，请重试。</span>
@@ -60,7 +57,6 @@
         <p>{{ filtered ? '没有匹配的节点' : '尚未添加节点' }}</p>
         <span class="ops-muted">{{ filtered ? '调整关键字或状态后重试。' : '先登记一个 Gost 实例，再生成安装命令。' }}</span>
         <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
-        <el-button v-else type="primary" @click="openDialog()">添加节点</el-button>
       </div>
       <div v-else-if="nodeList.length" class="ops-table-scroll inventory-scroll" :aria-busy="loading">
         <table class="inventory-table" role="table" aria-labelledby="node-inventory-title">
@@ -249,13 +245,12 @@
 import { ref, reactive, computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, ArrowRight, CopyDocument, Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, CopyDocument, Monitor, Plus, Search } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import NodeDetails from '@/components/NodeDetails.vue'
 import NodeRegionFlag from '@/components/NodeRegionFlag.vue'
 import NodeSettingsForm from '@/components/NodeSettingsForm.vue'
 import NodeTrafficCalibration from '@/components/NodeTrafficCalibration.vue'
-import PageActions from '@/components/PageActions.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
@@ -712,12 +707,8 @@ onBeforeUnmount(() => {
 <style scoped src="../inventory.css"></style>
 
 <style scoped>
-.inventory-heading { align-items: center; flex-wrap: wrap; }
-.inventory-heading h2 { margin: 0; }
-.inventory-filters { width: min(100%, 380px); gap: 8px; padding: 0; }
 .inventory-filters .inventory-field { flex-basis: 180px; }
 .inventory-filters .inventory-field + .inventory-field { flex-basis: 120px; }
-.inventory-scroll { container-type: inline-size; }
 .node-list-row { cursor: pointer; }
 .inventory-table .node-list-row:focus-within { background: var(--ops-raised); }
 .node-row-link { width: fit-content; min-height: 30px; color: var(--ops-text); text-decoration: none; }
@@ -730,14 +721,10 @@ onBeforeUnmount(() => {
 @media (min-width: 701px) {
   .inventory-table td:first-child { white-space: nowrap; }
   @container (max-width: 720px) {
-    .inventory-table th, .inventory-table td { padding-inline: 8px; }
-    .inventory-table :is(th, td):first-child { padding-inline-start: 14px; }
-    .inventory-table :is(th, td):last-child { padding-inline-end: 14px; }
     .node-row-link .el-icon { display: none; }
   }
 }
 @media (max-width: 700px) {
-  .inventory-heading .inventory-filters { width: 100%; padding: 0; }
   .inventory-filters .inventory-field { flex: 2 1 108px; }
   .inventory-filters .inventory-field + .inventory-field { flex: 1 1 94px; }
   .node-row-link { min-height: 44px; }

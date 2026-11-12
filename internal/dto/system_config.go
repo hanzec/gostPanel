@@ -16,6 +16,7 @@ type PublicSystemConfigResp struct {
 	LogoURL       string `json:"logoUrl"`
 	Copyright     string `json:"copyright"`
 	Host          string `json:"host"`
+	Version       string `json:"version"`
 	DaemonVersion string `json:"daemonVersion,omitempty"`
 }
 

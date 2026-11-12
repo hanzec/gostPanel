@@ -1,12 +1,5 @@
 <template>
   <div class="ops-page overview">
-    <PageActions>
-      <RouterLink class="overview-primary" to="/nodes">
-        查看节点
-        <el-icon aria-hidden="true"><ArrowRight /></el-icon>
-      </RouterLink>
-    </PageActions>
-
     <div v-if="statsError" class="ops-panel overview-feedback" role="alert">
       <span>{{ stats ? '状态更新失败，当前显示上次获取的数据。' : '暂时无法获取运行状态。' }}</span>
     </div>
@@ -186,7 +179,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ArrowRight, Connection, Cpu, DataAnalysis, Document, Monitor, Switch } from '@element-plus/icons-vue'
 import { getLogList } from '@/api/log'
 import { getDashboardStats } from '@/api/stats'
-import PageActions from '@/components/PageActions.vue'
 
 const stats = ref(null)
 const updatedAt = ref(null)
@@ -310,7 +302,6 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
 </script>
 
 <style scoped>
-.overview-primary,
 .overview-link {
   display: inline-flex;
   align-items: center;
@@ -319,17 +310,9 @@ onBeforeUnmount(() => window.clearInterval(pollTimer))
   font-weight: var(--ops-weight-semibold);
   text-decoration: none;
   white-space: nowrap;
+  color: var(--ops-accent);
 }
 
-.overview-primary {
-  padding: 0 16px;
-  border-radius: var(--ops-radius-inset);
-  background: var(--ops-accent);
-  color: var(--ops-bg);
-}
-
-.overview-primary:hover { filter: brightness(1.08); }
-.overview-link { color: var(--ops-accent); }
 .overview-link:hover { text-decoration: underline; }
 
 .overview-kpis,

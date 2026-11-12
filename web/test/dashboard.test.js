@@ -91,7 +91,7 @@ describe('Dashboard overview', () => {
     expect(entries[0].text()).toContain('Added a node')
     expect(entries[0].get('time').attributes('datetime')).toBe(logs[0].created_at)
     expect(entries[1].findAll('td').map((item) => item.text())).toEqual(['—', '—', 'custom', '—'])
-    expect(page.get('a[href="/nodes"]').text()).toContain('查看节点')
+    expect(page.find('a[href="/nodes"]').exists()).toBe(false)
     expect(page.get('a[href="/logs"]').text()).toContain('查看全部')
   })
 

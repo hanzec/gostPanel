@@ -69,6 +69,23 @@ async function openDetail(view) {
 }
 
 describe('node inventory', () => {
+  it('opens the add dialog from the empty inventory heading and refreshes automatically', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    api.getNodeList.mockResolvedValueOnce(list([]))
+    const view = open()
+    await flushPromises()
+    expect(view.text()).toContain('尚未添加节点')
+    const buttons = view.findAll('button').map(item => item.text())
+    expect(buttons.filter(label => label === '添加节点')).toHaveLength(1)
+    expect(buttons).not.toContain('刷新')
+    await click(view.get('.inventory-heading'), '添加节点')
+    await click(dialog(view, '添加节点'), '取消')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.getNodeList).toHaveBeenCalledTimes(2)
+    expect(view.get('#node-link-7').text()).toBe(primary.name)
+  })
+
   it('opens a node from any row cell and returns to the filtered list', async () => {
     const view = open()
     await flushPromises()

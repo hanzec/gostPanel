@@ -27,21 +27,21 @@
       </div>
     </nav>
 
-    <div class="console-nav__foot">
-      <el-icon aria-hidden="true"><Lock /></el-icon>
-      <span>内部管理控制台</span>
+    <div v-if="version" class="console-nav__foot">
+      版本 <span class="ops-mono">{{ version }}</span>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
-import { Connection, Document, Lock, Monitor, Odometer, Setting, Switch } from '@element-plus/icons-vue'
+import { Connection, Document, Monitor, Odometer, Setting, Switch } from '@element-plus/icons-vue'
 import { defaultLogoUrl } from '@/store/system'
 
 defineProps({
   siteTitle: { type: String, required: true },
-  logoUrl: { type: String, default: '' }
+  logoUrl: { type: String, default: '' },
+  version: { type: String, default: '' }
 })
 defineEmits(['navigate'])
 
@@ -141,14 +141,12 @@ const groups = [
 }
 
 .console-nav__foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin-top: auto;
   padding: 13px 10px 2px;
   border-top: 1px solid var(--ops-border);
   color: var(--ops-faint);
   font-size: var(--ops-text-xs);
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 900px) {

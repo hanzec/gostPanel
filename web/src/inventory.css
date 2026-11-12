@@ -1,20 +1,12 @@
 .inventory-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: var(--ops-card-padding);
 }
-.inventory-heading h2 { font-size: var(--ops-text-title); margin: 0 0 5px; }
-.inventory-heading p { margin: 0; font-size: var(--ops-text-body); }
-.inventory-badge {
-  color: var(--ops-accent);
-  background: color-mix(in srgb, var(--ops-accent) 9%, var(--ops-panel));
-  border-radius: var(--ops-radius-inset);
-  padding: 4px 8px;
-  white-space: nowrap;
-  font-size: var(--ops-text-xs);
-}
+.inventory-heading h2 { font-size: var(--ops-text-title); margin: 0; }
 .inventory-filters {
   display: flex;
   flex-wrap: wrap;
@@ -31,7 +23,7 @@
   font-weight: var(--ops-weight-medium);
 }
 .inventory-field + .inventory-field { flex-basis: 140px; }
-.inventory-scroll { min-width: 0; }
+.inventory-scroll { min-width: 0; container-type: inline-size; }
 .inventory-table {
   width: 100%;
   border-collapse: collapse;
@@ -98,6 +90,14 @@
 .inventory-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .inventory-form-wide { grid-column: 1 / -1; }
 .inventory-form-grid :deep(.el-input-number) { width: 100%; }
+@media (min-width: 701px) {
+  @container (max-width: 720px) {
+    .inventory-table th, .inventory-table td { padding-inline: 8px; }
+    .inventory-table :is(th, td):first-child { padding-inline-start: 14px; }
+    .inventory-table :is(th, td):last-child { padding-inline-end: 14px; }
+  }
+}
+
 @media (max-width: 700px) {
   .inventory-heading, .inventory-filters, .inventory-pagination { padding-left: var(--ops-card-padding); padding-right: var(--ops-card-padding); }
   .inventory-field { flex: 1 1 130px; }
@@ -124,6 +124,7 @@
   .inventory-status { grid-row: 1; grid-column: 2; justify-self: end; }
   .inventory-actions-cell { grid-column: 1 / -1; }
   .inventory-actions :deep(.el-button),
+  .inventory-heading :deep(.el-button),
   .inventory-filters :deep(.el-button),
   .inventory-filters :deep(.el-input__wrapper),
   .inventory-filters :deep(.el-select__wrapper),
