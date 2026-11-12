@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 
 	"gorm.io/gorm"
 )
+
+const gostVersionRefreshInterval = 5 * time.Minute
 
 // NodeHealthService 节点健康检测服务
 // 使用 Gost API 进行健康检查
@@ -94,6 +97,7 @@ func (s *NodeHealthService) checkNodes() {
 
 			if status == model.NodeStatusOnline {
 				logger.Debugf("节点 %s 在线", n.Name)
+				s.refreshGostVersion(n, time.Now())
 			} else {
 				// 停止其关联的所有规则和隧道
 				_ = s.ruleRepo.StopByNodeID(n.ID)
@@ -128,4 +132,17 @@ func (s *NodeHealthService) checkNodeHealth(node model.GostNode) model.NodeStatu
 	}
 
 	return model.NodeStatusOnline
+}
+
+func (s *NodeHealthService) refreshGostVersion(node model.GostNode, now time.Time) {
+	if node.GostVersionCheckedAt != nil && now.Before(node.GostVersionCheckedAt.Add(gostVersionRefreshInterval)) {
+		return
+	}
+	// This RPC reports the installed binary version from the node.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	state, _ := utils.GetGostClient(&node).GetUpgradeStatus(ctx)
+	if err := s.nodeRepo.UpdateGostVersion(node.ID, state.GetGostVersion(), now); err != nil {
+		logger.Debugf("更新节点 %d Gost 版本失败: %v", node.ID, err)
+	}
 }

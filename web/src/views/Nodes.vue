@@ -66,17 +66,24 @@
         <table class="inventory-table" role="table" aria-labelledby="node-inventory-title">
           <thead role="rowgroup">
             <tr role="row">
-              <th scope="col" role="columnheader">实例</th>
+              <th scope="col" role="columnheader">ID</th>
+              <th scope="col" role="columnheader">节点名称</th>
+              <th scope="col" role="columnheader">区域</th>
               <th scope="col" role="columnheader">节点 IP</th>
               <th scope="col" role="columnheader">状态</th>
               <th scope="col" role="columnheader">本期用量</th>
-              <th scope="col" role="columnheader">Gost 服务</th>
+              <th scope="col" role="columnheader">Gost 版本</th>
               <th scope="col" role="columnheader">操作</th>
             </tr>
           </thead>
           <tbody role="rowgroup">
             <tr v-for="node in nodeList" :key="node.id" class="node-list-row" role="row" @click="router.push(nodeLocation(node.id))">
-              <td class="inventory-resource" role="cell">
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">ID</span>
+                <span class="ops-mono">{{ node.id }}</span>
+              </td>
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">节点名称</span>
                 <RouterLink
                   :id="'node-link-' + node.id"
                   :to="nodeLocation(node.id)"
@@ -88,43 +95,28 @@
                   <strong>{{ node.name }}</strong>
                   <el-icon class="node-row-arrow" aria-hidden="true"><ArrowRight /></el-icon>
                 </RouterLink>
-                <span class="inventory-secondary ops-mono ops-muted">#{{ node.id }}</span>
-                <span v-if="node.region" class="inventory-secondary ops-muted">{{ formatRegion(node.region) }}</span>
+              </td>
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">区域</span>
+                <NodeRegionFlag :region="node.region" />
               </td>
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">节点 IP</span>
                 <strong class="ops-mono">{{ node.address || '待获取地址' }}</strong>
               </td>
-              <td class="inventory-status" role="cell">
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">状态</span>
                 <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">
                   {{ nodeStates[node.status]?.label || '未知' }}
                 </span>
               </td>
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">本期用量</span>
-                <strong class="ops-mono">{{ formatGigabytes(node.traffic_current_period_used_bytes) }}</strong>
-                <template v-if="node.traffic_limit_bytes > 0">
-                  <span class="inventory-secondary ops-muted">
-                    {{ trafficResetPeriods[node.traffic_reset_period] || trafficResetPeriods.none }}
-                  </span>
-                  <span class="ops-status node-traffic-status" :class="nodeTrafficQuotaState(node).tone">
-                    {{ nodeTrafficQuotaState(node).label }}
-                  </span>
-                  <span v-if="node.traffic_quota_state === 'unsupported'" class="inventory-secondary ops-muted">
-                    需要支持流量配额的 yagp-daemon 和 nftables。
-                  </span>
-                </template>
-                <span v-else-if="node.traffic_quota_state" class="inventory-secondary ops-muted">解除限制待同步</span>
-                <span v-else class="inventory-secondary ops-muted">未设上限</span>
+                <strong class="ops-mono">{{ formatNodeTrafficUsage(node) }}</strong>
               </td>
-              <td class="inventory-service" role="cell">
-                <span class="inventory-cell-label" aria-hidden="true">Gost 服务</span>
-                <RouterLink
-                  :to="{ ...nodeLocation(node.id), hash: '#node-gost-service' }"
-                  class="inventory-service-link"
-                  :aria-label="'查看 Gost 服务：' + node.name"
-                  @click.stop
-                >查看服务<el-icon aria-hidden="true"><ArrowRight /></el-icon></RouterLink>
+              <td role="cell">
+                <span class="inventory-cell-label" aria-hidden="true">Gost 版本</span>
+                <span class="ops-mono">{{ node.gost_version || '—' }}</span>
               </td>
               <td class="inventory-actions-cell" role="cell">
                 <div class="inventory-actions">
@@ -260,13 +252,14 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, ArrowRight, CopyDocument, Monitor, Plus, Refresh, Search } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import NodeDetails from '@/components/NodeDetails.vue'
+import NodeRegionFlag from '@/components/NodeRegionFlag.vue'
 import NodeSettingsForm from '@/components/NodeSettingsForm.vue'
 import NodeTrafficCalibration from '@/components/NodeTrafficCalibration.vue'
 import PageActions from '@/components/PageActions.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
-import { formatGigabytes, formatRegion, formatTime, nodeStates, nodeTrafficQuotaState, trafficResetPeriods } from '@/utils/node-display'
+import { formatNodeTrafficUsage, formatTime, nodeStates } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
@@ -730,26 +723,16 @@ onBeforeUnmount(() => {
 .node-row-link { width: fit-content; min-height: 30px; color: var(--ops-text); text-decoration: none; }
 .node-row-link:hover, .node-row-link:focus-visible { color: var(--ops-accent); text-decoration: underline; }
 .node-row-arrow { color: var(--ops-accent); flex: none; }
-.inventory-service-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 36px;
-  font-weight: var(--ops-weight-semibold);
-  text-decoration: none;
-  white-space: nowrap;
-}
-.inventory-service-link:hover, .inventory-service-link:focus-visible { text-decoration: underline; }
 .node-detail-crumb, .node-detail-back { display: flex; align-items: center; gap: 8px; }
 .node-detail-crumb { color: var(--ops-muted); font-size: var(--ops-text-sm); }
 .node-detail-back { min-height: 44px; color: var(--ops-text); text-decoration: none; }
 .node-detail-back:hover { color: var(--ops-accent); text-decoration: underline; }
 @media (min-width: 701px) {
+  .inventory-table td:first-child { white-space: nowrap; }
   @container (max-width: 720px) {
     .inventory-table th, .inventory-table td { padding-inline: 8px; }
     .inventory-table :is(th, td):first-child { padding-inline-start: 14px; }
     .inventory-table :is(th, td):last-child { padding-inline-end: 14px; }
-    .inventory-table :is(th, td):nth-child(2) { width: 27%; }
     .node-row-link .el-icon { display: none; }
   }
 }
@@ -757,8 +740,7 @@ onBeforeUnmount(() => {
   .inventory-heading .inventory-filters { width: 100%; padding: 0; }
   .inventory-filters .inventory-field { flex: 2 1 108px; }
   .inventory-filters .inventory-field + .inventory-field { flex: 1 1 94px; }
-  .node-row-link, .inventory-service-link { min-height: 44px; }
-  .inventory-status { align-self: center; }
+  .node-row-link { min-height: 44px; }
   .inventory-actions-cell { grid-column: 2; align-self: end; }
   .inventory-actions { justify-content: flex-end; }
 }
@@ -769,7 +751,6 @@ onBeforeUnmount(() => {
 .node-settings-danger { display: grid; justify-items: start; gap: 12px; padding: 16px; }
 .node-settings-danger h3 { color: var(--ops-danger); font-size: var(--ops-text-base); }
 .node-settings-danger .el-button { min-height: 44px; }
-.node-traffic-status { margin-top: 4px; }
 .config-empty { text-align: center; padding: 24px 12px; }
 .config-entry { border: 1px solid var(--ops-border); border-radius: var(--ops-radius-inset); margin-bottom: 8px; min-width: 0; }
 .config-entry summary { padding: 10px 12px; cursor: pointer; overflow-wrap: anywhere; }

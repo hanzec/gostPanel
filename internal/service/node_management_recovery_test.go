@@ -2,13 +2,10 @@ package service
 
 import (
 	"context"
-	"net/http"
 	"slices"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"yagp/internal/model"
 	"yagp/pkg/nodegrpc"
 
 	"google.golang.org/grpc/codes"
@@ -16,113 +13,82 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func TestAutomaticUpgradeRecoversAfterReleaseAndWorkerFailures(t *testing.T) {
-	var failRelease atomic.Bool
-	var gostLookups atomic.Int32
-	useLocalReleaseAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/repos/go-gost/gost/releases/latest":
-			gostLookups.Add(1)
-			if failRelease.Load() {
-				http.Error(w, "release unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			_, _ = w.Write([]byte(`{"tag_name":"v3.2.8"}`))
-		case "/repos/hanzec/yagp/releases/latest":
-			t.Error("daemon policy queried the remote latest release")
-			http.NotFound(w, r)
-		default:
-			http.NotFound(w, r)
-		}
-	})
+func TestAutomaticDaemonUpgradeContinuesAfterConfirmedFailure(t *testing.T) {
 	for _, tc := range []struct {
-		name               string
-		releaseUnavailable bool
-		gostResponse       *nodegrpc.NodeUpgradeStatus
-		gostError          error
-		busy               bool
-		want               []string
+		name     string
+		response *nodegrpc.NodeUpgradeStatus
+		err      error
+		busy     bool
+		want     []string
 	}{
 		{
-			name: "release lookup fails only for Gost", releaseUnavailable: true,
+			name: "worker rejects launch", err: status.Error(codes.Unavailable, "worker temporarily unavailable"),
 			want: []string{"daemon/0.1.90-abcdef0"},
 		},
 		{
-			name: "Gost worker rejects launch", gostError: status.Error(codes.Unavailable, "worker temporarily unavailable"),
-			want: []string{"gost/v3.2.8", "daemon/0.1.90-abcdef0"},
-		},
-		{
-			name:         "Gost worker returns confirmed failure",
-			gostResponse: &nodegrpc.NodeUpgradeStatus{State: "failed", Error: "release download failed"},
-			want:         []string{"gost/v3.2.8", "daemon/0.1.90-abcdef0"},
+			name: "worker returns confirmed failure", response: &nodegrpc.NodeUpgradeStatus{State: "failed", Error: "release download failed"},
+			want: []string{"daemon/0.1.90-abcdef0"},
 		},
 		{name: "a worker is already running", busy: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			failRelease.Store(tc.releaseUnavailable)
 			db := newServiceTestDB(t)
-			remote := &automaticUpgradeRecoveryNode{
-				nodeUpgradeFixture: nodeUpgradeFixture{gost: "v3.2.7", daemon: "0.1.89-abcdef0", started: make(chan string, 4)},
-				gostResponse:       tc.gostResponse, gostError: tc.gostError, busy: tc.busy,
+			first := &automaticUpgradeRecoveryNode{
+				nodeUpgradeFixture: nodeUpgradeFixture{daemon: "0.1.89-abcdef0", started: make(chan string, 4)},
+				response:           tc.response, err: tc.err, busy: tc.busy,
 			}
-			node := startServiceTestNode(t, remote)
-			node.UpgradePolicy = model.NodeUpgradePolicy{AutoUpgradeGost: true, AutoUpgradeDaemon: true}
-			saveServiceFixtures(t, db, &node)
+			second := &nodeUpgradeFixture{daemon: "0.1.89-abcdef0", started: make(chan string, 4)}
+			node, other := startServiceTestNode(t, first), startServiceTestNode(t, second)
+			other.Name = "second"
+			node.UpgradePolicy.AutoUpgradeDaemon, other.UpgradePolicy.AutoUpgradeDaemon = true, true
+			saveServiceFixtures(t, db, &node, &other)
 
-			service := NewNodeUpgradeService(db)
-			service.panelVersion = "0.1.90-abcdef0"
-			service.runAutomatic(t.Context())
-			close(remote.started)
+			s := NewNodeUpgradeService(db)
+			s.panelVersion = "0.1.90-abcdef0"
+			s.runAutomatic(t.Context())
+			close(first.started)
 			var started []string
-			for attempt := range remote.started {
+			for attempt := range first.started {
 				started = append(started, attempt)
 			}
 			if !slices.Equal(started, tc.want) {
 				t.Fatalf("upgrade attempts = %v, want %v", started, tc.want)
 			}
+			if len(second.started) != 1 || <-second.started != "daemon/0.1.90-abcdef0" {
+				t.Fatal("automatic upgrade did not continue to the next node")
+			}
 		})
-	}
-	failRelease.Store(false)
-	service := NewNodeUpgradeService(newServiceTestDB(t))
-	canceled, cancel := context.WithCancel(t.Context())
-	cancel()
-	_, err := service.cachedLatest(canceled, "gost")
-	requireServiceError(t, err, context.Canceled)
-	before := gostLookups.Load()
-	version, err := service.cachedLatest(t.Context(), "gost")
-	requireServiceError(t, err, nil)
-	if version != "v3.2.8" || gostLookups.Load() != before+1 {
-		t.Fatalf("canceled lookup poisoned the next release lookup: version=%q, requests=%d", version, gostLookups.Load()-before)
 	}
 }
 
 func TestAutomaticUpgradeStopsWhenWorkerCannotConfirmCompletion(t *testing.T) {
 	db := newServiceTestDB(t)
 	remote := &automaticUpgradeRecoveryNode{
-		nodeUpgradeFixture: nodeUpgradeFixture{gost: "v3.2.7", daemon: "0.1.89-abcdef0", started: make(chan string, 4)},
-		gostResponse:       &nodegrpc.NodeUpgradeStatus{State: "queued", Component: "gost", TargetVersion: "v3.2.8"},
+		nodeUpgradeFixture: nodeUpgradeFixture{daemon: "0.1.89-abcdef0", started: make(chan string, 4)},
+		response:           &nodegrpc.NodeUpgradeStatus{State: "queued", Component: "daemon", TargetVersion: "0.1.90-abcdef0"},
 	}
-	node := startServiceTestNode(t, remote)
-	node.UpgradePolicy = model.NodeUpgradePolicy{AutoUpgradeGost: true, AutoUpgradeDaemon: true}
-	saveServiceFixtures(t, db, &node)
-	service := NewNodeUpgradeService(db)
-	service.cache["gost"] = nodeUpgradeRelease{version: "v3.2.8", expiresAt: time.Now().Add(time.Minute)}
-	service.panelVersion = "0.1.90-abcdef0"
+	second := &nodeUpgradeFixture{daemon: "0.1.89-abcdef0", started: make(chan string, 4)}
+	node, other := startServiceTestNode(t, remote), startServiceTestNode(t, second)
+	other.Name = "second"
+	node.UpgradePolicy.AutoUpgradeDaemon, other.UpgradePolicy.AutoUpgradeDaemon = true, true
+	saveServiceFixtures(t, db, &node, &other)
+	s := NewNodeUpgradeService(db)
+	s.panelVersion = "0.1.90-abcdef0"
 
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	service.runAutomatic(ctx)
+	s.runAutomatic(ctx)
 	requireServiceError(t, ctx.Err(), context.DeadlineExceeded)
-	if len(remote.started) != 1 || <-remote.started != "gost/v3.2.8" {
-		t.Fatal("automatic upgrade started another component before the Gost worker confirmed completion")
+	if len(remote.started) != 1 || <-remote.started != "daemon/0.1.90-abcdef0" || len(second.started) != 0 {
+		t.Fatal("automatic upgrade must wait for the first daemon worker to confirm completion")
 	}
 }
 
 type automaticUpgradeRecoveryNode struct {
 	nodeUpgradeFixture
-	gostResponse *nodegrpc.NodeUpgradeStatus
-	gostError    error
-	busy         bool
+	response *nodegrpc.NodeUpgradeStatus
+	err      error
+	busy     bool
 }
 
 func (n *automaticUpgradeRecoveryNode) GetUpgradeStatus(ctx context.Context, request *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
@@ -134,8 +100,5 @@ func (n *automaticUpgradeRecoveryNode) GetUpgradeStatus(ctx context.Context, req
 
 func (n *automaticUpgradeRecoveryNode) StartUpgrade(_ context.Context, request *nodegrpc.NodeUpgradeRequest) (*nodegrpc.NodeUpgradeStatus, error) {
 	n.started <- request.GetComponent() + "/" + request.GetVersion()
-	if request.GetComponent() == "gost" {
-		return n.gostResponse, n.gostError
-	}
-	return &nodegrpc.NodeUpgradeStatus{State: "succeeded"}, nil
+	return n.response, n.err
 }

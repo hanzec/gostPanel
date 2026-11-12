@@ -45,6 +45,9 @@ type GostNode struct {
 	Region    string     `gorm:"size:2;not null;default:''" json:"region"`
 	Addresses []string   `gorm:"serializer:json;type:text" json:"addresses,omitempty"`
 
+	GostVersion          string     `gorm:"size:64;not null;default:''" json:"gost_version"`
+	GostVersionCheckedAt *time.Time `json:"-"`
+
 	// Supplemental addresses do not replace the detected primary address or identify local listeners.
 	ManualAddresses []string `gorm:"serializer:json;type:text" json:"manual_addresses,omitempty"`
 

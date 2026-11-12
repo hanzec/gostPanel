@@ -59,7 +59,7 @@ func (h *streamReports) GetNodeConfig(ctx context.Context, _ *emptypb.Empty) (*n
 		AutoUpgradeDaemon  bool   `yaml:"auto_upgrade_daemon"`
 	}{
 		NodeID: node.ID, TrafficLimitBytes: node.TrafficLimitBytes, TrafficResetPeriod: node.TrafficResetPeriod,
-		AutoUpgradeGost: node.UpgradePolicy.AutoUpgradeGost, AutoUpgradeDaemon: node.UpgradePolicy.AutoUpgradeDaemon,
+		AutoUpgradeDaemon: node.UpgradePolicy.AutoUpgradeDaemon,
 	})
 	if err != nil {
 		return nil, status.Error(codes.Internal, "could not encode node configuration")

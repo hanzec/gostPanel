@@ -336,6 +336,7 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 }
 
 func TestNodeHTTPUpgradeLifecycle(t *testing.T) {
+	t.Setenv("GH_PROXY", "")
 	version := buildinfo.Version
 	buildinfo.Version = "0.1.2-abcdef1"
 	t.Cleanup(func() { buildinfo.Version = version })
@@ -346,17 +347,23 @@ func TestNodeHTTPUpgradeLifecycle(t *testing.T) {
 	path := fmt.Sprintf("/nodes/%d/upgrade", node.ID)
 	previous := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	var lookupCount int
 	http.DefaultTransport = handlerReleaseTransport(func(req *http.Request) (*http.Response, error) {
-		var tag string
-		switch req.URL.String() {
-		case "https://api.github.com/repos/go-gost/gost/releases/latest":
-			tag = "v3.1.0"
-		default:
+		if req.URL.String() != "https://api.github.com/repos/go-gost/gost/releases/latest" {
+			t.Errorf("unexpected release lookup: %s", req.URL)
 			return nil, fmt.Errorf("unexpected release lookup: %s", req.URL)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"tag_name":%q}`, tag)))}, nil
+		lookupCount++
+		statusCode, body := http.StatusOK, `{"tag_name":"v3.1.0"}`
+		switch lookupCount {
+		case 1:
+			body = `{"tag_name":"v3.0.0"}`
+		case 2:
+			statusCode, body = http.StatusServiceUnavailable, "release unavailable"
+		}
+		return &http.Response{StatusCode: statusCode, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
-	policy := `{"auto_upgrade_gost":true,"auto_upgrade_daemon":false}`
+	policy := `{"auto_upgrade_daemon":true}`
 	f.request(t, "GET", "/nodes/999/upgrade", "", 404)
 	f.request(t, "PUT", "/nodes/999/upgrade", policy, 404)
 	f.request(t, "GET", "/nodes/0/upgrade", "", 400)
@@ -364,17 +371,32 @@ func TestNodeHTTPUpgradeLifecycle(t *testing.T) {
 	f.request(t, "POST", "/nodes/0/upgrade/gost", "", 400)
 	f.request(t, "PUT", path, `{"auto_upgrade_gost":true}`, 400)
 	f.request(t, "PUT", path, policy, 200)
+	f.request(t, "PUT", path, `{"auto_upgrade_gost":true,"auto_upgrade_daemon":true}`, 200)
 	view := handlerData[service.NodeUpgradeView](t, f.request(t, "GET", path, "", 200))
-	if !view.AutoUpgradeGost || view.AutoUpgradeDaemon || !view.Available || !view.GostUpdateAvailable || !view.DaemonUpdateAvailable {
+	if view.AutoUpgradeGost || !view.AutoUpgradeDaemon || !view.Available || view.GostUpdateAvailable ||
+		view.LatestGostVersion != "" || view.GostVersion != "3.0.0" || !view.DaemonUpdateAvailable {
 		t.Fatalf("upgrade view: %+v", view)
 	}
 	f.request(t, "POST", path+"/unknown", "", 400)
-	state := handlerData[nodegrpc.NodeUpgradeStatus](t, f.request(t, "POST", path+"/gost", "", 200))
+	state := handlerData[nodegrpc.NodeUpgradeStatus](t, f.request(t, "POST", path+"/daemon", "", 200))
 	control.mu.Lock()
 	started := control.upgrade
 	control.mu.Unlock()
-	if state.GetState() != "queued" || state.GetTargetVersion() != "v3.1.0" ||
-		started.GetVersion() != "v3.1.0" || started.GetComponent() != "gost" {
+	if state.GetState() != "queued" || state.GetTargetVersion() != buildinfo.Version ||
+		started.GetVersion() != buildinfo.Version || started.GetComponent() != "daemon" {
 		t.Fatalf("upgrade request: state %+v, RPC %+v", &state, started)
+	}
+	if lookupCount != 0 {
+		t.Fatalf("status or daemon upgrade performed %d release lookups", lookupCount)
+	}
+	f.request(t, "POST", path+"/gost", "", 409)
+	f.request(t, "POST", path+"/gost", "", 502)
+	state = handlerData[nodegrpc.NodeUpgradeStatus](t, f.request(t, "POST", path+"/gost", "", 200))
+	control.mu.Lock()
+	started = control.upgrade
+	control.mu.Unlock()
+	if state.GetState() != "queued" || state.GetTargetVersion() != "v3.1.0" ||
+		started.GetVersion() != "v3.1.0" || started.GetComponent() != "gost" || lookupCount != 3 {
+		t.Fatalf("manual Gost upgrade: state %+v, RPC %+v, lookups %d", &state, started, lookupCount)
 	}
 }

@@ -3,7 +3,6 @@ package handler
 import (
 	"strconv"
 
-	"yagp/internal/model"
 	"yagp/pkg/response"
 
 	"github.com/gin-gonic/gin"
@@ -28,15 +27,13 @@ func (h *NodeHandler) SetUpgradePolicy(c *gin.Context) {
 		return
 	}
 	var request struct {
-		AutoUpgradeGost   *bool `json:"auto_upgrade_gost" binding:"required"`
 		AutoUpgradeDaemon *bool `json:"auto_upgrade_daemon" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
-		response.BadRequest(c, "请提供 Gost 和 yagp-daemon 的自动升级开关")
+		response.BadRequest(c, "请提供 yagp-daemon 的自动升级开关")
 		return
 	}
-	policy := model.NodeUpgradePolicy{AutoUpgradeGost: *request.AutoUpgradeGost, AutoUpgradeDaemon: *request.AutoUpgradeDaemon}
-	if err := h.upgradeService.SetPolicy(c.Request.Context(), id, policy); err != nil {
+	if err := h.upgradeService.SetPolicy(c.Request.Context(), id, *request.AutoUpgradeDaemon); err != nil {
 		response.HandleError(c, err)
 		return
 	}
