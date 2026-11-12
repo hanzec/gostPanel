@@ -352,13 +352,39 @@ describe('forwarding rule editor and actions', () => {
     await routingRows(dialog)[2].get('button').trigger('click')
     expect(routingRows(dialog)).toHaveLength(3)
     expect(routingRows(dialog)[2].getComponent(ElSelect).props('modelValue')).toBe(2)
-    expect(dialog.text()).toContain('域名匹配自身和子域')
+    expect(dialog.text()).toContain('example.com 匹配自身和子域')
     await button(dialog, '创建端点').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenCalledExactlyOnceWith({
       node_id: entryNode.id, name: 'Matched exit', role: 'exit', protocol: 'tcp', listen_ip: '', listen_port: 9443, remark: '',
       use_original_target: true, ruleset_ids: [2], manual_domains: ['example.com', 'example.net'], use_clash_ruleset: false, targets: [], strategy: 'round'
     })
+  })
+
+  it('explains domain patterns and preserves their wildcard and port syntax when editing an exit', async () => {
+    const patterns = ['example.com', '*.example.com:443', '.example.com:400-500', 'api?.example.com:80', 'example.com:443']
+    const exit = { ...relayRule, name: 'Pattern exit', role: 'exit', targets: [], use_original_target: true, ruleset_ids: [], manual_domains: patterns }
+    getRuleList.mockResolvedValue(result([exit]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await wrapper.get('[aria-label="编辑 Pattern exit"]').trigger('click')
+    const dialog = editDialog(wrapper)
+    const inputs = routingRows(dialog).map(item => item.get('input'))
+    expect(inputs.map(input => input.element.value)).toEqual(patterns)
+    expect(inputs[0].attributes('placeholder')).toBe('例如 *.example.com:443')
+    const help = dialog.get(`[id="${inputs[0].attributes('aria-describedby')}"]`).text()
+    expect(help).toContain('未写端口默认匹配 443')
+    expect(help).toContain('example.com:443 仅匹配该域名和端口')
+    expect(help).toContain('支持 *、? 和端口范围')
+    expect(help).toContain('点号前缀（如 .example.com:443）包含自身和子域')
+    expect(help).toContain('仅作用于透明入口接管的 80/443 流量')
+    await inputs[1].setValue('  *.updated.example:443  ')
+    await button(dialog, '保存端点').trigger('click')
+    await flushPromises()
+    expect(updateRule).toHaveBeenCalledExactlyOnceWith(exit.id, expect.objectContaining({
+      manual_domains: ['example.com', '*.updated.example:443', '.example.com:400-500', 'api?.example.com:80', 'example.com:443']
+    }))
+    expect(exit.manual_domains).toEqual(patterns)
   })
 
   it('restores original-target rules and clears them when switching to all traffic or fixed targets', async () => {

@@ -85,7 +85,7 @@ func TestTransparentIngressSelectedRulesAndDomainsUseDedicatedPolicy(t *testing.
 	policyName := transparentPolicyName(f.tunnel.ID)
 	var bypass gost.AdmissionConfig
 	f.entryNode.read("/config/bypasses/"+policyName, &bypass)
-	for _, matcher := range []string{".one.test", ".two.test", ".manual.example"} {
+	for _, matcher := range []string{".one.test", ".two.test", ".manual.example:443"} {
 		if !slices.Contains(bypass.Matchers, matcher) || !bypass.Whitelist {
 			t.Fatalf("selected matchers did not reach the dedicated policy: %+v", bypass)
 		}

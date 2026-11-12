@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	stderrors "errors"
 	"fmt"
 	"net"
@@ -92,6 +93,10 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 		Remark:           req.Remark,
 		Status:           model.TunnelStatusStopped,
 		AllowlistNodeIDs: nodeIDs,
+		AutoAllowlist:    req.AllowlistNodeIDs == nil,
+	}
+	if tunnel.AutoAllowlist {
+		tunnel.RelaySecret = rand.Text()
 	}
 
 	if err = s.tunnelRepo.Create(tunnel); err != nil {
@@ -132,6 +137,7 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 			return nil, err
 		}
 		tunnel.AllowlistNodeIDs = nodeIDs
+		tunnel.AutoAllowlist = false
 	}
 	previousProtocol := tunnel.Protocol
 	if tunnel.EntryRuleID != nil || req.EntryRuleID != 0 || req.ExitRuleID != 0 {
@@ -198,6 +204,7 @@ func (s *TunnelService) UpdateAllowlist(ctx context.Context, id uint, nodeIDs []
 		return nil, err
 	}
 	tunnel.AllowlistNodeIDs = nodeIDs
+	tunnel.AutoAllowlist = false
 	if err := s.tunnelRepo.UpdateAllowlist(ctx, tunnel); err != nil {
 		return nil, err
 	}
@@ -334,6 +341,10 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	// 步骤1：在出口节点创建 Relay 服务
 	exitClient := utils.GetGostClient(exitNode)
 	relayName := relayServiceName(tunnel.ID)
+	var auth *gost.AuthConfig
+	if tunnel.RelaySecret != "" {
+		auth = &gost.AuthConfig{Username: relayName, Password: tunnel.RelaySecret}
+	}
 
 	relaySvc := &gost.ServiceConfig{
 		Name:     relayName,
@@ -341,6 +352,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 		Metadata: map[string]any{"enableStats": true},
 		Handler: &gost.HandlerConfig{
 			Type: "relay", // relay 协议支持接收客户端传来的目标地址
+			Auth: auth,
 		},
 		Listener: gost.RelayListener(tunnel.Protocol, tunnel.ProtocolOptions),
 	}
@@ -381,7 +393,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	chainName := tunnelChainName(tunnel.ID)
 	relayAddr := net.JoinHostPort(strings.Trim(exitHost, "[]"), strconv.Itoa(tunnel.RelayPort))
 
-	chain := newTunnelChain(chainName, relayAddr, tunnel.Protocol, tunnel.ProtocolOptions, nil)
+	chain := newTunnelChain(chainName, relayAddr, tunnel.Protocol, tunnel.ProtocolOptions, auth)
 
 	if err = entryClient.CreateChain(chain); err != nil {
 		// 回滚：删除出口节点的 Relay 服务

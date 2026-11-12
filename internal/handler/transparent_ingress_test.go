@@ -67,7 +67,7 @@ func TestOriginalTargetSelectionsHTTPPreserveAndClear(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	body := fmt.Sprintf(`{"name":"filtered exit","node_id":%d,"role":"exit","protocol":"tls","listen_port":21100,"use_original_target":true,"ruleset_ids":[2,2],"manual_domains":["Example.Test.","example.test"]}`, node.ID)
+	body := fmt.Sprintf(`{"name":"filtered exit","node_id":%d,"role":"exit","protocol":"tls","listen_port":21100,"use_original_target":true,"ruleset_ids":[2,2],"manual_domains":["Example.Test.","example.test","*.secure.test:443","api?.test:443",".range.test:400-500"]}`, node.ID)
 	exit := handlerData[model.GostRule](t, f.request(t, "POST", "/rules", body, 200))
 	path := fmt.Sprintf("/rules/%d", exit.ID)
 	assertPolicy := func(ids []uint, domains []string, original bool) {
@@ -77,9 +77,12 @@ func TestOriginalTargetSelectionsHTTPPreserveAndClear(t *testing.T) {
 			t.Fatalf("selection was not persisted: %+v", stored)
 		}
 	}
-	assertPolicy([]uint{2}, []string{"example.test"}, true)
+	wantDomains := []string{"example.test", "*.secure.test:443", "api?.test:443", ".range.test:400-500"}
+	assertPolicy([]uint{2}, wantDomains, true)
 	f.request(t, "PUT", path, `{"name":"renamed","protocol":"tls","listen_port":21100}`, 200)
-	assertPolicy([]uint{2}, []string{"example.test"}, true)
+	assertPolicy([]uint{2}, wantDomains, true)
+	f.request(t, "PUT", path, `{"name":"invalid port","protocol":"tls","listen_port":21100,"manual_domains":["*.secure.test:65536"]}`, 400)
+	assertPolicy([]uint{2}, wantDomains, true)
 	f.request(t, "PUT", path, `{"name":"all original targets","protocol":"tls","listen_port":21100,"ruleset_ids":[],"manual_domains":[]}`, 200)
 	assertPolicy(nil, nil, true)
 	f.request(t, "PUT", path, `{"name":"invalid fixed mode","protocol":"tls","listen_port":21100,"use_original_target":false,"targets":["fixed.test:443"],"manual_domains":["example.test"]}`, 400)

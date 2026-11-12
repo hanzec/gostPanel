@@ -17,7 +17,7 @@ vi.mock('@/api/rule', () => ({
 }))
 vi.mock('@/api/tunnel', () => ({
   createTunnel: vi.fn(), deleteTunnel: vi.fn(), getTunnelList: vi.fn(),
-  startTunnel: vi.fn(), stopTunnel: vi.fn(), updateTunnel: vi.fn(), updateTunnelAllowlist: vi.fn()
+  startTunnel: vi.fn(), stopTunnel: vi.fn(), updateTunnel: vi.fn()
 }))
 
 const ingress = { id: 1, name: '入口', mptcp_supported: false }

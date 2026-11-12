@@ -39,7 +39,9 @@ type GostTunnel struct {
 
 	ProtocolOptions map[string]string `gorm:"type:text;serializer:json" json:"protocol_options"`
 
-	AllowlistNodeIDs  []uint   `gorm:"type:text;serializer:json" json:"allowlist_node_ids"`
+	AllowlistNodeIDs []uint `gorm:"type:text;serializer:json" json:"allowlist_node_ids"`
+	// Existing tunnels keep their explicit source selection; new automatic tunnels follow EntryNodeID.
+	AutoAllowlist     bool     `gorm:"not null;default:false" json:"auto_allowlist"`
 	Targets           []string `gorm:"type:text;serializer:json" json:"targets"`
 	UseClashRuleset   bool     `gorm:"default:false" json:"use_clash_ruleset"`
 	UseOriginalTarget bool     `gorm:"not null;default:false" json:"use_original_target"`

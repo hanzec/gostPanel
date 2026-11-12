@@ -42,7 +42,7 @@
                     <el-option v-for="ruleset in rulesets" :key="ruleset.id" :label="ruleset.name" :value="ruleset.id" :disabled="selectedRulesetIds.includes(ruleset.id) && row.value !== ruleset.id" />
                     <el-option v-for="id in missingRulesetIds" :key="id" :label="rulesetName(id)" :value="id" :disabled="selectedRulesetIds.includes(id) && row.value !== id" />
                   </el-select>
-                  <el-input v-else :model-value="row.value" :aria-label="'手动域名 ' + (index + 1)" :aria-describedby="domainsHelpId" placeholder="例如 example.com" @update:model-value="updateRow(row, $event)" />
+                  <el-input v-else :model-value="row.value" :aria-label="'手动域名 ' + (index + 1)" :aria-describedby="domainsHelpId" placeholder="例如 *.example.com:443" @update:model-value="updateRow(row, $event)" />
                 </td>
                 <td class="target-rule-actions"><el-button text type="danger" :aria-label="'删除规则 ' + (index + 1)" @click="removeRow(index)">删除</el-button></td>
               </tr>
@@ -56,7 +56,7 @@
           <div v-if="loadError" class="target-ruleset-error" role="alert">
             <span>无法加载订阅规则集。</span><el-button text :loading="loading" @click="fetchRulesets">重新加载</el-button>
           </div>
-          <p :id="domainsHelpId" class="target-routing-hint ops-muted">域名匹配自身和子域。订阅可在系统设置中管理。</p>
+          <p :id="domainsHelpId" class="target-routing-hint ops-muted">未写端口默认匹配 443。example.com 匹配自身和子域；example.com:443 仅匹配该域名和端口。支持 *、? 和端口范围；点号前缀（如 .example.com:443）包含自身和子域。仅作用于透明入口接管的 80/443 流量。订阅可在系统设置中管理。</p>
         </div>
       </el-form-item>
     </template>

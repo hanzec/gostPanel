@@ -60,7 +60,6 @@ describe('panel API contracts', () => {
     ['tunnel details', () => tunnel.getTunnel(42), 'get', '/tunnels/42'],
     ['create tunnel', () => tunnel.createTunnel(body), 'post', '/tunnels', { data: body }],
     ['update tunnel', () => tunnel.updateTunnel(42, body), 'put', '/tunnels/42', { data: body }],
-    ['update tunnel allowlist', () => tunnel.updateTunnelAllowlist(42, [12]), 'put', '/tunnels/42/allowlist', { ...silent, data: { allowlist_node_ids: [12] } }],
     ['delete tunnel', () => tunnel.deleteTunnel(42), 'delete', '/tunnels/42'],
     ['start tunnel', () => tunnel.startTunnel(42), 'post', '/tunnels/42/start'],
     ['stop tunnel', () => tunnel.stopTunnel(42), 'post', '/tunnels/42/stop'],

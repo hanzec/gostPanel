@@ -53,9 +53,10 @@ func maintainPanelChannel(ctx context.Context, credentials *credentialManager, c
 		if ctx.Err() != nil {
 			return
 		}
-		log.Printf("panel stream disconnected: %v", err)
 		if connected {
 			delay = time.Second
+		} else if err != nil {
+			log.Printf("panel connection attempt failed: %v", err)
 		}
 		select {
 		case <-ctx.Done():

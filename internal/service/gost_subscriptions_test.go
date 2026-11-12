@@ -78,7 +78,7 @@ func TestGostRulesetSelectionNormalizesAndCombines(t *testing.T) {
 	}
 	matchers, err := svc.SelectedMatchers(t.Context(), ids, domains)
 	requireServiceError(t, err, nil)
-	if !slices.Equal(matchers, []string{".first.example", ".shared.example", ".second.example", ".example.com"}) {
+	if !slices.Equal(matchers, []string{".first.example", ".shared.example", ".second.example", ".example.com:443", ".shared.example:443"}) {
 		t.Fatalf("merged matchers = %v", matchers)
 	}
 	for _, ids := range [][]uint{{0}, {1}, {99}} {
@@ -87,7 +87,7 @@ func TestGostRulesetSelectionNormalizesAndCombines(t *testing.T) {
 			t.Fatalf("unavailable ruleset IDs %v returned %v", ids, err)
 		}
 	}
-	for _, domain := range []string{"", "192.0.2.1", "https://example.com", "*.example.com", ".example.com", "example.com:443", "bad name.example", "-bad.example", "例子.example"} {
+	for _, domain := range []string{"", "192.0.2.1", "https://example.com", ".*.example.com", "example.com:notaport", "example.com:65536", "bad name.example", "-bad.example", "例子.example"} {
 		if _, _, err := svc.NormalizeSelection(t.Context(), nil, []string{domain}); err == nil {
 			t.Fatalf("accepted invalid manual domain %q", domain)
 		}
@@ -161,14 +161,14 @@ func TestGostSelectedPoliciesSyncWithoutGlobalSubscriptionAndRetainOnFailure(t *
 		remote.read("/config/bypasses/"+transparentPolicyName(tunnel.ID), &bypass)
 		return bypass.Matchers
 	}
-	if !slices.Equal(read(), []string{".old.example", ".manual.example"}) {
+	if !slices.Equal(read(), []string{".old.example", ".manual.example:443"}) {
 		t.Fatalf("selected exit policy was not applied independently of global rules: %v", read())
 	}
 	subscription.Matchers = []string{".updated.example"}
 	requireServiceError(t, db.Save(&subscription).Error, nil)
 	remote.rejectCommand("POST /config?format=yaml", http.StatusBadGateway)
 	svc.sync(t.Context(), unsaved)
-	if !unsaved[entry.ID] || !slices.Equal(read(), []string{".updated.example", ".manual.example"}) {
+	if !unsaved[entry.ID] || !slices.Equal(read(), []string{".updated.example", ".manual.example:443"}) {
 		t.Fatal("changed subscription was not retained for a config-save retry")
 	}
 	remote.rejectCommand("POST /config?format=yaml", 0)
@@ -178,7 +178,7 @@ func TestGostSelectedPoliciesSyncWithoutGlobalSubscriptionAndRetainOnFailure(t *
 	}
 	requireServiceError(t, db.Delete(&subscription).Error, nil)
 	svc.sync(t.Context(), unsaved)
-	if !slices.Equal(read(), []string{".updated.example", ".manual.example"}) {
+	if !slices.Equal(read(), []string{".updated.example", ".manual.example:443"}) {
 		t.Fatal("missing subscription erased the last applied selection")
 	}
 }

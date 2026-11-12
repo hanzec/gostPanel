@@ -1,11 +1,11 @@
 import { flushPromises } from '@vue/test-utils'
-import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
+import { ElDropdownItem, ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Tunnels from '@/views/Tunnels.vue'
 import { getRoutingNodes } from '@/api/node'
 import { getGostRulesets } from '@/api/system'
 import { getRuleList } from '@/api/rule'
-import { createTunnel, deleteTunnel, getTunnelList, startTunnel, stopTunnel, updateTunnel, updateTunnelAllowlist } from '@/api/tunnel'
+import { createTunnel, deleteTunnel, getTunnelList, startTunnel, stopTunnel, updateTunnel } from '@/api/tunnel'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
 vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
@@ -13,7 +13,7 @@ vi.mock('@/api/system', () => ({ getGostRulesets: vi.fn() }))
 vi.mock('@/api/rule', () => ({ getRuleList: vi.fn() }))
 vi.mock('@/api/tunnel', () => ({
   createTunnel: vi.fn(), deleteTunnel: vi.fn(), getTunnelList: vi.fn(),
-  startTunnel: vi.fn(), stopTunnel: vi.fn(), updateTunnel: vi.fn(), updateTunnelAllowlist: vi.fn()
+  startTunnel: vi.fn(), stopTunnel: vi.fn(), updateTunnel: vi.fn()
 }))
 
 const ingress = { id: 4, name: '入口 A', addresses: ['192.0.2.1', '192.0.2.2', '2001:db8::1'] }
@@ -51,7 +51,7 @@ beforeEach(() => {
   getRoutingNodes.mockResolvedValue([ingress, egress, legacyNode])
   getRuleList.mockResolvedValue(result(entrances))
   getTunnelList.mockResolvedValue(result(tunnels, 32))
-  for (const action of [createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel]) action.mockResolvedValue({})
+  for (const action of [createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel]) action.mockResolvedValue({})
 })
 
 describe('Relay tunnel inventory', () => {
@@ -84,7 +84,7 @@ describe('Relay tunnel inventory', () => {
     await button(dialog(wrapper), '重新加载来源节点').trigger('click')
     await flushPromises()
     expect(getRoutingNodes).toHaveBeenCalledTimes(2)
-    expect(dialog(wrapper).text()).not.toContain('无法加载来源节点选项')
+    expect(dialog(wrapper).text()).not.toContain('无法加载入口来源 IP')
     await button(dialog(wrapper), '取消').trigger('click')
 
     await button(wrapper, '重新加载').trigger('click')
@@ -176,7 +176,7 @@ describe('Relay tunnel configuration', () => {
     expect(editor.get('.target-routing-summary').find('input').exists()).toBe(false)
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
-    expect(createTunnel).toHaveBeenCalledExactlyOnceWith({ name: 'Transparent tunnel', entry_rule_id: transparent.id, exit_rule_id: original.id, remark: '', allowlist_node_ids: [] })
+    expect(createTunnel).toHaveBeenCalledExactlyOnceWith({ name: 'Transparent tunnel', entry_rule_id: transparent.id, exit_rule_id: original.id, remark: '' })
   })
 
   it('preserves advanced options on a legacy tunnel and clears them when its transport changes', async () => {
@@ -248,7 +248,7 @@ describe('Relay tunnel configuration', () => {
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(createTunnel).toHaveBeenCalledExactlyOnceWith({
-      name: 'Exit policy', entry_rule_id: entry.id, exit_rule_id: exit.id, remark: '', allowlist_node_ids: []
+      name: 'Exit policy', entry_rule_id: entry.id, exit_rule_id: exit.id, remark: ''
     })
   })
 
@@ -291,7 +291,7 @@ describe('Relay tunnel configuration', () => {
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(createTunnel).toHaveBeenCalledExactlyOnceWith({
-      name: configured.name + '-copy', entry_rule_id: freshEntry.id, exit_rule_id: otherExit.id, remark: '', allowlist_node_ids: []
+      name: configured.name + '-copy', entry_rule_id: freshEntry.id, exit_rule_id: otherExit.id, remark: ''
     })
   })
 
@@ -342,7 +342,7 @@ describe('Relay tunnel configuration', () => {
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(createTunnel).toHaveBeenCalledExactlyOnceWith({
-      name: 'Fixed targets', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'kcp', remark: '', allowlist_node_ids: [],
+      name: 'Fixed targets', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'kcp', remark: '',
       use_clash_ruleset: false, targets: ['app.example:443', '[2001:db8::10]:443'], strategy: 'hash'
     })
   })
@@ -411,12 +411,12 @@ describe('Relay tunnel configuration', () => {
     await button(editor, '添加订阅规则集').trigger('click')
     await choose(editor.get('[data-rule-type="subscription"]').getComponent(ElSelect), 2)
     await button(editor, '添加手动域名').trigger('click')
-    await editor.get('[data-rule-type="domain"] input').setValue('manual.example')
+    await editor.get('[data-rule-type="domain"] input').setValue('*.manual.example:443')
     await button(editor, '添加并启动').trigger('click')
     await flushPromises()
     expect(createTunnel).toHaveBeenCalledExactlyOnceWith({
-      name: 'Clash tunnel', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'tcp', remark: '', allowlist_node_ids: [],
-      use_original_target: true, use_clash_ruleset: false, targets: [], strategy: 'round', ruleset_ids: [2], manual_domains: ['manual.example']
+      name: 'Clash tunnel', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'tcp', remark: '',
+      use_original_target: true, use_clash_ruleset: false, targets: [], strategy: 'round', ruleset_ids: [2], manual_domains: ['*.manual.example:443']
     })
   })
 
@@ -547,7 +547,6 @@ describe('Relay tunnel configuration', () => {
     await choose(destinationSelect, destination.id)
     await choose(selectField(editor, 'protocol'), 'udp')
     await editor.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
-    await choose(selectField(editor, 'allowlist_node_ids'), [ingress.id])
     await field(editor, 'remark').get('textarea').setValue('new service')
     createTunnel.mockRejectedValueOnce(error)
     await button(editor, '添加并启动').trigger('click')
@@ -559,7 +558,7 @@ describe('Relay tunnel configuration', () => {
     await flushPromises()
     expect(createTunnel).toHaveBeenLastCalledWith({
       name: 'New UDP relay', entry_rule_id: source.id, exit_rule_id: destination.id, protocol: 'udp', remark: 'new service',
-      allowlist_node_ids: [ingress.id], use_clash_ruleset: false, targets: ['app.example:443'], strategy: 'round'
+      use_clash_ruleset: false, targets: ['app.example:443'], strategy: 'round'
     })
     expect(ElMessage.success).toHaveBeenCalledWith('隧道已添加并启动')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
@@ -576,11 +575,11 @@ describe('Relay tunnel configuration', () => {
     expect(field(dialog(wrapper), 'name').get('input').element.value).toBe('Office relay-copy')
     expect(selectField(dialog(wrapper), 'entry_rule_id').props('modelValue')).toBe(null)
     expect(selectField(dialog(wrapper), 'exit_rule_id').props('modelValue')).toBe(null)
-    expect(selectField(dialog(wrapper), 'allowlist_node_ids').props('modelValue')).toEqual([])
+    expect(dialog(wrapper).text()).toContain('选择源端点后预览来源 IP')
     await button(dialog(wrapper), '取消').trigger('click')
     await command(row(wrapper, 'Media relay'), 'edit')
     expect(selectField(dialog(wrapper), 'entry_rule_id').props('modelValue')).toBe(mediaSource.id)
-    expect(selectField(dialog(wrapper), 'allowlist_node_ids').props('modelValue')).toEqual([egress.id])
+    expect(dialog(wrapper).text()).toContain('沿用此隧道已保存的来源 IP 限制')
     await choose(selectField(dialog(wrapper), 'entry_rule_id'), source.id)
     await choose(selectField(dialog(wrapper), 'exit_rule_id'), destination.id)
     await choose(selectField(dialog(wrapper), 'use_original_target'), false)
@@ -598,82 +597,100 @@ describe('Relay tunnel configuration', () => {
     expect(selectField(dialog(wrapper), 'protocol').props('filterable')).toBe(true)
     expect(selectField(dialog(wrapper), 'protocol').findAllComponents(ElOption).map(option => option.props('value'))).toEqual(expect.arrayContaining(['h2', 'wss', 'kcp']))
     await choose(selectField(dialog(wrapper), 'protocol'), 'h2')
-    await choose(selectField(dialog(wrapper), 'allowlist_node_ids'), [ingress.id])
     await button(dialog(wrapper), '保存更改').trigger('click')
     await flushPromises()
     expect(updateTunnel).toHaveBeenLastCalledWith(14, {
-      name: 'Unknown relay', protocol: 'h2', relay_port: 8443, remark: '', allowlist_node_ids: [ingress.id]
+      name: 'Unknown relay', protocol: 'h2', relay_port: 8443, remark: ''
     })
   })
 
-  it('keeps previously saved source IPs in allowlist previews and excludes local listener IPs', async () => {
+  it('previews the automatic entry allowlist without manual controls and follows a changed entry', async () => {
     getRoutingNodes.mockResolvedValue([
-      { ...ingress, manual_addresses: ['192.0.2.1', '198.51.100.40'], local_addresses: ['10.0.0.5'] },
+      { ...ingress, manual_addresses: ['192.0.2.1', '198.51.100.40'], local_addresses: ['192.0.2.1', '10.0.0.5'] },
       { ...egress, manual_addresses: ['198.51.100.90', '2001:db8:1::9'] },
       { ...legacyNode, manual_addresses: ['198.51.100.3', '198.51.100.50'] }
     ])
+    const alternative = { ...source, id: 73, node_id: legacyNode.id, node: legacyNode, role: 'entry' }
+    const exit = { ...destination, role: 'exit', targets: ['app.example:443'] }
+    getRuleList.mockResolvedValue(result([source, alternative, exit]))
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
-    await command(row(wrapper, 'Office relay'), 'allowlist')
-    const editor = dialog(wrapper)
-    const allowlist = selectField(editor, 'allowlist_node_ids')
-    expect(allowlist.findAllComponents(ElOption).map(option => [option.props('label'), option.props('disabled')])).toEqual([
-      ['入口 A（192.0.2.1 / 192.0.2.2 / 2001:db8::1 / 198.51.100.40）', false],
-      ['出口 B（198.51.100.90 / 2001:db8:1::9）', false],
-      ['旧版节点（198.51.100.3 / 198.51.100.50）', false],
-      ['节点 #88（未找到）', false]
-    ])
-    expect(editor.findAll('code').map(item => item.text())).toEqual(['192.0.2.1', '192.0.2.2', '2001:db8::1', '198.51.100.40'])
-    await choose(allowlist, [egress.id])
-    expect(editor.findAll('code').map(item => item.text())).toEqual(['198.51.100.90', '2001:db8:1::9'])
-    await button(editor, '保存更改').trigger('click')
+    expect(wrapper.findAllComponents(ElDropdownItem).map(item => item.props('command'))).not.toContain('allowlist')
+    await button(wrapper, '添加隧道').trigger('click')
     await flushPromises()
-    expect(updateTunnelAllowlist).toHaveBeenCalledWith(relay.id, [egress.id])
+    const editor = dialog(wrapper)
+    const allowlist = editor.get('section[aria-labelledby="tunnel-allowlist-title"]')
+    expect(allowlist.text()).toContain('根据入口节点 IP 自动生成')
+    expect(allowlist.find('input').exists()).toBe(false)
+    expect(editor.find('#tunnel-allowlist-nodes').exists()).toBe(false)
+    await field(editor, 'name').get('input').setValue('Automatic source')
+    await choose(selectField(editor, 'entry_rule_id'), source.id)
+    expect(allowlist.findAll('code').map(item => item.text())).toEqual(['192.0.2.1', '192.0.2.2', '2001:db8::1', '198.51.100.40', '10.0.0.5'])
+    await choose(selectField(editor, 'entry_rule_id'), alternative.id)
+    expect(allowlist.findAll('code').map(item => item.text())).toEqual(['198.51.100.3', '198.51.100.50'])
+    await choose(selectField(editor, 'exit_rule_id'), exit.id)
+    await button(editor, '添加并启动').trigger('click')
+    await flushPromises()
+    expect(createTunnel).toHaveBeenCalledExactlyOnceWith({ name: 'Automatic source', entry_rule_id: alternative.id, exit_rule_id: exit.id, remark: '' })
   })
 
-  it('edits and clears a running tunnel allowlist without changing its endpoints or other tunnels', async () => {
+  it('allows creating an automatic allowlist before the entry has reported a source IP', async () => {
+    const waitingNode = { id: 75, name: '待上报入口' }
+    const entry = { ...source, node_id: waitingNode.id, node: waitingNode, role: 'entry' }
+    const exit = { ...destination, role: 'exit', targets: ['app.example:443'] }
+    getRoutingNodes.mockResolvedValue([waitingNode, egress])
+    getRuleList.mockResolvedValue(result([entry, exit]))
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
-    await command(row(wrapper, 'Office relay'), 'allowlist')
+    await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
     const editor = dialog(wrapper)
-    expect(editor.attributes('aria-label')).toBe('Gost IP 白名单')
-    expect(editor.text()).toContain('Office relay')
-    expect(getRuleList).not.toHaveBeenCalled()
-    const allowlist = selectField(editor, 'allowlist_node_ids')
-    expect(editor.get('label[for="tunnel-allowlist-nodes"]').text()).toBe('Gost IP 白名单')
-    expect(allowlist.get('#tunnel-allowlist-nodes').attributes('role')).toBe('combobox')
-    expect(allowlist.props('modelValue')).toEqual([ingress.id, 88])
-    expect(allowlist.findAllComponents(ElOption).map(option => [option.props('label'), option.props('disabled')])).toEqual([
-      ['入口 A（192.0.2.1 / 192.0.2.2 / 2001:db8::1）', false],
-      ['出口 B（未获取 IP）', true],
-      ['旧版节点（198.51.100.3）', false],
-      ['节点 #88（未找到）', false]
-    ])
-    expect(editor.findAll('code').map(item => item.text())).toEqual(['192.0.2.1', '192.0.2.2', '2001:db8::1'])
-    await choose(allowlist, [legacyNode.id])
-    expect(editor.findAll('code').map(item => item.text())).toEqual(['198.51.100.3'])
-    await choose(allowlist, [])
-    updateTunnelAllowlist.mockRejectedValueOnce({ response: { data: { message: '白名单保存失败' } } })
+    await field(editor, 'name').get('input').setValue('Waiting entry')
+    await choose(selectField(editor, 'entry_rule_id'), entry.id)
+    await choose(selectField(editor, 'exit_rule_id'), exit.id)
+    const preview = editor.get('.tunnel-allowlist-preview')
+    expect(preview.text()).toContain('入口节点暂无来源 IP，等待入口上报后白名单自动生效')
+    expect(preview.find('code').exists()).toBe(false)
+    await button(editor, '添加并启动').trigger('click')
+    await flushPromises()
+    expect(createTunnel).toHaveBeenCalledExactlyOnceWith({ name: 'Waiting entry', entry_rule_id: entry.id, exit_rule_id: exit.id, remark: '' })
+  })
+
+  it('previews automatic allowlists while editing and lets the backend follow a changed entry', async () => {
+    const automatic = { ...udpRelay, auto_allowlist: true }
+    const alternative = { ...source, id: 73, node_id: legacyNode.id, node: legacyNode }
+    getRuleList.mockResolvedValue(result([...entrances, alternative]))
+    getTunnelList.mockResolvedValue(result([automatic]))
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await command(row(wrapper, automatic.name), 'edit')
+    const editor = dialog(wrapper)
+    expect(editor.get('.tunnel-allowlist-preview').findAll('code').map(item => item.text())).toEqual(ingress.addresses)
+    await choose(selectField(editor, 'entry_rule_id'), alternative.id)
+    expect(editor.get('.tunnel-allowlist-preview').findAll('code').map(item => item.text())).toEqual([legacyNode.ipv4])
+    await choose(selectField(editor, 'use_original_target'), false)
+    await editor.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
     await button(editor, '保存更改').trigger('click')
     await flushPromises()
-    const alert = editor.get('[role="alert"]')
-    expect(alert.text()).toContain('白名单保存失败')
-    expect(document.activeElement).toBe(alert.element)
+    expect(updateTunnel).toHaveBeenCalledWith(automatic.id, expect.objectContaining({ entry_rule_id: alternative.id }))
+    expect(updateTunnel.mock.calls[0][1]).not.toHaveProperty('allowlist_node_ids')
+    expect(updateTunnel.mock.calls[0][1]).not.toHaveProperty('auto_allowlist')
+  })
 
-    const pending = Promise.withResolvers()
-    updateTunnelAllowlist.mockClear().mockReturnValueOnce(pending.promise)
-    await editor.get('form').trigger('submit')
-    await editor.get('form').trigger('submit')
-    expect(updateTunnelAllowlist).toHaveBeenCalledExactlyOnceWith(relay.id, [])
-    expect(updateTunnel).not.toHaveBeenCalled()
-    pending.resolve({ data: { ...relay, allowlist_node_ids: [] } })
+  it('shows legacy saved source IPs read-only without overwriting their allowlist', async () => {
+    getRoutingNodes.mockResolvedValue([ingress, { ...egress, manual_addresses: ['198.51.100.90', '2001:db8:1::9'], local_addresses: ['10.0.0.9'] }, legacyNode])
+    const wrapper = mountInventory(Tunnels)
     await flushPromises()
-    expect(ElMessage.success).toHaveBeenCalledWith('Gost IP 白名单已保存')
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
-
-    await command(row(wrapper, 'Media relay'), 'allowlist')
-    expect(selectField(dialog(wrapper), 'allowlist_node_ids').props('modelValue')).toEqual([egress.id])
-    expect(dialog(wrapper).text()).toContain('所选节点暂无可用 IP')
+    await command(row(wrapper, udpRelay.name), 'edit')
+    const editor = dialog(wrapper)
+    const allowlist = editor.get('section[aria-labelledby="tunnel-allowlist-title"]')
+    expect(allowlist.text()).toContain('沿用此隧道已保存的来源 IP 限制')
+    expect(allowlist.findAll('code').map(item => item.text())).toEqual(['198.51.100.90', '2001:db8:1::9'])
+    expect(allowlist.find('input').exists()).toBe(false)
+    await button(editor, '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnel).toHaveBeenCalledWith(udpRelay.id, expect.any(Object))
+    expect(updateTunnel.mock.calls[0][1]).not.toHaveProperty('allowlist_node_ids')
   })
 
   it('disables competing toggles during a pending start and confirms deletions', async () => {

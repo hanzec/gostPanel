@@ -1,15 +1,19 @@
 package nodebridge
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,6 +360,113 @@ func TestNodeBridgeRetriesConfigurationBeforePublishingSession(t *testing.T) {
 	}
 	if _, err = ReadNftTemplate(configPath); err != nil {
 		t.Fatalf("session published before saving configuration: %v", err)
+	}
+}
+
+func TestPanelChannelReconnectsAndOnlyLogsFailedConnectionAttempt(t *testing.T) {
+	recorder := &reportRecorder{sessions: make(chan *nodegrpc.Session, 2)}
+	var originAttempts atomic.Int32
+	origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		originAttempts.Add(1)
+		if r.ProtoMajor != 1 || r.Method != http.MethodGet || r.URL.Path != nodegrpc.SessionPath || r.URL.RawQuery != "" ||
+			r.Header.Get("Authorization") != "Bearer "+testAccessToken || r.Header.Get(nodegrpc.NodeIDMetadata) != "42" ||
+			r.Header.Get("Sec-WebSocket-Protocol") != "yagp.node.v2" || !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			t.Error("reverse proxy did not preserve the HTTP/1.1 WebSocket route, credentials, and subprotocol")
+			http.Error(w, "invalid forwarded handshake", http.StatusBadRequest)
+			return
+		}
+		recorder.ServeHTTP(w, r)
+	}))
+	t.Cleanup(origin.Close)
+	originURL, err := url.Parse(origin.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(originURL)
+	proxy.Transport = origin.Client().Transport
+	var attempts atomic.Int32
+	panel := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 2 {
+			w.Header().Set("EO-LOG-UUID", "temporary-route-404")
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(panel.Close)
+	client := panel.Client()
+	client.Transport.(*http.Transport).DialContext = dialPanelAt(panel.Listener)
+	configPath := preparePanelCredentials(t)
+	host, err := nodegrpc.ParsePanelHost("127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := openCredentialManager(Config{NodeID: 42, ConfigFile: configPath}, host, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previousOutput)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	var current atomic.Pointer[nodegrpc.Session]
+	const observerAddress = "127.0.0.1:39001"
+	control := &controlServer{config: Config{ObserverListen: observerAddress}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		maintainPanelChannel(ctx, credentials, configPath, &current, controlDispatcher(control))
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitForSession := func(previous *nodegrpc.Session) *nodegrpc.Session {
+		t.Helper()
+		for {
+			if session := current.Load(); session != nil && session != previous {
+				return session
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatal("node did not publish the expected session")
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	verifyExchange := func(nodeSession *nodegrpc.Session) *nodegrpc.Session {
+		t.Helper()
+		var panelSession *nodegrpc.Session
+		select {
+		case panelSession = <-recorder.sessions:
+		case <-ctx.Done():
+			t.Fatal("node session did not reach the origin through the proxy")
+		}
+		endpoint, err := nodegrpc.NewV1Client(panelSession).GetObserverEndpoint(ctx, &emptypb.Empty{})
+		if err != nil || endpoint.GetAddress() != observerAddress {
+			t.Fatalf("proxied panel-to-node RPC = %v, %v", endpoint, err)
+		}
+		config, err := nodegrpc.NewV1Client(nodeSession).GetNodeConfig(ctx, &emptypb.Empty{})
+		if err != nil || config.GetNftTemplate() != `{"nftables":[]}` {
+			t.Fatalf("proxied node-to-panel RPC = %v, %v", config, err)
+		}
+		return panelSession
+	}
+	first := waitForSession(nil)
+	verifyExchange(first).Close()
+	second := waitForSession(first)
+	verifyExchange(second)
+	if second == first || attempts.Load() != 3 || originAttempts.Load() != 2 {
+		t.Fatalf("expected reconnection after one proxy failure, got %d edge attempts and %d origin sessions", attempts.Load(), originAttempts.Load())
+	}
+	cancel()
+	<-done
+	log.SetOutput(previousOutput)
+	output := logs.String()
+	want := `panel connection attempt failed: panel returned HTTP 404 for GET ` + host.HTTPURL(nodegrpc.SessionPath) + ` EO-LOG-UUID="temporary-route-404"`
+	if strings.Count(output, "panel connection attempt failed:") != 1 || !strings.Contains(output, want) || strings.Contains(output, "panel stream disconnected") {
+		t.Fatalf("unexpected reconnect logs: %q", output)
 	}
 }
 

@@ -48,7 +48,7 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 		_, err := tunnels.Create(&dto.CreateTunnelReq{Name: "invalid", EntryRuleID: scenario.source, ExitRuleID: scenario.destination}, testAdmin, testIP, testAgent)
 		requireServiceError(t, err, scenario.err)
 	}
-	request := &dto.CreateTunnelReq{Name: "site tunnel", EntryRuleID: source.ID, ExitRuleID: destination.ID}
+	request := &dto.CreateTunnelReq{Name: "site tunnel", EntryRuleID: source.ID, ExitRuleID: destination.ID, AllowlistNodeIDs: []uint{}}
 	mixed := *request
 	mixed.EntryNodeID = entry.ID
 	_, err := tunnels.Create(&mixed, testAdmin, testIP, testAgent)
