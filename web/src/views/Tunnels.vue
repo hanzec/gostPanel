@@ -111,6 +111,7 @@
                     :disabled="activeTunnelId !== null && activeTunnelId !== tunnel.id"
                     @click="toggleTunnel(tunnel)"
                   >{{ tunnel.status === 'running' ? '停止' : '启动' }}</el-button>
+                  <el-button :aria-label="'测试隧道 ' + tunnel.name" @click="openTestDialog(tunnel)">测试</el-button>
                   <el-dropdown trigger="click" @command="handleTunnelAction($event, tunnel)">
                     <el-button :aria-label="'隧道 ' + tunnel.name + ' 的更多操作'">
                       更多<el-icon aria-hidden="true"><ArrowDown /></el-icon>
@@ -147,6 +148,39 @@
         </div>
       </div>
     </section>
+
+    <PanelDialog
+      v-model="testDialogVisible"
+      title="隧道转发测试"
+      size="compact"
+      :close-on-click-modal="false"
+      :close-on-press-escape="!testLoading"
+      :show-close="!testLoading"
+    >
+      <template v-if="testTunnelRow">
+        <dl class="tunnel-policy-summary">
+          <dt>隧道</dt><dd>{{ testTunnelRow.name }}</dd>
+          <dt>源端</dt><dd>{{ testTunnelRow.entry_node?.name || '节点 #' + testTunnelRow.entry_node_id }}</dd>
+          <dt>目的端</dt><dd>{{ testTunnelRow.exit_node?.name || '节点 #' + testTunnelRow.exit_node_id }}</dd>
+        </dl>
+        <p class="ops-muted">验证测试数据能否通过 Gost Relay 在两端之间往返。应用目标需单独验证。</p>
+        <p v-if="testTunnelRow.status !== 'running'" class="tunnel-test-message">请先启动隧道，再测试转发。</p>
+        <div role="status" aria-atomic="true" class="tunnel-test-feedback">
+          <p v-if="testLoading" class="tunnel-test-message">正在测试隧道转发…</p>
+          <template v-else-if="testResult">
+            <span class="ops-status" :class="testResult.success ? 'is-success' : 'is-danger'">
+              {{ testResult.success ? '隧道转发正常' : '测试失败' }}
+            </span>
+            <p v-if="testResult.success" class="tunnel-test-message">往返耗时 {{ testResult.latency_ms }} ms</p>
+            <p v-else-if="testResult.message" class="tunnel-test-message">{{ testResult.message }}</p>
+          </template>
+        </div>
+      </template>
+      <template #footer>
+        <el-button :disabled="testLoading" @click="testDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="testLoading" :disabled="testTunnelRow?.status !== 'running'" @click="runTunnelTest">开始测试</el-button>
+      </template>
+    </PanelDialog>
 
     <PanelDialog
       v-model="dialogVisible"
@@ -301,7 +335,7 @@ import { supportedProtocolOptions, tunnelProtocols } from '@/utils/gost-protocol
 import { isLegacyClashSelection, targetRoutingFields, targetRoutingPayload, usesOriginalTarget } from '@/utils/target-policy'
 import { ArrowDown, Connection, Plus, Remove, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import { getTunnelList, createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
+import { getTunnelList, createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel, testTunnel } from '@/api/tunnel'
 import { getRoutingNodes } from '@/api/node'
 import { getRuleList } from '@/api/rule'
 import { formatEndpoint, mappedConnectEndpoint } from '@/utils/node-address-mapping'
@@ -340,6 +374,10 @@ const tunnelMetrics = computed(() => [
 ])
 
 const activeTunnelId = ref(null)
+const testDialogVisible = ref(false)
+const testTunnelRow = ref(null)
+const testLoading = ref(false)
+const testResult = ref(null)
 const dialogVisible = ref(false)
 const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
@@ -616,6 +654,27 @@ const toggleTunnel = async (row) => {
   }
 }
 
+const openTestDialog = (row) => {
+  testTunnelRow.value = row
+  testResult.value = null
+  testDialogVisible.value = true
+}
+
+const runTunnelTest = async () => {
+  if (testLoading.value || testTunnelRow.value?.status !== 'running') return
+  testLoading.value = true
+  testResult.value = null
+  try {
+    const { data } = await testTunnel(testTunnelRow.value.id)
+    testResult.value = data
+  } catch (error) {
+    const message = error.response?.data?.message || (!error.isAxiosError && error.message) || '暂时无法测试隧道，请重试。'
+    testResult.value = { success: false, message }
+  } finally {
+    testLoading.value = false
+  }
+}
+
 const handleTunnelAction = (action, row) => {
   if (action === 'edit' && row.status !== 'running') openDialog(row)
   if (action === 'delete') handleDelete(row)
@@ -661,6 +720,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-policy-summary dt { color: var(--ops-muted); }
 .tunnel-policy-summary dd { margin: 0; overflow-wrap: anywhere; }
 .tunnel-policy-summary dd span { display: block; }
+.tunnel-test-message { margin: 0; overflow-wrap: anywhere; }
+.tunnel-test-feedback .ops-status + .tunnel-test-message { margin-top: 8px; }
 .tunnel-target-list { display: grid; gap: 8px; width: 100%; }
 .tunnel-target-item { display: flex; align-items: center; gap: 8px; }
 .tunnel-target-item .el-input { min-width: 0; }

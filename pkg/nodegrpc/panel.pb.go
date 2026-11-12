@@ -27,7 +27,8 @@ var File_panel_proto protoreflect.FileDescriptor
 const file_panel_proto_rawDesc = "" +
 	"\n" +
 	"\vpanel.proto\x12\x04yagp\x1a\x1bgoogle/protobuf/empty.proto\x1a\n" +
-	"node.proto\x1a\x0eobserver.proto2\x8f\t\n" +
+	"node.proto\x1a\x0eobserver.proto2\xaf\n" +
+	"\n" +
 	"\x02v1\x12:\n" +
 	"\x06Report\x12\x1b.yagp.node.v1.ReportRequest\x1a\x13.proto.ObserveReply\x12A\n" +
 	"\rGetNodeConfig\x12\x16.google.protobuf.Empty\x1a\x18.yagp.node.v1.NodeConfig\x12E\n" +
@@ -43,7 +44,9 @@ const file_panel_proto_rawDesc = "" +
 	"\x10SyncTrafficQuota\x12!.yagp.node.v1.TrafficQuotaRequest\x1a\x1f.yagp.node.v1.TrafficQuotaReply\x12K\n" +
 	"\x10GetUpgradeStatus\x12\x16.google.protobuf.Empty\x1a\x1f.yagp.node.v1.NodeUpgradeStatus\x12Q\n" +
 	"\fStartUpgrade\x12 .yagp.node.v1.NodeUpgradeRequest\x1a\x1f.yagp.node.v1.NodeUpgradeStatus\x12p\n" +
-	"\x1cConfigureTransparentRedirect\x12(.yagp.node.v1.TransparentRedirectRequest\x1a&.yagp.node.v1.TransparentRedirectReplyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
+	"\x1cConfigureTransparentRedirect\x12(.yagp.node.v1.TransparentRedirectRequest\x1a&.yagp.node.v1.TransparentRedirectReply\x12M\n" +
+	"\x10StartTunnelProbe\x12\x16.google.protobuf.Empty\x1a!.yagp.node.v1.TunnelProbeEndpoint\x12O\n" +
+	"\vProbeTunnel\x12 .yagp.node.v1.TunnelProbeRequest\x1a\x1e.yagp.node.v1.TunnelProbeReplyB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var file_panel_proto_goTypes = []any{
 	(*ReportRequest)(nil),              // 0: yagp.node.v1.ReportRequest
@@ -56,16 +59,19 @@ var file_panel_proto_goTypes = []any{
 	(*TrafficQuotaRequest)(nil),        // 7: yagp.node.v1.TrafficQuotaRequest
 	(*NodeUpgradeRequest)(nil),         // 8: yagp.node.v1.NodeUpgradeRequest
 	(*TransparentRedirectRequest)(nil), // 9: yagp.node.v1.TransparentRedirectRequest
-	(*proto.ObserveReply)(nil),         // 10: proto.ObserveReply
-	(*NodeConfig)(nil),                 // 11: yagp.node.v1.NodeConfig
-	(*CommandReply)(nil),               // 12: yagp.node.v1.CommandReply
-	(*ListenerCheckReply)(nil),         // 13: yagp.node.v1.ListenerCheckReply
-	(*ObserverEndpoint)(nil),           // 14: yagp.node.v1.ObserverEndpoint
-	(*GostServiceStatus)(nil),          // 15: yagp.node.v1.GostServiceStatus
-	(*GostLogsReply)(nil),              // 16: yagp.node.v1.GostLogsReply
-	(*TrafficQuotaReply)(nil),          // 17: yagp.node.v1.TrafficQuotaReply
-	(*NodeUpgradeStatus)(nil),          // 18: yagp.node.v1.NodeUpgradeStatus
-	(*TransparentRedirectReply)(nil),   // 19: yagp.node.v1.TransparentRedirectReply
+	(*TunnelProbeRequest)(nil),         // 10: yagp.node.v1.TunnelProbeRequest
+	(*proto.ObserveReply)(nil),         // 11: proto.ObserveReply
+	(*NodeConfig)(nil),                 // 12: yagp.node.v1.NodeConfig
+	(*CommandReply)(nil),               // 13: yagp.node.v1.CommandReply
+	(*ListenerCheckReply)(nil),         // 14: yagp.node.v1.ListenerCheckReply
+	(*ObserverEndpoint)(nil),           // 15: yagp.node.v1.ObserverEndpoint
+	(*GostServiceStatus)(nil),          // 16: yagp.node.v1.GostServiceStatus
+	(*GostLogsReply)(nil),              // 17: yagp.node.v1.GostLogsReply
+	(*TrafficQuotaReply)(nil),          // 18: yagp.node.v1.TrafficQuotaReply
+	(*NodeUpgradeStatus)(nil),          // 19: yagp.node.v1.NodeUpgradeStatus
+	(*TransparentRedirectReply)(nil),   // 20: yagp.node.v1.TransparentRedirectReply
+	(*TunnelProbeEndpoint)(nil),        // 21: yagp.node.v1.TunnelProbeEndpoint
+	(*TunnelProbeReply)(nil),           // 22: yagp.node.v1.TunnelProbeReply
 }
 var file_panel_proto_depIdxs = []int32{
 	0,  // 0: yagp.v1.Report:input_type -> yagp.node.v1.ReportRequest
@@ -83,23 +89,27 @@ var file_panel_proto_depIdxs = []int32{
 	1,  // 12: yagp.v1.GetUpgradeStatus:input_type -> google.protobuf.Empty
 	8,  // 13: yagp.v1.StartUpgrade:input_type -> yagp.node.v1.NodeUpgradeRequest
 	9,  // 14: yagp.v1.ConfigureTransparentRedirect:input_type -> yagp.node.v1.TransparentRedirectRequest
-	10, // 15: yagp.v1.Report:output_type -> proto.ObserveReply
-	11, // 16: yagp.v1.GetNodeConfig:output_type -> yagp.node.v1.NodeConfig
-	1,  // 17: yagp.v1.UpdateNodeIPs:output_type -> google.protobuf.Empty
-	12, // 18: yagp.v1.Execute:output_type -> yagp.node.v1.CommandReply
-	13, // 19: yagp.v1.CheckListener:output_type -> yagp.node.v1.ListenerCheckReply
-	14, // 20: yagp.v1.GetObserverEndpoint:output_type -> yagp.node.v1.ObserverEndpoint
-	15, // 21: yagp.v1.GetGostServiceStatus:output_type -> yagp.node.v1.GostServiceStatus
-	15, // 22: yagp.v1.RestartGostService:output_type -> yagp.node.v1.GostServiceStatus
-	16, // 23: yagp.v1.GetGostLogs:output_type -> yagp.node.v1.GostLogsReply
-	6,  // 24: yagp.v1.GetNftConfig:output_type -> yagp.node.v1.NftConfig
-	6,  // 25: yagp.v1.ApplyNftConfig:output_type -> yagp.node.v1.NftConfig
-	17, // 26: yagp.v1.SyncTrafficQuota:output_type -> yagp.node.v1.TrafficQuotaReply
-	18, // 27: yagp.v1.GetUpgradeStatus:output_type -> yagp.node.v1.NodeUpgradeStatus
-	18, // 28: yagp.v1.StartUpgrade:output_type -> yagp.node.v1.NodeUpgradeStatus
-	19, // 29: yagp.v1.ConfigureTransparentRedirect:output_type -> yagp.node.v1.TransparentRedirectReply
-	15, // [15:30] is the sub-list for method output_type
-	0,  // [0:15] is the sub-list for method input_type
+	1,  // 15: yagp.v1.StartTunnelProbe:input_type -> google.protobuf.Empty
+	10, // 16: yagp.v1.ProbeTunnel:input_type -> yagp.node.v1.TunnelProbeRequest
+	11, // 17: yagp.v1.Report:output_type -> proto.ObserveReply
+	12, // 18: yagp.v1.GetNodeConfig:output_type -> yagp.node.v1.NodeConfig
+	1,  // 19: yagp.v1.UpdateNodeIPs:output_type -> google.protobuf.Empty
+	13, // 20: yagp.v1.Execute:output_type -> yagp.node.v1.CommandReply
+	14, // 21: yagp.v1.CheckListener:output_type -> yagp.node.v1.ListenerCheckReply
+	15, // 22: yagp.v1.GetObserverEndpoint:output_type -> yagp.node.v1.ObserverEndpoint
+	16, // 23: yagp.v1.GetGostServiceStatus:output_type -> yagp.node.v1.GostServiceStatus
+	16, // 24: yagp.v1.RestartGostService:output_type -> yagp.node.v1.GostServiceStatus
+	17, // 25: yagp.v1.GetGostLogs:output_type -> yagp.node.v1.GostLogsReply
+	6,  // 26: yagp.v1.GetNftConfig:output_type -> yagp.node.v1.NftConfig
+	6,  // 27: yagp.v1.ApplyNftConfig:output_type -> yagp.node.v1.NftConfig
+	18, // 28: yagp.v1.SyncTrafficQuota:output_type -> yagp.node.v1.TrafficQuotaReply
+	19, // 29: yagp.v1.GetUpgradeStatus:output_type -> yagp.node.v1.NodeUpgradeStatus
+	19, // 30: yagp.v1.StartUpgrade:output_type -> yagp.node.v1.NodeUpgradeStatus
+	20, // 31: yagp.v1.ConfigureTransparentRedirect:output_type -> yagp.node.v1.TransparentRedirectReply
+	21, // 32: yagp.v1.StartTunnelProbe:output_type -> yagp.node.v1.TunnelProbeEndpoint
+	22, // 33: yagp.v1.ProbeTunnel:output_type -> yagp.node.v1.TunnelProbeReply
+	17, // [17:34] is the sub-list for method output_type
+	0,  // [0:17] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name

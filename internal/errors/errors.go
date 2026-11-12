@@ -118,7 +118,17 @@ var (
 	ErrTunnelTransparentDaemon    = New(10227, "入口节点的 yagp-daemon 不支持透明分流。请在节点管理中升级入口节点的 yagp-daemon，重启并确认升级后的进程已重新连接面板，再重试创建或启动隧道", http.StatusNotImplemented)
 	ErrTunnelTransparentPlatform  = New(10228, "入口节点的透明分流需要 Linux；请确认 yagp-daemon 在 Linux 上使用节点配置文件启动", http.StatusNotImplemented)
 	ErrTunnelTransparentNft       = New(10229, "入口节点未找到 nftables；请在入口节点安装 nftables，并确认 yagp-daemon 可以执行 nft 后重试", http.StatusNotImplemented)
+	ErrTunnelProbePrepare         = New(10230, "无法在出口节点启动测试，请检查节点的 daemon 连接和运行状态", http.StatusBadGateway)
+	ErrTunnelProbeFailed          = New(10231, "测试数据未能通过隧道往返，请检查入口节点和出口 Relay 的运行状态", http.StatusBadGateway)
+	ErrTunnelProbeTimeout         = New(10232, "隧道转发测试超时，请检查两节点之间的连接和出口 Relay 的运行状态", http.StatusGatewayTimeout)
+	ErrTunnelProbeChain           = New(10233, "入口节点无法使用 Gost 隧道链，请检查节点的连接和隧道配置", http.StatusConflict)
+	ErrTunnelProbeGost            = New(10235, "入口节点无法准备 Gost 测试，请检查 Gost 安装和服务状态", http.StatusBadGateway)
+	ErrTunnelProbeData            = New(10236, "隧道返回的测试数据校验失败，请检查入口转发链和出口 Relay", http.StatusBadGateway)
 )
+
+func TunnelProbeDaemonUnsupported(nodeRole string) *BizError {
+	return New(10234, "请升级"+nodeRole+"的 yagp-daemon 后再测试隧道", http.StatusNotImplemented)
+}
 
 // ==================== 认证相关错误 (103xx) ====================
 
