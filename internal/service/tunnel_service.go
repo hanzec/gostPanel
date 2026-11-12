@@ -47,7 +47,7 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 		return nil, err
 	}
 	if req.EntryRuleID != 0 || req.ExitRuleID != 0 {
-		if req.EntryNodeID != 0 || req.ExitNodeID != 0 || req.Protocol != "" || req.RelayPort != 0 {
+		if req.EntryNodeID != 0 || req.ExitNodeID != 0 || req.RelayPort != 0 {
 			return nil, errors.ErrTunnelEndpointsRequired
 		}
 		return s.createEndpointTunnel(req, nodeIDs, username, ip, userAgent)
@@ -127,7 +127,7 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 		tunnel.AllowlistNodeIDs = nodeIDs
 	}
 	if tunnel.EntryRuleID != nil || req.EntryRuleID != 0 || req.ExitRuleID != 0 {
-		if tunnel.EntryRuleID == nil || req.Protocol != "" || req.RelayPort != 0 {
+		if tunnel.EntryRuleID == nil || req.RelayPort != 0 {
 			return nil, errors.ErrTunnelEndpointsRequired
 		}
 		if tunnel.Status == model.TunnelStatusError {
@@ -137,6 +137,9 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 		}
 		if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
 			return nil, err
+		}
+		if tunnel.ExitRule.Role != model.EndpointRoleExit && req.Protocol != "" {
+			tunnel.Protocol = req.Protocol
 		}
 		if err := setTunnelTargets(tunnel, req.Targets, req.UseClashRuleset, req.Strategy); err != nil {
 			return nil, err

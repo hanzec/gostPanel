@@ -66,6 +66,18 @@ func TestEntranceHTTPChecksSavedListenerOnItsNode(t *testing.T) {
 	if err := f.db.First(&rule, rule.ID).Error; err != nil || rule.Status != model.RuleStatusStopped {
 		t.Fatalf("occupied listener changed the saved entrance: %+v (%v)", rule, err)
 	}
+	for _, transport := range []struct{ protocol, network string }{
+		{"tls", "tcp"}, {"mtls", "tcp"}, {"ws", "tcp"}, {"mws", "tcp"}, {"quic", "udp"},
+	} {
+		if err := f.db.Model(&rule).Update("protocol", transport.protocol).Error; err != nil {
+			t.Fatal(err)
+		}
+		remote.reply <- nil
+		f.request(t, http.MethodPost, path, "", http.StatusOK)
+		if req := <-remote.calls; req.Protocol != transport.network {
+			t.Fatalf("%s listener check used %s instead of %s", transport.protocol, req.Protocol, transport.network)
+		}
+	}
 
 	remote.reply <- status.Error(codes.Unimplemented, "old daemon")
 	f.request(t, http.MethodPost, path, "", http.StatusNotImplemented)

@@ -49,7 +49,7 @@
       <div v-else-if="!tunnelList.length && !loadError" class="inventory-state">
         <el-icon class="inventory-state-icon" aria-hidden="true"><Connection /></el-icon>
         <p>{{ filtered ? '没有匹配的隧道' : '尚未建立隧道' }}</p>
-        <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '先在端点管理创建两个端点，再在这里选择方向和转发目标。' }}</span>
+        <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '先在端点管理创建入口与出口，再在这里连接两个端点。' }}</span>
         <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
       </div>
       <div v-else-if="tunnelList.length" class="ops-table-scroll inventory-scroll" :aria-busy="loading">
@@ -88,7 +88,7 @@
               </td>
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">Relay</span>
-                <strong class="ops-mono">{{ tunnel.protocol?.toUpperCase() || '—' }}</strong>
+                <strong class="ops-mono">{{ (tunnel.exit_rule?.role === 'exit' ? tunnel.exit_rule.protocol : tunnel.protocol)?.toUpperCase() || '—' }}</strong>
                 <span class="inventory-secondary ops-muted">
                   <template v-if="relayConnectEndpoints[tunnel.id]">本机监听 </template>
                   <span class="ops-mono">{{ tunnel.exit_rule ? listenEndpoint(tunnel.exit_rule) : ':' + (tunnel.relay_port || '—') }}</span>
@@ -165,7 +165,7 @@
       <p v-else class="tunnel-dialog-hint ops-muted">
         <template v-if="isEdit">端点变更将在启动时应用。</template>
         <template v-else-if="!entryOptionsLoading && (!sourceOptions.length || !destinationOptions.length)">源端或目的端缺少可用端点。</template>
-        <template v-else>选择源端、目的端和转发目标后，面板将配置两端并启动隧道。</template>
+        <template v-else>选择入口和出口后，面板将按出口的目标与策略配置两端并启动隧道。</template>
         <RouterLink to="/rules" class="tunnel-link" @click="dialogVisible = false">前往端点管理</RouterLink>
       </p>
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" :disabled="submitLoading" @submit.prevent="handleSubmit">
@@ -183,7 +183,7 @@
                 :disabled="rule.node_id === exitEntrance?.node_id"
               />
             </el-select>
-            <span id="source-entry-help" class="tunnel-form-hint ops-muted">源端接收流量，按下方目标与策略转发。独立转发中的端点须先停止。</span>
+            <span id="source-entry-help" class="tunnel-form-hint ops-muted">入口接收流量，按出口的目标与策略转发。独立转发中的旧端点须先停止。</span>
           </el-form-item>
           <el-form-item v-if="!legacyEdit" label="目的端点" prop="exit_rule_id">
             <el-select v-model="form.exit_rule_id" placeholder="选择目的端点" :loading="entryOptionsLoading" filterable fit-input-width popper-class="tunnel-endpoint-options" aria-describedby="destination-entry-help">
@@ -196,7 +196,7 @@
               />
             </el-select>
             <span id="destination-entry-help" class="tunnel-form-hint ops-muted">
-              目的端须在另一节点且监听可达，其协议和端口用于 Relay。
+              出口须在另一节点且监听可达，其隧道协议、目标与策略在端点管理中配置。
               <span v-if="selectedRelayConnectEndpoint" class="tunnel-connect-endpoint">
                 源端连接 <span class="ops-mono">{{ selectedRelayConnectEndpoint }}</span>
               </span>
@@ -211,10 +211,30 @@
             <el-input-number v-model="form.relay_port" :min="1" :max="65535" controls-position="right" />
             <span class="tunnel-form-hint ops-muted">Relay 服务在出口节点监听。</span>
           </el-form-item>
-          <section v-if="!legacyEdit" class="tunnel-target-section inventory-form-wide" aria-labelledby="tunnel-target-title">
+          <section v-if="exitOwnsTargets" class="tunnel-target-section inventory-form-wide" aria-labelledby="tunnel-exit-policy-title">
+            <h3 id="tunnel-exit-policy-title">出口目标与策略</h3>
+            <p class="tunnel-dialog-hint ops-muted">以下设置来自所选出口，在端点管理中修改。</p>
+            <dl class="tunnel-policy-summary">
+              <dt>隧道协议</dt><dd>{{ exitEntrance.protocol.toUpperCase() }}</dd>
+              <dt>目标类型</dt><dd>{{ exitEntrance.use_clash_ruleset ? 'Clash 规则集（透明分流）' : '固定目标地址' }}</dd>
+              <template v-if="!exitEntrance.use_clash_ruleset">
+                <dt>目标地址</dt><dd><span v-for="target in exitEntrance.targets" :key="target" class="ops-mono">{{ target }}</span></dd>
+                <dt>负载均衡</dt><dd>{{ strategies[exitEntrance.strategy] || '轮询' }}</dd>
+              </template>
+            </dl>
+            <p v-if="exitEntrance.use_clash_ruleset" class="tunnel-form-hint ops-muted">Clash 分流要求入口使用 TCP 与 127.0.0.1。</p>
+          </section>
+          <p v-else-if="!legacyEdit && !exitEntrance" class="tunnel-form-hint ops-muted inventory-form-wide">选择出口后查看其目标与策略。</p>
+          <section v-if="legacyTargetEdit" class="tunnel-target-section inventory-form-wide" aria-labelledby="tunnel-target-title">
             <h3 id="tunnel-target-title">目标与策略</h3>
-            <p class="tunnel-dialog-hint ops-muted">设置流量经过隧道后访问的目标，配置随隧道保存。</p>
+            <p class="tunnel-dialog-hint ops-muted">此旧端点未指定方向，目标与策略仍随隧道保存。</p>
             <div class="inventory-form-grid">
+              <el-form-item label="隧道协议" prop="protocol" class="inventory-form-wide" for="tunnel-protocol">
+                <el-select id="tunnel-protocol" v-model="form.protocol" aria-describedby="tunnel-protocol-help">
+                  <el-option v-for="protocol in protocols" :key="protocol" :label="protocol.toUpperCase()" :value="protocol" />
+                </el-select>
+                <p id="tunnel-protocol-help" class="tunnel-form-hint ops-muted">用于源节点到目的节点之间的 Gost 隧道传输。</p>
+              </el-form-item>
               <el-form-item label="目标类型" prop="use_clash_ruleset" class="inventory-form-wide">
                 <el-select v-model="form.use_clash_ruleset" aria-describedby="tunnel-target-mode-help">
                   <el-option label="固定目标地址" :value="false" />
@@ -227,10 +247,11 @@
               <el-form-item v-if="!form.use_clash_ruleset" label="目标地址" prop="targetList" class="inventory-form-wide">
                 <div class="tunnel-target-list">
                   <div v-for="(item, index) in form.targetList" :key="index" class="tunnel-target-item">
-                    <el-input v-model.trim="item.address" :aria-label="'目标地址 ' + (index + 1)" placeholder="例如 192.168.1.10:8080" />
+                    <el-input v-model.trim="item.address" :aria-label="'目标地址 ' + (index + 1)" aria-describedby="tunnel-target-address-help" placeholder="例如 example.com:443 或 192.168.1.10:8080" />
                     <el-button text type="danger" :icon="Remove" :aria-label="'移除目标地址 ' + (index + 1)" @click="removeTarget(index)" />
                   </div>
                   <el-button :icon="Plus" @click="form.targetList.push({ address: '' })">添加目标地址</el-button>
+                  <p id="tunnel-target-address-help" class="tunnel-form-hint ops-muted">填写域名或 IP 与端口。HTTPS 会透传客户端发送的 SNI，无需额外开启。</p>
                 </div>
               </el-form-item>
               <el-form-item v-if="!form.use_clash_ruleset" label="负载均衡" prop="strategy">
@@ -314,6 +335,7 @@ const tunnelStates = {
   error: { label: '异常', icon: Warning, tone: 'danger' }
 }
 const protocols = ['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic']
+const strategies = { round: '轮询', rand: '随机', fifo: '先进先出', hash: '哈希' }
 
 const nodeList = ref([])
 const nodeOptionsLoading = ref(false)
@@ -364,6 +386,8 @@ const listenEndpoint = rule => formatEndpoint(rule.listen_ip, rule.listen_port)
 const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
 const entryEntrance = computed(() => entryList.value.find(rule => rule.id === form.entry_rule_id))
 const exitEntrance = computed(() => entryList.value.find(rule => rule.id === form.exit_rule_id))
+const exitOwnsTargets = computed(() => !legacyEdit.value && exitEntrance.value?.role === 'exit')
+const legacyTargetEdit = computed(() => !legacyEdit.value && !!exitEntrance.value && !exitOwnsTargets.value)
 const selectedRelayConnectEndpoint = computed(() => mappedConnectEndpoint(exitEntrance.value?.node, exitEntrance.value?.listen_ip, exitEntrance.value?.listen_port))
 const relayConnectEndpoints = computed(() => Object.fromEntries(tunnelList.value.map(tunnel => [
   tunnel.id, mappedConnectEndpoint(tunnel.exit_node, tunnel.exit_rule?.listen_ip, tunnel.relay_port)
@@ -371,16 +395,18 @@ const relayConnectEndpoints = computed(() => Object.fromEntries(tunnelList.value
 const availableEntrances = computed(() => entryList.value.filter(rule => rule.linked_tunnel_id
   ? rule.linked_tunnel_id === editId.value
   : !rule.tunnel_id && rule.status !== 'running'))
-const sourceOptions = availableEntrances
+const sourceOptions = computed(() => availableEntrances.value.filter(rule => !rule.role || rule.role === 'entry'))
 const destinationOptions = computed(() => availableEntrances.value.filter(rule =>
-  !['0.0.0.0', '::', '::1'].includes(rule.listen_ip) && !rule.listen_ip?.startsWith('127.')))
+  (!rule.role || rule.role === 'exit') && !['0.0.0.0', '::', '::1'].includes(rule.listen_ip) && !rule.listen_ip?.startsWith('127.')))
 const canUseClashRuleset = computed(() => entryEntrance.value?.protocol === 'tcp' && entryEntrance.value?.listen_ip === '127.0.0.1')
 const validateEndpointNodes = (_rule, _value, callback) => callback(entryEntrance.value?.node_id &&
   entryEntrance.value.node_id === exitEntrance.value?.node_id ? new Error('源端和目的端须位于不同节点') : undefined)
 const formRules = {
   name: [{ required: true, message: '请输入隧道名称', trigger: 'blur' }],
   entry_rule_id: [{ required: true, message: '请选择源端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
-  exit_rule_id: [{ required: true, message: '请选择目的端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
+  exit_rule_id: [{ required: true, message: '请选择目的端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' },
+    { validator: (_rule, _value, callback) => callback(exitOwnsTargets.value && exitEntrance.value.use_clash_ruleset && !canUseClashRuleset.value
+      ? new Error('此出口的 Clash 分流需要入口使用 TCP 与 127.0.0.1') : undefined), trigger: 'change' }],
   use_clash_ruleset: [{ validator: (_rule, value, callback) => callback(value && !canUseClashRuleset.value
     ? new Error('Clash 分流需要源端点使用 TCP 与 127.0.0.1') : undefined), trigger: 'change' }],
   targetList: [{ required: true, validator: (_rule, value, callback) => callback(!form.use_clash_ruleset && !value.some(item => item.address.trim())
@@ -390,7 +416,8 @@ const formRules = {
 }
 
 watch(canUseClashRuleset, () => {
-  if (dialogVisible.value && form.use_clash_ruleset) formRef.value?.validateField('use_clash_ruleset').catch(() => {})
+  if (dialogVisible.value && legacyTargetEdit.value && form.use_clash_ruleset) formRef.value?.validateField('use_clash_ruleset').catch(() => {})
+  if (dialogVisible.value && exitOwnsTargets.value) formRef.value?.validateField('exit_rule_id').catch(() => {})
 })
 
 const removeTarget = index => {
@@ -516,8 +543,10 @@ const handleSubmit = async () => {
       }
       const payload = legacyEdit.value
         ? { name, remark, protocol, relay_port }
-        : { name, remark, entry_rule_id, exit_rule_id, use_clash_ruleset: form.use_clash_ruleset,
-          targets: form.use_clash_ruleset ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.strategy }
+        : exitOwnsTargets.value
+          ? { name, remark, entry_rule_id, exit_rule_id }
+          : { name, remark, entry_rule_id, exit_rule_id, protocol, use_clash_ruleset: form.use_clash_ruleset,
+            targets: form.use_clash_ruleset ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.strategy }
       if (!isEdit.value || allowlist_node_ids.length !== savedAllowlistNodeIds.length ||
         allowlist_node_ids.some(id => !savedAllowlistNodeIds.includes(id))) {
         payload.allowlist_node_ids = allowlist_node_ids
@@ -591,7 +620,10 @@ const handleTunnelAction = (action, row) => {
     openDialog()
     form.name = row.name.slice(0, 95) + '-copy'
     form.remark = row.remark || ''
-    Object.assign(form, targetFields(row))
+    if (row.exit_rule?.role !== 'exit') {
+      form.protocol = row.protocol || 'tcp'
+      Object.assign(form, targetFields(row))
+    }
   }
 }
 
@@ -621,6 +653,10 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-connect-endpoint { display: block; overflow-wrap: anywhere; }
 .tunnel-target-section { border-top: 1px solid var(--ops-border); padding-top: 16px; }
 .tunnel-target-section h3 { margin: 0 0 8px; font-size: var(--ops-text-base); }
+.tunnel-policy-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 16px; margin: 0; }
+.tunnel-policy-summary dt { color: var(--ops-muted); }
+.tunnel-policy-summary dd { margin: 0; overflow-wrap: anywhere; }
+.tunnel-policy-summary dd span { display: block; }
 .tunnel-target-list { display: grid; gap: 8px; width: 100%; }
 .tunnel-target-item { display: flex; align-items: center; gap: 8px; }
 .tunnel-target-item .el-input { min-width: 0; }

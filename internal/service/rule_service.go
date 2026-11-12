@@ -76,7 +76,7 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 	if err != nil {
 		return nil, err
 	}
-	if err = validateClashTarget(req.UseClashRuleset, model.RuleProtocol(req.Protocol), listenIP, req.Targets); err != nil {
+	if err = validateEndpointConfig(model.EndpointRole(req.Role), kind, model.RuleProtocol(req.Protocol), listenIP, req.Targets, req.UseClashRuleset); err != nil {
 		return nil, err
 	}
 	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort)
@@ -93,6 +93,7 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 		TunnelID:        tunnelID,
 		Name:            req.Name,
 		Type:            kind,
+		Role:            model.EndpointRole(req.Role),
 		Protocol:        model.RuleProtocol(req.Protocol),
 		ListenIP:        listenIP,
 		ListenPort:      req.ListenPort,
@@ -122,19 +123,24 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 	return rule, nil
 }
 
-// Update 更新未绑定隧道的规则。
+// Update also permits policy changes on an exit whose tunnel has stopped.
 func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, userAgent string) (*model.GostRule, error) {
 	rule, err := s.GetByID(id)
 	if err != nil {
 		return nil, err
 	}
-	if rule.LinkedTunnelID != nil {
+	if rule.LinkedTunnelID != nil && (rule.Role != model.EndpointRoleExit || rule.LinkedTunnelStatus != model.TunnelStatusStopped) {
 		return nil, errors.ErrRuleTunnelLinked
 	}
 
 	// 检查是否在运行中
 	if rule.Status == model.RuleStatusRunning {
 		return nil, errors.ErrRuleRunning
+	}
+	if rule.LinkedTunnelID != nil && ((req.NodeID != nil && (rule.NodeID == nil || *req.NodeID != *rule.NodeID)) ||
+		(req.Role != "" && model.EndpointRole(req.Role) != rule.Role) || req.ListenPort != rule.ListenPort ||
+		(req.ListenIP != nil && *req.ListenIP != rule.ListenIP)) {
+		return nil, errors.ErrRuleTunnelLinked
 	}
 
 	// 获取入口节点 ID（用于端口冲突检查）
@@ -162,11 +168,23 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	if req.Targets != nil {
 		targets = req.Targets
 	}
-	// Endpoint-only edits do not change legacy targets or determine a tunnel role.
-	if req.UseClashRuleset != nil || req.Targets != nil || req.Strategy != "" {
-		if err = validateClashTarget(useClashRuleset, model.RuleProtocol(req.Protocol), listenIP, targets); err != nil {
+	role := rule.Role
+	if req.Role != "" {
+		role = model.EndpointRole(req.Role)
+	}
+	if role == model.EndpointRoleEntry {
+		if len(req.Targets) != 0 || (req.UseClashRuleset != nil && *req.UseClashRuleset) {
+			return nil, errors.ErrEndpointTargets
+		}
+		targets, useClashRuleset = []string{}, false
+	}
+	// Listener-only edits preserve targets belonging to an unconverted legacy endpoint.
+	if role != "" || req.UseClashRuleset != nil || req.Targets != nil || req.Strategy != "" {
+		if err = validateEndpointConfig(role, rule.Type, model.RuleProtocol(req.Protocol), listenIP, targets, useClashRuleset); err != nil {
 			return nil, err
 		}
+	} else if req.Protocol != "" && req.Protocol != "tcp" && req.Protocol != "udp" {
+		return nil, errors.ErrEndpointProtocol
 	}
 	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort, id)
 	if err != nil {
@@ -177,6 +195,7 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	}
 
 	rule.Name = req.Name
+	rule.Role = role
 	rule.Protocol = model.RuleProtocol(req.Protocol)
 	rule.ListenIP = listenIP
 	rule.ListenPort = req.ListenPort
@@ -184,6 +203,9 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	rule.UseClashRuleset = useClashRuleset
 	if req.Strategy != "" {
 		rule.Strategy = req.Strategy
+	}
+	if role == model.EndpointRoleEntry {
+		rule.Strategy = "round"
 	}
 	rule.EnableTLS = req.EnableTLS
 	rule.Remark = req.Remark
@@ -213,6 +235,36 @@ func (s *RuleService) findRuleNode(id *uint) (*model.GostNode, error) {
 		return nil, errors.ErrNodeNotFound
 	}
 	return node, err
+}
+
+func validateEndpointConfig(role model.EndpointRole, kind model.RuleType, protocol model.RuleProtocol, listenIP string, targets []string, useClash bool) error {
+	if role != "" && (kind != model.RuleTypeForward || (role != model.EndpointRoleEntry && role != model.EndpointRoleExit)) {
+		return errors.ErrEndpointRole
+	}
+	if role != model.EndpointRoleExit && protocol != "" && protocol != model.RuleProtocolTCP && protocol != model.RuleProtocolUDP {
+		return errors.ErrEndpointProtocol
+	}
+	switch role {
+	case model.EndpointRoleEntry:
+		if len(targets) != 0 || useClash {
+			return errors.ErrEndpointTargets
+		}
+	case model.EndpointRoleExit:
+		if !relayBindReachable(listenIP) {
+			return errors.ErrTunnelExitInvalid
+		}
+		if (useClash && len(targets) != 0) || (!useClash && len(targets) == 0) {
+			return errors.ErrEndpointTargets
+		}
+		for _, target := range targets {
+			if strings.TrimSpace(target) == "" {
+				return errors.ErrEndpointTargets
+			}
+		}
+	default:
+		return validateClashTarget(useClash, protocol, listenIP, targets)
+	}
+	return nil
 }
 
 func normalizeRuleListenIP(value string) (string, error) {
@@ -290,16 +342,16 @@ func (s *RuleService) loadEntranceBinding(rule *model.GostRule) error {
 		return err
 	}
 	if tunnel.EntryRuleID != nil && *tunnel.EntryRuleID == rule.ID {
-		setEntranceBinding(rule, tunnel.ID, "entry")
+		setEntranceBinding(rule, tunnel.ID, "entry", tunnel.Status)
 	} else {
-		setEntranceBinding(rule, tunnel.ID, "exit")
+		setEntranceBinding(rule, tunnel.ID, "exit", tunnel.Status)
 	}
 	return nil
 }
 
-func setEntranceBinding(rule *model.GostRule, tunnelID uint, role string) {
+func setEntranceBinding(rule *model.GostRule, tunnelID uint, role string, status model.TunnelStatus) {
 	if rule != nil {
-		rule.LinkedTunnelID, rule.TunnelRole = &tunnelID, role
+		rule.LinkedTunnelID, rule.TunnelRole, rule.LinkedTunnelStatus = &tunnelID, role, status
 	}
 }
 
@@ -349,10 +401,10 @@ func (s *RuleService) List(req *dto.RuleListReq) ([]model.GostRule, int64, error
 	}
 	for _, tunnel := range bindings {
 		if tunnel.EntryRuleID != nil {
-			setEntranceBinding(byID[*tunnel.EntryRuleID], tunnel.ID, "entry")
+			setEntranceBinding(byID[*tunnel.EntryRuleID], tunnel.ID, "entry", tunnel.Status)
 		}
 		if tunnel.ExitRuleID != nil {
-			setEntranceBinding(byID[*tunnel.ExitRuleID], tunnel.ID, "exit")
+			setEntranceBinding(byID[*tunnel.ExitRuleID], tunnel.ID, "exit", tunnel.Status)
 		}
 	}
 	return rules, total, nil
@@ -372,7 +424,7 @@ func (s *RuleService) Start(id uint, username, ip, userAgent string) error {
 	if rule.Status == model.RuleStatusRunning {
 		return nil
 	}
-	if rule.Type == model.RuleTypeForward && (rule.UseClashRuleset || len(rule.Targets) == 0) {
+	if rule.Type == model.RuleTypeForward && (rule.Role != "" || rule.UseClashRuleset || len(rule.Targets) == 0) {
 		return errors.ErrRuleTargetRequired
 	}
 
