@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +14,6 @@ import (
 
 	"yagp/internal/buildinfo"
 	"yagp/internal/deployjob"
-	"yagp/pkg/upgrade"
 )
 
 func TestSubmitUpdatePersistsJobBeforeStarting(t *testing.T) {
@@ -57,7 +55,7 @@ func TestSubmitUpdatePersistsJobBeforeStarting(t *testing.T) {
 	}
 }
 
-func TestUpdateWorkerPublishesProgressAndReturnsScriptExit(t *testing.T) {
+func TestUpdateWorkerPublishesProgressAndReturnsCommandExit(t *testing.T) {
 	directory := t.TempDir()
 	request := deployjob.Request{ID: "0123456789abcdef0123456789abcdef", Mode: "compose", Digest: "sha256:" + strings.Repeat("a", 64)}
 	dir := filepath.Join(directory, request.ID)
@@ -198,77 +196,6 @@ func TestApplyToolReleaseNeverDowngradesAndRequiresInstalledPair(t *testing.T) {
 	}
 	if err := applyToolRelease(t.Context(), executable, "0.1.91-abcdef0", nil); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("update without installed receiver returned %v", err)
-	}
-}
-
-func TestRunReleaseScriptDownloadsTaggedGitHubSource(t *testing.T) {
-	const tag = "0.1.90-abcdef0"
-	for _, tc := range []struct {
-		name       string
-		invalidTag bool
-		statusCode int
-		exitCode   int
-		wantError  string
-	}{
-		{name: "runs tagged source", statusCode: http.StatusOK},
-		{name: "returns script exit status", statusCode: http.StatusOK, exitCode: 7},
-		{name: "invalid metadata", invalidTag: true, wantError: "invalid stable release tag"},
-		{name: "missing source", statusCode: http.StatusNotFound, wantError: "download update script"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			script := `read -r digest
-printf '%s %s %s\n' "$1" "$YAGP_UPDATE_RELEASE_TAG" "$digest"
-`
-			if tc.exitCode != 0 {
-				script += "exit 7\n"
-			}
-			client := selfUpgradeClient()
-			client.Transport = selfUpgradeRoundTripper(func(req *http.Request) (*http.Response, error) {
-				var body string
-				statusCode := http.StatusOK
-				switch req.URL.String() {
-				case upgrade.YAGPReleaseCache + "/latest":
-					if req.Header.Get("Accept") != "application/json" {
-						t.Error("release request did not select JSON")
-					}
-					if tc.invalidTag {
-						body = `{"tag":"../heads/master"}`
-					} else {
-						body = `{"tag":"` + tag + `"}`
-					}
-				case "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/" + tag + "/scripts/setup_deploy.sh":
-					if tc.invalidTag {
-						t.Error("requested script after receiving an invalid tag")
-					}
-					statusCode, body = tc.statusCode, script
-				default:
-					t.Errorf("unexpected request to %s", req.URL)
-					return nil, errors.New("unexpected release request")
-				}
-				return &http.Response{StatusCode: statusCode, Status: http.StatusText(statusCode), Body: io.NopCloser(strings.NewReader(body))}, nil
-			})
-			digest := "sha256:" + strings.Repeat("a", 64)
-			var output bytes.Buffer
-			err := runReleaseScript(t.Context(), client, deployjob.Request{Mode: "compose", Digest: digest}, &output)
-			if tc.wantError != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantError) || output.Len() != 0 {
-					t.Fatalf("script returned %v, output %q, want %q and no output", err, output.String(), tc.wantError)
-				}
-				return
-			}
-			if tc.exitCode == 0 && err != nil {
-				t.Fatal(err)
-			}
-			if tc.exitCode != 0 {
-				var exit *exec.ExitError
-				if !errors.As(err, &exit) || exit.ExitCode() != tc.exitCode {
-					t.Fatalf("script returned %v, want exit %d", err, tc.exitCode)
-				}
-			}
-			if got, want := output.String(), "compose "+tag+" "+digest+"\n"; got != want {
-				t.Fatalf("script output %q, want %q", got, want)
-			}
-		})
 	}
 }
 

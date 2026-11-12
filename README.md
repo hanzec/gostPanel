@@ -172,6 +172,8 @@ sudo journalctl --namespace=+yagp-depoly -u yagp-depoly.service -u 'yagp-update-
 
 手动更新工具可运行 `sudo /usr/local/sbin/yagp-update depoly`。手动部署镜像时，向 `sudo /usr/local/sbin/yagp-update compose` 的标准输入传入镜像的 `sha256:…` 摘要。
 
+部署工具直接拉取指定镜像，并在重建前比较当前和目标镜像的发布版本。目标版本较低时跳过重建，版本标签缺失或无效时报告错误。重建读取服务器现有的 `docker-compose.yml` 和 `.env`，通过标准输入指定本次使用的镜像。后续手动执行 Compose 时，镜像仍以该次命令使用的配置为准。
+
 ## 下载与开发
 
 面板支持 Linux（amd64、arm64）、Windows（amd64）和 macOS（Apple Silicon、Intel）。节点支持 Linux（amd64、arm64）。 [发布包](https://github.com/hanzec/yagp/releases)

@@ -90,12 +90,6 @@ func TestNativeToolUpdateRejectsDevelopmentBuildBeforeNetwork(t *testing.T) {
 	}
 }
 
-func TestPublishedScriptRejectsToolSelfUpdate(t *testing.T) {
-	if err := runReleaseScript(t.Context(), nil, deployjob.Request{Mode: "depoly"}, io.Discard); err == nil || !strings.Contains(err.Error(), "only used for compose") {
-		t.Fatalf("tool update entered the script runner: %v", err)
-	}
-}
-
 func TestDownloadToolReleaseKeepsArchiveAndProofAtTheSameTag(t *testing.T) {
 	const tag = "0.1.147-4713edf"
 	archive := "yagp-depoly-linux-" + runtime.GOARCH + ".tar.gz"

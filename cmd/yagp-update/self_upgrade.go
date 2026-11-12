@@ -187,7 +187,11 @@ func downloadSelfUpgradeFile(ctx context.Context, client *http.Client, url, targ
 }
 
 func findSelfUpgradeTool(name string) (string, error) {
-	for _, dir := range []string{"/usr/local/bin", "/usr/bin", "/bin"} {
+	return findRootOwnedTool(name, []string{"/usr/local/bin", "/usr/bin", "/bin"})
+}
+
+func findRootOwnedTool(name string, directories []string) (string, error) {
+	for _, dir := range directories {
 		canonicalDir, err := filepath.EvalSymlinks(dir)
 		if err != nil || checkSelfUpgradePath(canonicalDir, false) != nil {
 			continue

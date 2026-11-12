@@ -572,7 +572,7 @@ inspect_project() {
     [[ $project =~ ^[a-z0-9][a-z0-9_-]*$ && $service == yagp ]] ||
         fail '现有 yagp 容器不属于可识别的 Compose 项目。'
     case $compose_files in
-        "$project_dir/docker-compose.yml"|"$project_dir/docker-compose.yml,$managed_override") ;;
+        "$project_dir/docker-compose.yml"|"$project_dir/docker-compose.yml,$managed_override"|"$project_dir/docker-compose.yml,-") ;;
         "$project_dir/docker-compose.yml,$project_dir/$previous_override_name")
             [[ -f $project_dir/$previous_override_name || -f $managed_override ]] ||
                 fail '现有容器仍引用旧镜像覆盖文件，但该文件已丢失。'
@@ -586,9 +586,11 @@ inspect_project() {
     printf '%s\n' "$project"
 }
 
+# Retained for installed updaters that still call the tagged script.
 deploy_image() {
     root_environment
     local digest project_dir project image running compose_status started=$SECONDS
+    local containers current_image current_ref current_project health current_version='' target_version versions
     IFS= read -r digest && [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] ||
         fail '需要完整的小写 SHA-256 镜像 digest。'
     image="$image_repo@$digest"
@@ -602,30 +604,53 @@ deploy_image() {
     project=$(read_project "$managed_override")
     cd "$project_dir"
     check_services "$project_dir" "$project"
-    running=$(docker_local inspect --type container --format \
-        '{{.Config.Image}}|{{index .Config.Labels "com.docker.compose.project"}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' yagp 2>/dev/null) || running=''
-    if [[ $running == "$image|$project|healthy" ||
-          $running == "$legacy_image_repo@$digest|$project|healthy" ]]; then
-        # 继续引用正在运行的镜像，直到实际拉取了加速地址上的镜像。
-        write_override "$managed_override" "$project" "${running%%|*}"
-        log "项目 $project 已运行该镜像且健康，跳过重启：$digest"
-        return
+    containers=$(docker_local container ls --all --filter 'name=^/yagp$' --format '{{.Names}}') ||
+        fail '无法查询现有面板容器。'
+    if [[ -n $containers ]]; then
+        [[ $containers == yagp ]] || fail '面板容器列表结果无效。'
+        running=$(docker_local inspect --type container --format \
+            '{{.Image}}|{{.Config.Image}}|{{index .Config.Labels "com.docker.compose.project"}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' yagp) ||
+            fail '无法读取现有面板容器。'
+        IFS='|' read -r current_image current_ref current_project health <<< "$running"
+        [[ $current_image =~ ^sha256:[0-9a-f]{64}$ && $current_project == "$project" ]] ||
+            fail '现有面板容器的镜像或 Compose 项目无效。'
+        if [[ $health == healthy && ( $current_ref == "$image" || $current_ref == "$legacy_image_repo@$digest" ) ]]; then
+            log "项目 $project 已运行该镜像且健康，跳过重启：$digest"
+            return
+        fi
+        current_version=$(panel_image_version "$current_image") || return
     fi
     log "项目 $project 正在拉取镜像。"
     docker_local image pull "$image" ||
         fail "镜像拉取失败（退出码 $?），当前容器保持原状。"
+    target_version=$(panel_image_version "$image") || return
+    if [[ -n $current_version ]]; then
+        versions=$(printf '%s\n' "${current_version%-*}" "${target_version%-*}" | LC_ALL=C sort -V) ||
+            fail '无法比较面板镜像版本。'
+        if [[ ${versions##*$'\n'} != "${target_version%-*}" ]]; then
+            log "目标镜像版本 $target_version 低于当前版本 ${current_version}，跳过更新。"
+            return
+        fi
+    fi
 
-    log "写入镜像覆盖文件：$managed_override"
-    write_override "$managed_override" "$project" "$image"
     log '启动 yagp-config-init 与 yagp，最多等待健康检查 120 秒。'
-    compose "$project_dir" "$project" -f "$managed_override" \
+    compose_with_image "$project_dir" "$project" "$image" \
         up --no-build --pull never --wait --wait-timeout 120 yagp yagp-config-init || {
         compose_status=$?
         log "正在读取项目 $project 的容器状态。"
-        compose "$project_dir" "$project" -f "$managed_override" ps --all yagp yagp-config-init || true
-        fail "Compose 更新失败（退出码 $compose_status）。覆盖文件已记录本次 digest：$digest"
+        compose_with_image "$project_dir" "$project" "$image" ps --all yagp yagp-config-init || true
+        fail "Compose 更新失败（退出码 $compose_status），目标 digest：$digest"
     }
     log "项目 $project 更新完成，健康检查通过，耗时 $((SECONDS - started)) 秒。"
+}
+
+panel_image_version() {
+    local image=$1 version
+    local tag_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-[0-9a-f]{7}$'
+    version=$(docker_local image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image") ||
+        fail "无法读取面板镜像版本：$image"
+    [[ $version =~ $tag_pattern ]] || fail "面板镜像缺少有效的发布版本：$image"
+    printf '%s\n' "$version"
 }
 
 # 仅为已安装的旧版 yagp-update 保留一次性迁移入口；新版自行下载并验签。
@@ -790,6 +815,13 @@ compose() {
     shift 2
     docker_local compose --project-name "$project" --project-directory "$project_dir" \
         --env-file "$project_dir/.env" -f "$project_dir/docker-compose.yml" "$@"
+}
+
+compose_with_image() {
+    local project_dir=$1 project=$2 image=$3
+    shift 3
+    printf 'services:\n  yagp:\n    image: %s\n  yagp-config-init:\n    image: %s\n' "$image" "$image" |
+        compose "$project_dir" "$project" -f - "$@"
 }
 
 check_services() {
