@@ -1,5 +1,5 @@
 import { flushPromises } from '@vue/test-utils'
-import { ElSelect } from 'element-plus'
+import { ElOption, ElSelect } from 'element-plus'
 import { nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,6 +33,9 @@ const token = (value = 'secret', lifetime = 60_000) => response({ token: value, 
 const editForm = (view, title) => dialog(view, title).get('form.el-form')
 const settingsTitle = '节点配置 · 边缘节点'
 const quotaInput = '[placeholder="例如 100.5"]'
+const mappingRows = form => form.findAll('.node-address-mapping')
+const listenSelect = row => row.getComponent(ElSelect)
+const listenOptions = row => listenSelect(row).findAllComponents(ElOption)
 let wrapper
 let messages
 let router
@@ -337,113 +340,119 @@ describe('node inventory', () => {
 })
 
 describe('node registration and quota settings', () => {
-  it('validates both addresses and creates a node with a complete IP mapping', async () => {
+  it('creates a node without supplemental IP or listener mapping controls', async () => {
     api.createNode.mockResolvedValue(response(newNode))
     const view = open()
     await flushPromises()
     await click(view, '添加节点')
     const form = editForm(view, '添加节点')
+    expect(form.text()).not.toContain('补充 IP')
+    expect(form.find('.node-address-mappings').exists()).toBe(false)
     await form.get('[placeholder="例如 华东入口"]').setValue(newNode.name)
-    await click(form, '添加映射')
-    const localIP = form.get('[placeholder="例如 10.0.0.2"]')
-    const connectIP = form.get('[placeholder="例如 203.0.113.20"]')
-    expect(document.activeElement).toBe(localIP.element)
-    await localIP.setValue(' 10.0.0.2 ')
     await click(dialog(view, '添加节点'), '添加节点')
+    expect(api.createNode).toHaveBeenCalledExactlyOnceWith({
+      name: newNode.name, remark: '', traffic_limit_bytes: 0, traffic_reset_period: 'none'
+    })
+    expect(api.issueNodeRegistrationToken).toHaveBeenCalledWith(newNode.id)
+  })
+
+  it('selects a local interface IP, validates the connection IP and saves the mapping', async () => {
+    const node = { ...primary, local_addresses: ['10.0.0.2', 'fd00::2'] }
+    api.getNodeList.mockResolvedValue(list([node]))
+    api.updateNode.mockResolvedValue(response(node))
+    const view = open()
+    await flushPromises()
+    await click(view, '配置')
+    const form = editForm(view, settingsTitle)
+    expect(form.text()).not.toContain('补充 IP')
+    await click(form, '添加映射')
+    const [first] = mappingRows(form)
+    const select = listenSelect(first)
+    expect(select.props('placeholder')).toBe('选择节点 IP')
+    expect(select.props('allowCreate')).toBe(false)
+    expect(document.activeElement).toBe(select.get('[role="combobox"]').element)
+    expect(listenOptions(first).map(option => option.props('value'))).toEqual(node.local_addresses)
+    await listenOptions(first)[0].trigger('click')
+    expect(select.props('modelValue')).toBe('10.0.0.2')
+    const connectIP = first.get('[placeholder="例如 203.0.113.20"]')
+    await click(dialog(view, settingsTitle), '保存更改')
     await vi.waitFor(() => {
       expect(form.text()).toContain('请输入对外连接 IP')
       expect(document.activeElement).toBe(connectIP.element)
     })
-    expect(api.createNode).not.toHaveBeenCalled()
+    expect(api.updateNode).not.toHaveBeenCalled()
 
-    await connectIP.setValue(' 203.0.113.20 ')
-    await click(dialog(view, '添加节点'), '添加节点')
-    expect(api.createNode).toHaveBeenCalledExactlyOnceWith({
-      name: newNode.name, remark: '', traffic_limit_bytes: 0, traffic_reset_period: 'none',
-      address_mappings: [{ listen_ip: '10.0.0.2', connect_ip: '203.0.113.20' }]
+    await click(form, '添加映射')
+    const second = mappingRows(form)[1]
+    expect(listenOptions(second).map(option => [option.props('value'), option.props('disabled')])).toEqual([
+      ['10.0.0.2', true], ['fd00::2', false]
+    ])
+    await listenOptions(second)[0].trigger('click')
+    expect(listenSelect(second).props('modelValue')).toBe('')
+    await listenOptions(second)[1].trigger('click')
+    expect(button(form, '添加映射').element.disabled).toBe(true)
+    await first.get('[placeholder="例如 203.0.113.20"]').setValue(' 203.0.113.20 ')
+    await second.get('[placeholder="例如 203.0.113.20"]').setValue('2001:db8::20')
+    await click(dialog(view, settingsTitle), '保存更改')
+    expect(api.updateNode).toHaveBeenCalledExactlyOnceWith(primary.id, {
+      name: primary.name, remark: primary.remark,
+      address_mappings: [
+        { listen_ip: '10.0.0.2', connect_ip: '203.0.113.20' },
+        { listen_ip: 'fd00::2', connect_ip: '2001:db8::20' }
+      ]
     })
   })
 
-  it('shows saved IP mappings, omits them when unchanged and sends an empty array when removed', async () => {
+  it.each([
+    [{ addresses: ['192.0.2.7', '2001:db8::8'] }, ['192.0.2.7', '2001:db8::8']],
+    [{ local_addresses: null, addresses: [] }, ['192.0.2.7', '2001:db8::7']],
+    [{ local_addresses: [], addresses: ['192.0.2.7', '2001:db8::8'] }, []]
+  ])('uses reported IPs as a fallback only for a missing local snapshot (%j)', async (report, expected) => {
+    api.getNodeList.mockResolvedValue(list([{ ...primary, ...report }]))
+    const view = open()
+    await flushPromises()
+    await click(view, '配置')
+    const form = editForm(view, settingsTitle)
+    expect(button(form, '添加映射').element.disabled).toBe(expected.length === 0)
+    if (expected.length) {
+      await click(form, '添加映射')
+      expect(listenOptions(mappingRows(form)[0]).map(option => option.props('value'))).toEqual(expected)
+    }
+  })
+
+  it('preserves mappings for a disappeared interface and can remove all saved mappings', async () => {
     const address_mappings = [
       { listen_ip: '10.0.0.2', connect_ip: '203.0.113.20' },
       { listen_ip: 'fd00::2', connect_ip: '2001:db8::20' }
     ]
-    const mapped = { ...primary, address_mappings }
+    const mapped = { ...primary, address_mappings, local_addresses: ['fd00::2'] }
     api.getNodeList.mockResolvedValue(list([mapped]))
     api.getNode.mockResolvedValue(response(mapped))
     api.updateNode.mockResolvedValue(response(mapped))
     const view = open()
     await flushPromises()
     await openDetail(view)
-    expect(view.text()).toContain('fd00::2 → 2001:db8::20')
+    const overview = view.get('.detail-overview')
+    expect(overview.text()).toContain('本机 IP')
+    expect(overview.text()).toContain('fd00::2 → 2001:db8::20')
+    expect(overview.text()).not.toContain('补充 IP')
+    expect(overview.text()).not.toContain(primary.manual_addresses[0])
     await click(view, '配置')
     const form = editForm(view, settingsTitle)
-    expect(form.findAll('.node-address-mapping')).toHaveLength(2)
-    expect(form.findAll('[placeholder="例如 10.0.0.2"]').map(input => input.element.value)).toEqual(['10.0.0.2', 'fd00::2'])
+    const [first, second] = mappingRows(form)
+    expect([first, second].map(row => listenSelect(row).props('modelValue'))).toEqual(['10.0.0.2', 'fd00::2'])
+    expect(listenOptions(first).some(option => option.props('value') === '10.0.0.2')).toBe(true)
+    expect(listenOptions(second).some(option => option.props('value') === '10.0.0.2')).toBe(false)
     await click(dialog(view, settingsTitle), '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, remark: primary.remark })
 
     await click(view, '配置')
     const reopened = editForm(view, settingsTitle)
     await reopened.get('[aria-label="移除第 1 组映射"]').trigger('click')
-    expect(reopened.get('[placeholder="例如 10.0.0.2"]').element.value).toBe('fd00::2')
+    expect(listenSelect(mappingRows(reopened)[0]).props('modelValue')).toBe('fd00::2')
     await reopened.get('[aria-label="移除第 1 组映射"]').trigger('click')
     await click(dialog(view, settingsTitle), '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, remark: primary.remark, address_mappings: [] })
-  })
-
-  it('creates a node with supplementary IPs entered on separate lines', async () => {
-    api.createNode.mockResolvedValue(response(newNode))
-    const view = open()
-    await flushPromises()
-    await click(view, '添加节点')
-    const form = editForm(view, '添加节点')
-    await form.get('[placeholder="例如 华东入口"]').setValue(newNode.name)
-    const field = form.get('#node-manual-addresses')
-    expect(field.attributes('aria-describedby')).toBe('node-manual-addresses-help')
-    expect(form.get('#node-manual-addresses-help').text()).toContain('不替代自动获取的主要 IP')
-    await field.setValue(' 198.51.100.90 \n\n 2001:db8:1::9 \n')
-    await click(dialog(view, '添加节点'), '添加节点')
-    expect(api.createNode).toHaveBeenCalledWith({
-      name: newNode.name, remark: '', traffic_limit_bytes: 0, traffic_reset_period: 'none',
-      manual_addresses: ['198.51.100.90', '2001:db8:1::9']
-    })
-    expect(api.issueNodeRegistrationToken).toHaveBeenCalledWith(newNode.id)
-  })
-
-  it('retains invalid supplementary IP input after server validation, then saves and clears it', async () => {
-    const view = open()
-    await flushPromises()
-    await click(view, '配置')
-    const form = editForm(view, settingsTitle)
-    expect(form.get('#node-manual-addresses').element.value).toBe(primary.manual_addresses.join('\n'))
-    const logger = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const message = '补充 IP 必须是有效的 IPv4 或 IPv6 地址'
-    api.updateNode.mockRejectedValueOnce({ response: { data: { message } } })
-    await form.get('#node-manual-addresses').setValue('198.51.100.70:3333')
-    await click(dialog(view, settingsTitle), '保存更改')
-    expect(form.get('[role="alert"]').text()).toBe(message)
-    expect(form.get('#node-manual-addresses').element.value).toBe('198.51.100.70:3333')
-    expect(logger).toHaveBeenCalledOnce()
-
-    const updated = { ...primary, manual_addresses: ['198.51.100.71', '2001:db8:1::8'] }
-    api.updateNode.mockResolvedValue(response(updated))
-    api.getNodeList.mockResolvedValue(list([updated]))
-    await form.get('#node-manual-addresses').setValue(' 198.51.100.71 \n\n2001:db8:1::8\n')
-    await click(dialog(view, settingsTitle), '保存更改')
-    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
-      name: primary.name, remark: primary.remark, manual_addresses: updated.manual_addresses
-    })
-    await click(view, '配置')
-    const updatedForm = editForm(view, settingsTitle)
-    expect(updatedForm.get('#node-manual-addresses').element.value).toBe(updated.manual_addresses.join('\n'))
-    expect(updatedForm.find('[role="alert"]').exists()).toBe(false)
-    await updatedForm.get('#node-manual-addresses').setValue(' \n ')
-    await click(dialog(view, settingsTitle), '保存更改')
-    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
-      name: primary.name, remark: primary.remark, manual_addresses: []
-    })
   })
 
   it('hides installation in both views and closes an open dialog once the node is online', async () => {
@@ -682,7 +691,7 @@ describe('node actions', () => {
     expect(overview.find('time').exists()).toBe(false)
     const addresses = Object.fromEntries(overview.findAll('dt').map(term => [term.text(), term.element.nextElementSibling.textContent]))
     expect(addresses).toEqual({
-      '节点 IP': primary.address, IPv4: primary.ipv4, IPv6: primary.ipv6, '补充 IP': primary.manual_addresses.join(' · ')
+      '节点 IP': primary.address, IPv4: primary.ipv4, IPv6: primary.ipv6
     })
     expect(view.get('[aria-labelledby="node-traffic-title"]').text()).toContain('流量统计与配额')
     expect(overview.find('[aria-labelledby="node-traffic-title"]').exists()).toBe(false)

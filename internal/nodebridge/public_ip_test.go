@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-func TestPublicAddressesIncludesPublicInterfacesAndNAT(t *testing.T) {
+func TestCollectNodeIPsSeparatesLocalInterfacesFromPublicIP(t *testing.T) {
 	var interfaces []net.Addr
 	for _, address := range []string{"198.51.100.1/24", "198.51.100.2/24", "2001:db8::1/64", "10.0.0.1/8", "fc00::1/64", "fe80::1/64", "127.0.0.1/8"} {
 		ip, network, err := net.ParseCIDR(address)
@@ -28,13 +28,56 @@ func TestPublicAddressesIncludesPublicInterfacesAndNAT(t *testing.T) {
 		interfaces = append(interfaces, network)
 	}
 	const egress = "203.0.113.1"
-	v4, v6, addresses := publicAddresses(egress, "", interfaces)
-	if v4 != egress || v6 != "2001:db8::1" || !slices.Equal(addresses, []string{"198.51.100.1", "198.51.100.2", "2001:db8::1", egress}) {
-		t.Fatalf("primary addresses %q %q; all addresses %v", v4, v6, addresses)
+	report := collectNodeIPs(egress, "", interfaces)
+	if report.ipv4 != egress || report.ipv6 != "2001:db8::1" ||
+		!slices.Equal(report.public, []string{"198.51.100.1", "198.51.100.2", "2001:db8::1", egress}) ||
+		!slices.Equal(report.local, []string{"10.0.0.1", "198.51.100.1", "198.51.100.2", "2001:db8::1", "fc00::1"}) {
+		t.Fatalf("IP snapshot = %+v", report)
 	}
 }
 
 func TestReportPublicIPChanges(t *testing.T) {
+	const ipv4, ipv6, newIPv4 = "198.51.100.1", "2001:db8::1", "198.51.100.2"
+	snapshots := []nodeIPSnapshot{
+		{ipv4: ipv4, ipv6: ipv6}, {ipv4: ipv4, ipv6: ipv6}, {ipv4: ipv4, ipv6: ipv6},
+		{}, {ipv4: newIPv4}, {ipv4: newIPv4, ipv6: ipv6},
+		{ipv4: ipv4, ipv6: ipv6}, {ipv4: newIPv4, ipv6: ipv6}, {ipv4: newIPv4, ipv6: ipv6},
+	}
+	want := [][2]string{{ipv4, ipv6}, {ipv4, ipv6}, {newIPv4, ""}, {ipv4, ipv6}, {newIPv4, ipv6}}
+	var got [][2]string
+	for _, request := range runIPReports(t, snapshots) {
+		if request.GetLocalIpSnapshot() != nil {
+			t.Fatalf("no local snapshot was detected, but received %+v", request.GetLocalIpSnapshot())
+		}
+		got = append(got, [2]string{request.GetIpv4(), request.GetIpv6()})
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("reported addresses = %v, want %v", got, want)
+	}
+}
+
+func TestReportLocalIPChangesWithoutPublicAddresses(t *testing.T) {
+	first, next, empty := []string{"10.0.0.2"}, []string{"fd00::2"}, []string{}
+	snapshots := []nodeIPSnapshot{
+		{local: first}, {local: first}, {local: first}, {},
+		{local: next}, {local: empty}, {local: empty}, {local: empty},
+	}
+	var got [][]string
+	for _, request := range runIPReports(t, snapshots) {
+		snapshot := request.GetLocalIpSnapshot()
+		if snapshot == nil || request.GetIpv4() != "" || request.GetIpv6() != "" || len(request.GetAddresses()) != 0 {
+			t.Fatalf("local-only report = %+v", request)
+		}
+		got = append(got, snapshot.GetAddresses())
+	}
+	want := [][]string{first, first, next, empty, empty}
+	if !slices.EqualFunc(got, want, slices.Equal[[]string]) {
+		t.Fatalf("local reports = %v, want %v", got, want)
+	}
+}
+
+func runIPReports(t *testing.T, snapshots []nodeIPSnapshot) []*nodegrpc.NodeIPsRequest {
+	t.Helper()
 	reports := &ipReportRecorder{requests: make(chan *nodegrpc.NodeIPsRequest, 8)}
 	panel := httptest.NewTLSServer(reports)
 	t.Cleanup(panel.Close)
@@ -54,26 +97,21 @@ func TestReportPublicIPChanges(t *testing.T) {
 	session := nodegrpc.NewSession(stream, nodegrpc.NewDispatcher(nodegrpc.UnimplementedV1Server{}))
 	go func() { _ = session.Run() }()
 
-	const ipv4, ipv6, newIPv4 = "198.51.100.1", "2001:db8::1", "198.51.100.2"
-	addresses := [][2]string{
-		{ipv4, ipv6}, {ipv4, ipv6}, {ipv4, ipv6},
-		{}, {newIPv4, ""}, {newIPv4, ipv6},
-		{ipv4, ipv6}, {newIPv4, ipv6}, {newIPv4, ipv6},
-		{}, // The last tick waits for the preceding check to finish.
-	}
+	// The last tick waits for the preceding check to finish.
+	snapshots = append(snapshots, nodeIPSnapshot{})
 	ticks := make(chan time.Time)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		next := 0
-		reportPublicIPChanges(ctx, 42, nodegrpc.NewV1Client(session), func(context.Context) (string, string, []string) {
-			address := addresses[next]
+		reportIPChanges(ctx, 42, nodegrpc.NewV1Client(session), func(context.Context) nodeIPSnapshot {
+			snapshot := snapshots[next]
 			next++
-			return address[0], address[1], nil
+			return snapshot
 		}, ticks)
 	}()
 
-	for range addresses[1:] {
+	for range snapshots[1:] {
 		select {
 		case ticks <- time.Now():
 		case <-ctx.Done():
@@ -82,18 +120,15 @@ func TestReportPublicIPChanges(t *testing.T) {
 	}
 	cancel()
 	<-done
-	want := [][2]string{{ipv4, ipv6}, {ipv4, ipv6}, {newIPv4, ""}, {ipv4, ipv6}, {newIPv4, ipv6}}
-	var got [][2]string
+	var got []*nodegrpc.NodeIPsRequest
 	for len(reports.requests) > 0 {
 		request := <-reports.requests
 		if request.GetNodeId() != 42 {
 			t.Fatalf("reported node ID = %d, want 42", request.GetNodeId())
 		}
-		got = append(got, [2]string{request.GetIpv4(), request.GetIpv6()})
+		got = append(got, request)
 	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("reported addresses = %v, want %v", got, want)
-	}
+	return got
 }
 
 type ipReportRecorder struct {

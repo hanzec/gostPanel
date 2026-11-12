@@ -30,12 +30,8 @@ func (r *NodeRepository) Create(node *model.GostNode) error {
 }
 
 // Update 更新节点元数据，不覆盖并发完成的注册或健康检查。
-func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string, manualAddresses []string, addressMappings []model.NodeAddressMapping) error {
+func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string, addressMappings []model.NodeAddressMapping) error {
 	fields := []string{"Name", "Remark"}
-	if manualAddresses != nil {
-		node.ManualAddresses = manualAddresses
-		fields = append(fields, "ManualAddresses")
-	}
 	if addressMappings != nil {
 		node.AddressMappings = addressMappings
 		fields = append(fields, "AddressMappings")
@@ -100,6 +96,7 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 		values["ipv4"] = node.IPv4
 		values["ipv6"] = node.IPv6
 		values["addresses"] = nil
+		values["local_addresses"] = nil
 		values["session_generation"] = gorm.Expr("session_generation + 1")
 		result := tx.Model(&model.GostNode{}).
 			Where("id = ? AND registration_token_hash = ? AND registration_expires_at > ?", node.ID, hash, time.Now().UTC()).
@@ -115,7 +112,7 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 	})
 }
 
-func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses ...string) error {
+func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ipv4, ipv6 string, addresses, localAddresses []string) error {
 	// The session keeps its authenticated generation, but the addresses can change while it is connected.
 	query := r.DB.WithContext(ctx).Model(&model.GostNode{}).
 		Where("id = ? AND session_generation = ?", node.ID, node.SessionGeneration)
@@ -153,6 +150,13 @@ func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ip
 			return err
 		}
 		updates["addresses"] = string(encoded)
+	}
+	if localAddresses != nil {
+		encoded, err := json.Marshal(localAddresses)
+		if err != nil {
+			return err
+		}
+		updates["local_addresses"] = string(encoded)
 	}
 	if len(updates) == 0 {
 		return nil

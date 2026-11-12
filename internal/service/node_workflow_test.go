@@ -58,7 +58,7 @@ func TestNodeEnrollmentAndDeletion(t *testing.T) {
 	}
 	_, err = credentials.Enroll(ctx, node.ID, token.Token, "192.0.2.99", "")
 	requireServiceError(t, err, gorm.ErrRecordNotFound)
-	requireServiceError(t, s.UpdateIPs(ctx, registered, "192.0.2.8", ""), nil)
+	requireServiceError(t, s.UpdateIPs(ctx, registered, "192.0.2.8", "", nil, nil), nil)
 	results, count, err := s.List(&dto.NodeListReq{Status: "offline", Keyword: "192.0.2.8"})
 	requireServiceError(t, err, nil)
 	if count != 1 || len(results) != 1 || results[0].ID != node.ID ||

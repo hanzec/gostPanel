@@ -1267,13 +1267,14 @@ func (x *RefreshNodeRequest) GetRequestId() string {
 }
 
 type NodeIPsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Ipv4          string                 `protobuf:"bytes,2,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
-	Ipv6          string                 `protobuf:"bytes,3,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
-	Addresses     []string               `protobuf:"bytes,4,rep,name=addresses,proto3" json:"addresses,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	NodeId          uint64                 `protobuf:"varint,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Ipv4            string                 `protobuf:"bytes,2,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	Ipv6            string                 `protobuf:"bytes,3,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	Addresses       []string               `protobuf:"bytes,4,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	LocalIpSnapshot *LocalIPSnapshot       `protobuf:"bytes,5,opt,name=local_ip_snapshot,json=localIpSnapshot,proto3" json:"local_ip_snapshot,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *NodeIPsRequest) Reset() {
@@ -1334,6 +1335,58 @@ func (x *NodeIPsRequest) GetAddresses() []string {
 	return nil
 }
 
+func (x *NodeIPsRequest) GetLocalIpSnapshot() *LocalIPSnapshot {
+	if x != nil {
+		return x.LocalIpSnapshot
+	}
+	return nil
+}
+
+// A present snapshot replaces the prior local addresses, including when empty.
+type LocalIPSnapshot struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Addresses     []string               `protobuf:"bytes,1,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LocalIPSnapshot) Reset() {
+	*x = LocalIPSnapshot{}
+	mi := &file_node_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LocalIPSnapshot) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LocalIPSnapshot) ProtoMessage() {}
+
+func (x *LocalIPSnapshot) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LocalIPSnapshot.ProtoReflect.Descriptor instead.
+func (*LocalIPSnapshot) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *LocalIPSnapshot) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
+}
+
 type StreamFrame struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The sender allocates an ID for each call. Its reply repeats that ID.
@@ -1350,7 +1403,7 @@ type StreamFrame struct {
 
 func (x *StreamFrame) Reset() {
 	*x = StreamFrame{}
-	mi := &file_node_proto_msgTypes[21]
+	mi := &file_node_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +1415,7 @@ func (x *StreamFrame) String() string {
 func (*StreamFrame) ProtoMessage() {}
 
 func (x *StreamFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[21]
+	mi := &file_node_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,7 +1428,7 @@ func (x *StreamFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamFrame.ProtoReflect.Descriptor instead.
 func (*StreamFrame) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{21}
+	return file_node_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *StreamFrame) GetId() uint64 {
@@ -1435,7 +1488,7 @@ type TransparentRedirectRequest struct {
 
 func (x *TransparentRedirectRequest) Reset() {
 	*x = TransparentRedirectRequest{}
-	mi := &file_node_proto_msgTypes[22]
+	mi := &file_node_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1447,7 +1500,7 @@ func (x *TransparentRedirectRequest) String() string {
 func (*TransparentRedirectRequest) ProtoMessage() {}
 
 func (x *TransparentRedirectRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[22]
+	mi := &file_node_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1460,7 +1513,7 @@ func (x *TransparentRedirectRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransparentRedirectRequest.ProtoReflect.Descriptor instead.
 func (*TransparentRedirectRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{22}
+	return file_node_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *TransparentRedirectRequest) GetAction() TransparentRedirectAction {
@@ -1523,7 +1576,7 @@ type TransparentRedirectReply struct {
 
 func (x *TransparentRedirectReply) Reset() {
 	*x = TransparentRedirectReply{}
-	mi := &file_node_proto_msgTypes[23]
+	mi := &file_node_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1535,7 +1588,7 @@ func (x *TransparentRedirectReply) String() string {
 func (*TransparentRedirectReply) ProtoMessage() {}
 
 func (x *TransparentRedirectReply) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[23]
+	mi := &file_node_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1548,7 +1601,7 @@ func (x *TransparentRedirectReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransparentRedirectReply.ProtoReflect.Descriptor instead.
 func (*TransparentRedirectReply) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{23}
+	return file_node_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *TransparentRedirectReply) GetMark() uint32 {
@@ -1668,12 +1721,15 @@ const file_node_proto_rawDesc = "" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12#\n" +
 	"\rrefresh_token\x18\x02 \x01(\tR\frefreshToken\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x03 \x01(\tR\trequestId\"o\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\"\xba\x01\n" +
 	"\x0eNodeIPsRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\x04R\x06nodeId\x12\x12\n" +
 	"\x04ipv4\x18\x02 \x01(\tR\x04ipv4\x12\x12\n" +
 	"\x04ipv6\x18\x03 \x01(\tR\x04ipv6\x12\x1c\n" +
-	"\taddresses\x18\x04 \x03(\tR\taddresses\"\xa0\x01\n" +
+	"\taddresses\x18\x04 \x03(\tR\taddresses\x12I\n" +
+	"\x11local_ip_snapshot\x18\x05 \x01(\v2\x1d.yagp.node.v1.LocalIPSnapshotR\x0flocalIpSnapshot\"/\n" +
+	"\x0fLocalIPSnapshot\x12\x1c\n" +
+	"\taddresses\x18\x01 \x03(\tR\taddresses\"\xa0\x01\n" +
 	"\vStreamFrame\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x16\n" +
 	"\x06method\x18\x02 \x01(\tR\x06method\x12\x18\n" +
@@ -1713,7 +1769,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_node_proto_goTypes = []any{
 	(TransparentRedirectAction)(0),     // 0: yagp.node.v1.TransparentRedirectAction
 	(*CommandRequest)(nil),             // 1: yagp.node.v1.CommandRequest
@@ -1737,21 +1793,23 @@ var file_node_proto_goTypes = []any{
 	(*NodeCredentials)(nil),            // 19: yagp.node.v1.NodeCredentials
 	(*RefreshNodeRequest)(nil),         // 20: yagp.node.v1.RefreshNodeRequest
 	(*NodeIPsRequest)(nil),             // 21: yagp.node.v1.NodeIPsRequest
-	(*StreamFrame)(nil),                // 22: yagp.node.v1.StreamFrame
-	(*TransparentRedirectRequest)(nil), // 23: yagp.node.v1.TransparentRedirectRequest
-	(*TransparentRedirectReply)(nil),   // 24: yagp.node.v1.TransparentRedirectReply
-	(*proto.ObserveRequest)(nil),       // 25: proto.ObserveRequest
+	(*LocalIPSnapshot)(nil),            // 22: yagp.node.v1.LocalIPSnapshot
+	(*StreamFrame)(nil),                // 23: yagp.node.v1.StreamFrame
+	(*TransparentRedirectRequest)(nil), // 24: yagp.node.v1.TransparentRedirectRequest
+	(*TransparentRedirectReply)(nil),   // 25: yagp.node.v1.TransparentRedirectReply
+	(*proto.ObserveRequest)(nil),       // 26: proto.ObserveRequest
 }
 var file_node_proto_depIdxs = []int32{
 	8,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
-	25, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	26, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	19, // 2: yagp.node.v1.RegisterNodeReply.credentials:type_name -> yagp.node.v1.NodeCredentials
-	0,  // 3: yagp.node.v1.TransparentRedirectRequest.action:type_name -> yagp.node.v1.TransparentRedirectAction
-	4,  // [4:4] is the sub-list for method output_type
-	4,  // [4:4] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	22, // 3: yagp.node.v1.NodeIPsRequest.local_ip_snapshot:type_name -> yagp.node.v1.LocalIPSnapshot
+	0,  // 4: yagp.node.v1.TransparentRedirectRequest.action:type_name -> yagp.node.v1.TransparentRedirectAction
+	5,  // [5:5] is the sub-list for method output_type
+	5,  // [5:5] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -1766,7 +1824,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -50,10 +50,13 @@ type GostNode struct {
 	Region    string     `gorm:"-" json:"region"`
 	Addresses []string   `gorm:"serializer:json;type:text" json:"addresses,omitempty"`
 
+	// Nil means the daemon has not reported its local interfaces.
+	LocalAddresses []string `gorm:"serializer:json;type:text" json:"local_addresses"`
+
 	GostVersion          string     `gorm:"size:64;not null;default:''" json:"gost_version"`
 	GostVersionCheckedAt *time.Time `json:"-"`
 
-	// Supplemental addresses do not replace the detected primary address or identify local listeners.
+	// Existing supplemental addresses remain available to Gost source allowlists.
 	ManualAddresses []string             `gorm:"serializer:json;type:text" json:"manual_addresses,omitempty"`
 	AddressMappings []NodeAddressMapping `gorm:"serializer:json;type:text" json:"address_mappings,omitempty"`
 

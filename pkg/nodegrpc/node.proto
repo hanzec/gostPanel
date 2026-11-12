@@ -136,6 +136,12 @@ message NodeIPsRequest {
   string ipv4 = 2;
   string ipv6 = 3;
   repeated string addresses = 4;
+  LocalIPSnapshot local_ip_snapshot = 5;
+}
+
+// A present snapshot replaces the prior local addresses, including when empty.
+message LocalIPSnapshot {
+  repeated string addresses = 1;
 }
 
 message StreamFrame {

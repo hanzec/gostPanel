@@ -24,11 +24,11 @@
           <dt>{{ item.label }}</dt>
           <dd class="ops-mono">{{ item.value }}</dd>
         </div>
-        <div v-if="node.manual_addresses?.length" class="detail-manual-addresses">
-          <dt>补充 IP</dt>
-          <dd class="ops-mono">{{ node.manual_addresses.join(' · ') }}</dd>
+        <div v-if="node.local_addresses?.length" class="detail-address-list">
+          <dt>本机 IP</dt>
+          <dd class="ops-mono">{{ node.local_addresses.join(' · ') }}</dd>
         </div>
-        <div v-if="node.address_mappings?.length" class="detail-manual-addresses">
+        <div v-if="node.address_mappings?.length" class="detail-address-list">
           <dt>本机监听 IP → 对外连接 IP</dt>
           <dd v-for="mapping in node.address_mappings" :key="mapping.listen_ip" class="ops-mono">
             {{ mapping.listen_ip }} → {{ mapping.connect_ip }}
@@ -96,7 +96,7 @@ const endpoints = computed(() => [
   gap: var(--ops-section-gap);
 }
 .detail-cards > .ops-panel { display: grid; align-content: start; gap: var(--ops-section-gap); }
-.detail-manual-addresses { grid-column: 1 / -1; }
+.detail-address-list { grid-column: 1 / -1; }
 .detail-traffic { display: grid; min-width: 0; gap: var(--ops-section-gap); }
 .detail-traffic h2 {
   display: flex;

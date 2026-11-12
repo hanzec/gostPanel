@@ -156,7 +156,7 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatalf("registration failed to return node credentials: %v", err)
 	}
 	node.Remark = "updated metadata"
-	if err := repository.NewNodeRepository(f.db).Update(&node, nil, nil, nil, nil); err != nil {
+	if err := repository.NewNodeRepository(f.db).Update(&node, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	assertRejected(token, http.StatusUnauthorized)
@@ -327,6 +327,47 @@ func TestNodeSessionReportsMultipleAddresses(t *testing.T) {
 	report.Addresses = []string{"fe80::1%eth0"}
 	if _, err := session.UpdateNodeIPs(ctx, report); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("invalid additional address was accepted: %v", err)
+	}
+}
+
+func TestNodeSessionReportsLocalIPSnapshot(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	const egress = "198.51.100.9"
+	node := model.GostNode{Name: "IX relay", Address: egress, IPv4: egress}
+	if err := f.db.Create(&node).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	session := startTestReportStream(t, ctx, startTestReportServer(t, f.db), node, nil)
+	report := &nodegrpc.NodeIPsRequest{NodeId: uint64(node.ID)}
+	report.LocalIpSnapshot = &nodegrpc.LocalIPSnapshot{Addresses: []string{"fd00:0000::1", "::ffff:10.0.0.9", "10.0.0.9"}}
+	wantLocal := []string{"10.0.0.9", "fd00::1"}
+	for _, step := range []struct {
+		ipv4     string
+		snapshot *nodegrpc.LocalIPSnapshot
+		code     codes.Code
+		want     []string
+	}{
+		{snapshot: report.LocalIpSnapshot, want: wantLocal},
+		{ipv4: egress, want: wantLocal},
+		{snapshot: &nodegrpc.LocalIPSnapshot{Addresses: []string{"fe80::1%eth0"}}, code: codes.InvalidArgument, want: wantLocal},
+		{snapshot: &nodegrpc.LocalIPSnapshot{}, want: []string{}},
+	} {
+		report.Ipv4, report.LocalIpSnapshot = step.ipv4, step.snapshot
+		if _, err := session.UpdateNodeIPs(ctx, report); status.Code(err) != step.code {
+			t.Fatalf("local IP report %+v: %v, want %s", report, err, step.code)
+		}
+		var stored model.GostNode
+		if err := f.db.First(&stored, node.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if stored.LocalAddresses == nil || !slices.Equal(stored.LocalAddresses, step.want) {
+			t.Fatalf("stored local addresses = %#v, want %#v", stored.LocalAddresses, step.want)
+		}
+		if stored.Address != egress || stored.IPv4 != egress || len(stored.Addresses) != 0 {
+			t.Fatalf("local IP report changed public addresses: %q, %q, %v", stored.Address, stored.IPv4, stored.Addresses)
+		}
 	}
 }
 

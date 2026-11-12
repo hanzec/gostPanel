@@ -43,6 +43,7 @@ var (
 	ErrNodeOffline                 = New(10006, "节点已离线", http.StatusBadRequest)
 	ErrNodeTrafficQuotaUnavailable = New(10007, "节点流量配额未能生效，请检查 yagp-daemon 和 nftables", http.StatusServiceUnavailable)
 	ErrNodeOnline                  = New(10008, "节点已在线，无法重新安装", http.StatusConflict)
+	ErrNodeMappingListenIP         = New(10009, "本机监听 IP 必须从节点已上报的 IP 中选择", http.StatusBadRequest)
 )
 
 // ==================== 规则相关错误 (101xx) ====================
