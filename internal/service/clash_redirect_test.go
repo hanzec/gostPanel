@@ -138,7 +138,7 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 	nextHost := "198.51.100.22"
 	base := entryRemote.chain(tunnel.ChainID)
 	NewRuleSyncService(db).syncTunnels(utils.GetGostClient(&entry), entry.ID, []model.GostTunnel{*tunnel},
-		[]gost.ChainConfig{base, clash}, map[uint]string{exit.ID: nextHost})
+		[]gost.ChainConfig{base, clash}, map[uint]*model.GostNode{exit.ID: {Address: nextHost}})
 	active, _, lastRelayHost = entryRemote.redirectStatus()
 	address, _ := entryRemote.chain(clash.Name).TunnelRelayAddress()
 	if !active || lastRelayHost != nextHost || address != nextHost+":10952" {
@@ -290,7 +290,7 @@ func TestClashEntranceUsesSeparateChainAndFollowsExit(t *testing.T) {
 	base := entryRemote.chain(tunnel.ChainID)
 	clash := entryRemote.chain(service.Handler.Chain)
 	NewRuleSyncService(db).syncTunnels(utils.GetGostClient(&entry), entry.ID, []model.GostTunnel{*tunnel},
-		[]gost.ChainConfig{base, clash}, map[uint]string{exit.ID: "198.51.100.20"})
+		[]gost.ChainConfig{base, clash}, map[uint]*model.GostNode{exit.ID: {Address: "198.51.100.20"}})
 	for _, name := range []string{base.Name, clash.Name} {
 		addr, found := entryRemote.chain(name).TunnelRelayAddress()
 		if !found || addr != "198.51.100.20:8443" {

@@ -344,10 +344,11 @@ const submitError = ref('')
 const deleting = ref(false)
 const formRef = ref(null)
 const daemonUpgradePanel = ref(null)
-const form = reactive({ name: '', remark: '', manualAddresses: '', trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const form = reactive({ name: '', remark: '', manualAddresses: '', addressMappings: [], trafficLimitGiB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
 let originalManualAddresses = []
+let originalAddressMappings = []
 const originalTrafficLimitGiB = computed(() => {
   const bytes = originalTrafficLimitBytes.value
   return bytes > 0 ? (bytes / GIB).toFixed(10).replace(/\.?0+$/, '') : ''
@@ -592,11 +593,13 @@ const openDialog = (row = null) => {
   originalTrafficLimitBytes.value = row?.traffic_limit_bytes ?? 0
   originalTrafficResetPeriod = row?.traffic_reset_period || 'none'
   originalManualAddresses = row?.manual_addresses || []
+  originalAddressMappings = row?.address_mappings || []
   submitError.value = ''
   Object.assign(form, {
     name: row?.name ?? '',
     remark: row?.remark || '',
     manualAddresses: originalManualAddresses.join('\n'),
+    addressMappings: originalAddressMappings.map(mapping => ({ ...mapping, key: Symbol() })),
     trafficLimitGiB: originalTrafficLimitGiB.value,
     trafficResetPeriod: originalTrafficResetPeriod
   })
@@ -617,6 +620,11 @@ const handleSubmit = async () => {
     if (manualAddresses.length !== originalManualAddresses.length ||
       manualAddresses.some((value, index) => value !== originalManualAddresses[index])) {
       node.manual_addresses = manualAddresses
+    }
+    const addressMappings = form.addressMappings.map(({ listen_ip, connect_ip }) => ({ listen_ip, connect_ip }))
+    if (addressMappings.length !== originalAddressMappings.length || addressMappings.some((mapping, index) =>
+      mapping.listen_ip !== originalAddressMappings[index].listen_ip || mapping.connect_ip !== originalAddressMappings[index].connect_ip)) {
+      node.address_mappings = addressMappings
     }
     if (!isEdit.value || trafficLimitBytes.value !== originalTrafficLimitBytes.value) {
       node.traffic_limit_bytes = trafficLimitBytes.value

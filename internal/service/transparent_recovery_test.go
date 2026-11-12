@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"yagp/internal/dto"
 	bizerrors "yagp/internal/errors"
 	"yagp/internal/model"
+	"yagp/internal/repository"
 	"yagp/internal/utils"
 	"yagp/pkg/gost"
 
@@ -194,6 +196,59 @@ func TestTransparentTunnelRollsBackFailedRuntimeTransactions(t *testing.T) {
 	}
 }
 
+func TestEndpointTunnelDialsMappedIPAndRetainsLocalBind(t *testing.T) {
+	f := newTransparentTestTunnel(t)
+	const listenIP = "10.20.30.40"
+	const firstConnectIP = "203.0.113.8"
+	const nextConnectIP = "2001:db8::8"
+	f.destination.ListenIP = listenIP
+	requireServiceError(t, f.db.Model(&f.destination).Update("listen_ip", listenIP).Error, nil)
+	f.exit.AddressMappings = []model.NodeAddressMapping{
+		{ListenIP: "10.20.30.41", ConnectIP: "203.0.113.7"},
+		{ListenIP: listenIP, ConnectIP: firstConnectIP},
+	}
+	requireServiceError(t, f.db.Model(&f.exit).Select("AddressMappings").Updates(&f.exit).Error, nil)
+	requireServiceError(t, f.start(), nil)
+	tunnel, err := f.service.GetByID(f.tunnel.ID)
+	requireServiceError(t, err, nil)
+	sync := NewRuleSyncService(f.db)
+	client := utils.GetGostClient(&f.entry)
+	chainNames := []string{tunnel.ChainID, clashTunnelChainName(tunnel.ID)}
+	checkHost := func(want string) {
+		t.Helper()
+		if got := f.exitNode.service(tunnel.ServiceID).Addr; got != listenIP+":18443" {
+			t.Fatalf("relay listener = %q, want %s:18443", got, listenIP)
+		}
+		for _, name := range chainNames {
+			address, ok := f.entryNode.chain(name).TunnelRelayAddress()
+			if !ok || address != net.JoinHostPort(want, "18443") {
+				t.Errorf("chain %s relay address = %q, want host %q at port 18443", name, address, want)
+			}
+		}
+		active, _, redirectHost := f.entryNode.redirectStatus()
+		if !active || redirectHost != want {
+			t.Errorf("redirect active = %t, host = %q, want active with host %q", active, redirectHost, want)
+		}
+	}
+	checkHost(firstConnectIP)
+
+	for _, step := range []struct {
+		mappings []model.NodeAddressMapping
+		want     string
+	}{
+		{[]model.NodeAddressMapping{{ListenIP: listenIP, ConnectIP: nextConnectIP}}, nextConnectIP},
+		{[]model.NodeAddressMapping{}, listenIP},
+	} {
+		f.exit.AddressMappings = step.mappings
+		requireServiceError(t, f.db.Model(&f.exit).Select("AddressMappings").Updates(&f.exit).Error, nil)
+		exit, err := repository.NewNodeRepository(f.db).FindByID(f.exit.ID)
+		requireServiceError(t, err, nil)
+		sync.syncTunnels(client, f.entry.ID, []model.GostTunnel{*tunnel},
+			[]gost.ChainConfig{f.entryNode.chain(chainNames[0]), f.entryNode.chain(chainNames[1])}, map[uint]*model.GostNode{exit.ID: exit})
+		checkHost(step.want)
+	}
+}
+
 func TestTransparentRelaySyncWaitsForRedirectUpdate(t *testing.T) {
 	f := newTransparentTestTunnel(t)
 	requireServiceError(t, f.start(), nil)
@@ -205,7 +260,7 @@ func TestTransparentRelaySyncWaitsForRedirectUpdate(t *testing.T) {
 	const nextHost = "198.51.100.22"
 	retarget := func(host string) {
 		sync.syncTunnels(client, f.entry.ID, []model.GostTunnel{*tunnel},
-			[]gost.ChainConfig{f.entryNode.chain(tunnel.ChainID), f.entryNode.chain(chain)}, map[uint]string{f.exit.ID: host})
+			[]gost.ChainConfig{f.entryNode.chain(tunnel.ChainID), f.entryNode.chain(chain)}, map[uint]*model.GostNode{f.exit.ID: {Address: host}})
 	}
 	checkHost := func(want string) {
 		t.Helper()

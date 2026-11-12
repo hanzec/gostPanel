@@ -85,18 +85,18 @@ func (s *RuleSyncService) syncAll() {
 		return
 	}
 
-	exitAddresses := make(map[uint]string, len(nodes))
-	for _, node := range nodes {
-		exitAddresses[node.ID] = node.Address
+	exitNodes := make(map[uint]*model.GostNode, len(nodes))
+	for i := range nodes {
+		exitNodes[nodes[i].ID] = &nodes[i]
 	}
 	for _, node := range nodes {
 		// 并发同步每个节点
-		go s.syncNodeRules(node, exitAddresses)
+		go s.syncNodeRules(node, exitNodes)
 	}
 }
 
 // syncNodeRules 同步单个节点的规则
-func (s *RuleSyncService) syncNodeRules(node model.GostNode, exitAddresses map[uint]string) {
+func (s *RuleSyncService) syncNodeRules(node model.GostNode, exitNodes map[uint]*model.GostNode) {
 	// 如果节点离线，跳过规则同步
 	if node.Status == model.NodeStatusOffline {
 		return
@@ -149,7 +149,7 @@ func (s *RuleSyncService) syncNodeRules(node model.GostNode, exitAddresses map[u
 	if changed {
 		s.unsavedTunnelConfig.Store(node.ID, struct{}{})
 	}
-	s.syncTunnels(client, node.ID, tunnels, gostCfg.Chains, exitAddresses)
+	s.syncTunnels(client, node.ID, tunnels, gostCfg.Chains, exitNodes)
 }
 
 func (s *RuleSyncService) getNodeConfig(client *gost.Client, node model.GostNode) (*gost.GostConfig, error) {
@@ -175,7 +175,7 @@ func (s *RuleSyncService) getNodeConfig(client *gost.Client, node model.GostNode
 	return current, nil
 }
 
-func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels []model.GostTunnel, chains []gost.ChainConfig, exitAddresses map[uint]string) {
+func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels []model.GostTunnel, chains []gost.ChainConfig, exitNodes map[uint]*model.GostNode) {
 	chainsByName := make(map[string]gost.ChainConfig, len(chains))
 	for _, chain := range chains {
 		chainsByName[chain.Name] = chain
@@ -200,7 +200,7 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 		if !exists || chainName != managedName {
 			continue
 		}
-		exitHost := relayHost(&t, exitAddresses[t.ExitNodeID])
+		exitHost := relayHost(t.ExitRule, exitNodes[t.ExitNodeID])
 		clashChain := clashTunnelChainName(t.ID)
 		for _, name := range []string{chainName, clashChain} {
 			addr, ok := chainsByName[name].TunnelRelayAddress()

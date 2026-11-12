@@ -100,7 +100,10 @@
               </td>
               <td role="cell" data-label="监听">
                 <span class="rule-protocol ops-mono">{{ (row.protocol || 'tcp').toUpperCase() }}</span>
-                <span class="ops-mono">{{ listenEndpoint(row.listen_ip, row.listen_port) }}</span>
+                <span class="ops-mono">{{ formatEndpoint(row.listen_ip, row.listen_port) }}</span>
+                <span v-if="connectEndpoints[row.id]" class="rule-secondary">
+                  对外连接 <span class="ops-mono">{{ connectEndpoints[row.id] }}</span>
+                </span>
                 <span v-if="listenerChecks.has(row.id) && row.status !== 'running'" class="rule-secondary" role="status">
                   {{ listenerChecks.get(row.id).label }}
                 </span>
@@ -222,7 +225,10 @@
             <el-form-item label="监听端口" prop="listen_port">
               <el-input-number v-model="form.listen_port" :min="1" :max="65535" :step-strictly="true" placeholder="填写端口" controls-position="right" aria-describedby="rule-listen-endpoint" />
               <p v-if="form.listen_port" id="rule-listen-endpoint" class="rule-form-hint ops-muted">
-                监听地址 <span class="ops-mono">{{ listenEndpoint(form.listen_ip, form.listen_port) }}</span>
+                监听地址 <span class="ops-mono">{{ formatEndpoint(form.listen_ip, form.listen_port) }}</span>
+                <span v-if="selectedConnectEndpoint" class="rule-connect-endpoint">
+                  对外连接 <span class="ops-mono">{{ selectedConnectEndpoint }}</span>
+                </span>
               </p>
             </el-form-item>
           </div>
@@ -294,6 +300,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { ElMessage } from 'element-plus'
 import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
+import { formatEndpoint, mappedConnectEndpoint } from '@/utils/node-address-mapping'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, Plus, Remove, Right, Search, Switch, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
@@ -304,6 +311,9 @@ const nodeList = ref([])
 const nodeOptionsLoading = ref(false)
 const nodeOptionsError = ref(false)
 const ruleList = ref([])
+const connectEndpoints = computed(() => Object.fromEntries(ruleList.value.map(rule => [
+  rule.id, mappedConnectEndpoint(rule.node, rule.listen_ip, rule.listen_port)
+])))
 const loading = ref(false)
 const listError = ref(false)
 const page = ref(1)
@@ -354,14 +364,18 @@ const form = reactive({
 })
 
 const canUseClashRuleset = computed(() => form.protocol === 'tcp' && form.listen_ip === '127.0.0.1')
-const listenEndpoint = (ip, port) => (ip?.includes(':') ? '[' + ip + ']' : ip || '*') + ':' + port
+const selectedNode = computed(() => nodeList.value.find(item => item.id === form.node_id))
+const selectedConnectEndpoint = computed(() => mappedConnectEndpoint(selectedNode.value, form.listen_ip, form.listen_port))
 const listenAddressOptions = computed(() => {
-  const entry = nodeList.value.find(item => item.id === form.node_id)
+  const entry = selectedNode.value
   const options = new Map([
     ['', '所有接口'],
     ['127.0.0.1', 'IPv4 回环 · 127.0.0.1'],
     ['::1', 'IPv6 回环 · ::1']
   ])
+  for (const { listen_ip, connect_ip } of entry?.address_mappings || []) {
+    options.set(listen_ip, `本机 ${listen_ip} · 对外 ${connect_ip}`)
+  }
   for (const ip of [entry?.ipv4, entry?.ipv6]) {
     if (ip && !options.has(ip)) options.set(ip, '入口探测地址 · ' + ip)
   }
@@ -806,6 +820,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   line-height: 1.45;
   font-size: var(--ops-text-xs);
 }
+
+.rule-connect-endpoint { display: block; overflow-wrap: anywhere; }
 
 .rule-form-link { color: var(--ops-accent); }
 
