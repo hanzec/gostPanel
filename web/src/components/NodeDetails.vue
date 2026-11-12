@@ -17,19 +17,19 @@
 
   <div class="detail-cards">
     <section class="ops-panel ops-panel-body detail-overview" aria-labelledby="node-network-title">
-      <h2 class="ops-section-title" id="node-network-title"><el-icon aria-hidden="true"><Connection /></el-icon>IP 信息</h2>
-      <div class="detail-network">
-        <dl class="detail-endpoints">
-          <div v-for="item in endpoints" :key="item.label">
-            <dt>{{ item.label }}</dt>
-            <dd class="ops-mono">{{ item.value }}</dd>
-          </div>
-        </dl>
-        <dl class="detail-check">
-          <dt>最近检查</dt>
-          <dd><time v-if="node.last_check_at" :datetime="node.last_check_at" class="ops-mono">{{ formatTime(node.last_check_at) }}</time><span v-else>待检查</span></dd>
-        </dl>
-      </div>
+      <header class="ops-panel-header">
+        <h2 class="ops-section-title" id="node-network-title"><el-icon aria-hidden="true"><Connection /></el-icon>IP 信息</h2>
+      </header>
+      <dl class="ops-panel-details">
+        <div v-for="item in endpoints" :key="item.label">
+          <dt>{{ item.label }}</dt>
+          <dd class="ops-mono">{{ item.value }}</dd>
+        </div>
+        <div v-if="node.manual_addresses?.length" class="detail-manual-addresses">
+          <dt>补充 IP</dt>
+          <dd class="ops-mono">{{ node.manual_addresses.join(' · ') }}</dd>
+        </div>
+      </dl>
     </section>
     <NodeGostService :key="node.id" :node="node" class="ops-panel ops-panel-body" />
   </div>
@@ -50,7 +50,7 @@ import { computed } from 'vue'
 import { Connection, Download, PieChart, Setting } from '@element-plus/icons-vue'
 import NodeGostService from '@/components/NodeGostService.vue'
 import NodeRegionFlag from '@/components/NodeRegionFlag.vue'
-import { formatNodeTrafficUsage, formatTime, nodeIPs, nodeStates } from '@/utils/node-display'
+import { formatNodeTrafficUsage, nodeIPs, nodeStates } from '@/utils/node-display'
 
 const props = defineProps({ node: { type: Object, required: true } })
 defineEmits(['action'])
@@ -58,8 +58,7 @@ defineEmits(['action'])
 const endpoints = computed(() => [
   { label: '节点 IP', value: props.node.address || '待获取地址' },
   { label: 'IPv4', value: nodeIPs(props.node, 4).join(' · ') || '未上报' },
-  { label: 'IPv6', value: nodeIPs(props.node, 6).join(' · ') || '不支持' },
-  ...(props.node.manual_addresses?.length ? [{ label: '补充 IP', value: props.node.manual_addresses.join(' · ') }] : [])
+  { label: 'IPv6', value: nodeIPs(props.node, 6).join(' · ') || '不支持' }
 ])
 </script>
 
@@ -91,32 +90,20 @@ const endpoints = computed(() => [
   font-size: var(--ops-text-xs);
 }
 .detail-buttons .el-button { min-height: 44px; margin: 0; }
-.detail-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--ops-section-gap); }
-.detail-overview { display: grid; min-width: 0; gap: var(--ops-section-gap); }
-.detail-network, .detail-traffic { display: grid; min-width: 0; gap: var(--ops-section-gap); }
-.detail-overview h2, .detail-traffic h2, .detail-upgrade h2 {
+.detail-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  gap: var(--ops-section-gap);
+}
+.detail-cards > .ops-panel { display: grid; align-content: start; gap: var(--ops-section-gap); }
+.detail-manual-addresses { grid-column: 1 / -1; }
+.detail-traffic { display: grid; min-width: 0; gap: var(--ops-section-gap); }
+.detail-traffic h2, .detail-upgrade h2 {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.detail-overview h2 .el-icon, .detail-traffic h2 .el-icon, .detail-upgrade h2 .el-icon { color: var(--ops-accent); }
-.detail-network dl { margin: 0; min-width: 0; }
-.detail-network dt { color: var(--ops-muted); font-size: var(--ops-text-sm); }
-.detail-network dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
-.detail-endpoints { display: grid; gap: 6px; }
-.detail-endpoints > div, .detail-check {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-.detail-endpoints > div {
-  padding-block: 8px;
-  border-bottom: 1px solid var(--ops-border);
-}
-.detail-endpoints dt, .detail-check dt { flex: none; }
-.detail-endpoints dd, .detail-check dd { text-align: end; }
-.detail-check { padding-top: 4px; }
+.detail-traffic h2 .el-icon, .detail-upgrade h2 .el-icon { color: var(--ops-accent); }
 .detail-upgrade {
   display: flex;
   align-items: center;
@@ -126,7 +113,6 @@ const endpoints = computed(() => [
 }
 
 @media (max-width: 1100px) {
-  .detail-cards { grid-template-columns: minmax(0, 1fr); }
   .detail-upgrade .el-button { min-height: 44px; }
 }
 </style>

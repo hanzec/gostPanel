@@ -1,6 +1,6 @@
 <template>
-  <section id="node-gost-service" class="gost-service" aria-labelledby="node-gost-title">
-    <header class="gost-service-header">
+  <section id="node-gost-service" aria-labelledby="node-gost-title">
+    <header class="ops-panel-header">
       <div class="gost-title">
         <h2 class="ops-section-title" id="node-gost-title" tabindex="-1"><el-icon aria-hidden="true"><Monitor /></el-icon>Gost 服务</h2>
         <span v-if="service && !statusError" class="ops-status" :class="'is-' + statusTone">{{ statusLabel }}</span>
@@ -20,7 +20,7 @@
 
     <div class="gost-status" :aria-busy="statusLoading || restarting">
       <p v-if="statusError" class="gost-error" role="alert">{{ statusError }}</p>
-      <dl v-else-if="service" class="gost-service-info">
+      <dl v-else-if="service" class="ops-panel-details">
         <div><dt>服务单元</dt><dd class="ops-mono">{{ service.unit || '未知' }}</dd></div>
         <div><dt>加载状态</dt><dd class="ops-mono">{{ service.load_state || '未知' }}</dd></div>
         <div><dt>子状态</dt><dd class="ops-mono">{{ service.sub_state || '未知' }}</dd></div>
@@ -147,33 +147,15 @@ watch(() => props.node.status, (status) => {
 </script>
 
 <style scoped>
-.gost-service {
-  display: grid;
-  gap: var(--ops-section-gap);
-  min-width: 0;
-}
-
-.gost-service-header, .gost-title, .gost-actions {
+.gost-title, .gost-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.gost-title h2 { display: flex; align-items: center; gap: 8px; }
-.gost-title h2 .el-icon { color: var(--ops-accent); }
-.gost-service-header { justify-content: space-between; gap: 12px; }
-
 .gost-actions .el-button { min-height: 44px; margin: 0; }
 .gost-status { display: grid; gap: 8px; min-width: 0; }
-.gost-service-info {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-}
-.gost-service-info dt { color: var(--ops-muted); font-size: var(--ops-text-sm); }
-.gost-service-info dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .gost-error { color: var(--ops-danger); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .gost-log-section { min-width: 0; border-top: 1px solid var(--ops-border); }
@@ -210,8 +192,4 @@ watch(() => props.node.status, (status) => {
 .gost-logs li + li { border-top: 1px solid var(--ops-border); }
 .gost-log-meta { font-size: var(--ops-text-xs); }
 .gost-log-message { font-size: var(--ops-text-sm); margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
-
-@media (max-width: 760px) {
-  .gost-service-info { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 </style>

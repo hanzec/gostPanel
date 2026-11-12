@@ -615,9 +615,8 @@ describe('node actions', () => {
     expect(overview.get('h2').text()).toBe('IP 信息')
     expect(overview.findAll('h2')).toHaveLength(1)
     expect(service.get('h2').text()).toBe('Gost 服务')
-    expect(overview.get('.detail-network').text()).toContain(primary.ipv4)
-    expect(overview.get('.detail-network').text()).toContain(primary.ipv6)
-    const addresses = Object.fromEntries(overview.findAll('.detail-endpoints > div').map(item => [item.get('dt').text(), item.get('dd').text()]))
+    expect(overview.find('time').exists()).toBe(false)
+    const addresses = Object.fromEntries(overview.findAll('dt').map(term => [term.text(), term.element.nextElementSibling.textContent]))
     expect(addresses).toEqual({
       '节点 IP': primary.address, IPv4: primary.ipv4, IPv6: primary.ipv6, '补充 IP': primary.manual_addresses.join(' · ')
     })
