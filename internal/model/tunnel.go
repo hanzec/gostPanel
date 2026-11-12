@@ -37,7 +37,11 @@ type GostTunnel struct {
 	RelayPort   int          `gorm:"default:8443" json:"relay_port"`      // 出口节点 Relay 服务端口
 	Status      TunnelStatus `gorm:"size:20;default:stopped" json:"status"`
 
-	AllowlistNodeIDs []uint `gorm:"type:text;serializer:json" json:"allowlist_node_ids"`
+	AllowlistNodeIDs []uint   `gorm:"type:text;serializer:json" json:"allowlist_node_ids"`
+	Targets          []string `gorm:"type:text;serializer:json" json:"targets"`
+	UseClashRuleset  bool     `gorm:"default:false" json:"use_clash_ruleset"`
+	// An empty strategy identifies older tunnels whose targets still belong to the source rule.
+	Strategy string `gorm:"size:20" json:"strategy"`
 
 	// Gost 服务相关 ID（启动时创建）
 	ServiceID    string       `gorm:"size:100" json:"service_id"` // 出口节点 Relay 服务 ID

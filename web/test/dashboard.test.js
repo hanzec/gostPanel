@@ -79,9 +79,11 @@ describe('Dashboard overview', () => {
 
     expect(page.get('[aria-label="资源概况"]').attributes('aria-busy')).toBe('false')
     expect(page.findAll('.kpi-value').map((item) => item.text())).toEqual(['2,500', '2', '0'])
+    expect(page.findAll('.kpi-header h2').map((item) => item.text())).toEqual(['节点', '端点', '隧道'])
     expect(page.findAll('.kpi-card .distribution-fill').map((item) => item.element.style.width)).toEqual(['50%', '100%', '0%'])
     expect(page.get('.distribution-list').text()).toContain('暂无资源')
-    expect(page.get('.distribution-types').text()).toContain('端口转发 1')
+    expect(page.get('.distribution-types').text()).toContain('节点端点 1')
+    expect(page.get('.distribution-types').text()).toContain('端点构成')
     expect(page.get('.runtime-list').text()).toContain('1.0.0')
     expect(page.get('.runtime-list').text()).toContain('SQLite')
     expect(Date.parse(page.get('.runtime-list time').attributes('datetime'))).not.toBeNaN()
@@ -131,6 +133,7 @@ describe('Dashboard overview', () => {
     expect(page.get('.runtime-list').text()).toContain('MySQL')
     expect(page.get('.runtime-list').text()).toContain('2.0.0')
     expect(page.get('.overview-empty').text()).toContain('暂无操作记录')
+    expect(page.get('.overview-empty').text()).toContain('节点、端点、隧道的管理活动')
     expect(page.find('[role="alert"]').exists()).toBe(false)
   })
 

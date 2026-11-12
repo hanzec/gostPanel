@@ -31,6 +31,9 @@ func (s *TunnelService) createEndpointTunnel(req *dto.CreateTunnelReq, nodeIDs [
 	if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
 		return nil, err
 	}
+	if err := setTunnelTargets(tunnel, req.Targets, req.UseClashRuleset, req.Strategy); err != nil {
+		return nil, err
+	}
 	if err := endpointNodesOnline(tunnel); err != nil {
 		return nil, err
 	}
@@ -54,14 +57,14 @@ func (s *TunnelService) setTunnelEndpoints(tunnel *model.GostTunnel, entryID, ex
 	}
 	rules := repository.NewRuleRepository(s.tunnelRepo.DB)
 	entry, err := rules.FindByID(entryID)
-	if stderrors.Is(err, gorm.ErrRecordNotFound) || (err == nil && (entry.Type != model.RuleTypeForward || entry.Node == nil || (!entry.UseClashRuleset && len(entry.Targets) == 0))) {
+	if stderrors.Is(err, gorm.ErrRecordNotFound) || (err == nil && (entry.Type != model.RuleTypeForward || entry.Node == nil)) {
 		return errors.ErrTunnelEntryInvalid
 	}
 	if err != nil {
 		return err
 	}
 	exit, err := rules.FindByID(exitID)
-	if stderrors.Is(err, gorm.ErrRecordNotFound) || (err == nil && (exit.Type != model.RuleTypeForward || exit.Node == nil || exit.UseClashRuleset || len(exit.Targets) != 0 || !relayBindReachable(exit.ListenIP))) {
+	if stderrors.Is(err, gorm.ErrRecordNotFound) || (err == nil && (exit.Type != model.RuleTypeForward || exit.Node == nil || !relayBindReachable(exit.ListenIP))) {
 		return errors.ErrTunnelExitInvalid
 	}
 	if err != nil {
@@ -90,6 +93,38 @@ func (s *TunnelService) setTunnelEndpoints(tunnel *model.GostTunnel, entryID, ex
 	return nil
 }
 
+func setTunnelTargets(t *model.GostTunnel, targets []string, useClash bool, strategy string) error {
+	if targets != nil || useClash || strategy != "" {
+		t.Targets, t.UseClashRuleset, t.Strategy = targets, useClash, strategy
+	} else if t.Strategy == "" {
+		t.Targets, t.UseClashRuleset, t.Strategy = t.EntryRule.Targets, t.EntryRule.UseClashRuleset, t.EntryRule.Strategy
+	}
+	if t.Strategy == "" {
+		t.Strategy = "round"
+	}
+	return validateTunnelTargets(t)
+}
+
+func validateTunnelTargets(t *model.GostTunnel) error {
+	source := endpointTargetRule(t)
+	if err := validateClashTarget(source.UseClashRuleset, source.Protocol, source.ListenIP, source.Targets); err != nil {
+		return err
+	}
+	if !source.UseClashRuleset && len(source.Targets) == 0 {
+		return errors.ErrTunnelTargetRequired
+	}
+	return nil
+}
+
+// Overlay tunnel targets for provisioning without changing the reusable endpoint.
+func endpointTargetRule(t *model.GostTunnel) model.GostRule {
+	rule := *t.EntryRule
+	if t.Strategy != "" {
+		rule.Targets, rule.UseClashRuleset, rule.Strategy = t.Targets, t.UseClashRuleset, t.Strategy
+	}
+	return rule
+}
+
 func relayBindReachable(ip string) bool {
 	if ip == "" {
 		return true
@@ -111,6 +146,9 @@ func endpointNodesOnline(t *model.GostTunnel) error {
 func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 	if t.EntryRule == nil || t.ExitRule == nil {
 		return errors.ErrTunnelEndpointsRequired
+	}
+	if err := validateTunnelTargets(t); err != nil {
+		return err
 	}
 	if err := endpointNodesOnline(t); err != nil {
 		return err
@@ -142,7 +180,7 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 }
 
 func prepareEndpointRedirect(t *model.GostTunnel, entryClient *gost.Client, host string) (*nodegrpc.TransparentRedirectRequest, error) {
-	if !t.EntryRule.UseClashRuleset {
+	if !endpointTargetRule(t).UseClashRuleset {
 		return nil, nil
 	}
 	redirect := transparentRedirectRequest(t.EntryRule, host)
@@ -161,7 +199,10 @@ func (s *TunnelService) provisionEndpointTunnel(t *model.GostTunnel, entryClient
 	}
 	rules := NewRuleService(s.tunnelRepo.DB)
 	mark := redirect.GetMark()
-	if err := rules.provisionSelectedEntrance(entryClient, t.EntryRule, t.EntryNode, t, nil, mark); err != nil {
+	source := endpointTargetRule(t)
+	err := rules.provisionSelectedEntrance(entryClient, &source, t.EntryNode, t, nil, mark)
+	t.EntryRule.ServiceID = source.ServiceID
+	if err != nil {
 		return err
 	}
 	if redirect.GetDockerAddress() != "" {
@@ -266,7 +307,8 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 		return err
 	}
 	entryClient, exitClient := utils.GetGostClient(t.EntryNode), utils.GetGostClient(t.ExitNode)
-	if save && t.EntryRule.UseClashRuleset {
+	useClash := endpointTargetRule(t).UseClashRuleset
+	if save && useClash {
 		request := &nodegrpc.TransparentRedirectRequest{
 			Action: nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE,
 			Owner:  entranceServiceName(t.EntryRule.ID),
@@ -284,7 +326,7 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 	if err := entryClient.DeleteService(serviceName); err != nil {
 		return err
 	}
-	if t.EntryRule.UseClashRuleset {
+	if useClash {
 		if err := entryClient.DeleteService(dockerEntranceServiceName(t.EntryRule.ID)); err != nil {
 			return err
 		}

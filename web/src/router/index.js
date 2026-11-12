@@ -24,7 +24,7 @@ const routes = [
                 path: 'rules',
                 name: 'Rules',
                 component: () => import('@/views/Rules.vue'),
-                meta: { title: '入口管理', icon: 'Switch' }
+                meta: { title: '端点管理', icon: 'Switch' }
             },
             {
                 path: 'tunnels',

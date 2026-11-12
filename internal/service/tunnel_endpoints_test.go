@@ -41,7 +41,7 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 		err                 error
 	}{
 		{source.ID, source.ID, bizerrors.ErrTunnelEndpointsRequired},
-		{destination.ID, source.ID, bizerrors.ErrTunnelEntryInvalid},
+		{destination.ID, source.ID, bizerrors.ErrTunnelTargetRequired},
 		{source.ID, loopback.ID, bizerrors.ErrTunnelExitInvalid},
 		{source.ID, local.ID, bizerrors.ErrTunnelNodeSame},
 	} {

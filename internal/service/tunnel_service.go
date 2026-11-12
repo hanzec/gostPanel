@@ -138,6 +138,9 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 		if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
 			return nil, err
 		}
+		if err := setTunnelTargets(tunnel, req.Targets, req.UseClashRuleset, req.Strategy); err != nil {
+			return nil, err
+		}
 	} else {
 		tunnel.Protocol = req.Protocol
 		tunnel.RelayPort = req.RelayPort

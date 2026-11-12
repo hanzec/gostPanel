@@ -34,11 +34,12 @@ func TestManualDaemonUpgradeValidatesStateAndSkipsReleaseLookup(t *testing.T) {
 	s := NewNodeUpgradeService(db)
 	s.panelVersion = "0.1.90-abcdef0"
 	ctx := context.Background()
+	missingID := node.ID + 1
 
-	_, err := s.Get(ctx, 99)
+	_, err := s.Get(ctx, missingID)
 	requireServiceError(t, err, bizerrors.ErrNodeNotFound)
-	requireServiceError(t, s.SetPolicy(ctx, 99, false), bizerrors.ErrNodeNotFound)
-	_, err = s.Upgrade(ctx, 99, "daemon")
+	requireServiceError(t, s.SetPolicy(ctx, missingID, false), bizerrors.ErrNodeNotFound)
+	_, err = s.Upgrade(ctx, missingID, "daemon")
 	requireServiceError(t, err, bizerrors.ErrNodeNotFound)
 	_, err = s.Upgrade(ctx, node.ID, "unknown")
 	requireUpgradeCode(t, err, codes.InvalidArgument)

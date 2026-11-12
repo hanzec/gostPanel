@@ -116,9 +116,9 @@
           </div>
         </dl>
         <div class="distribution-types">
-          <span>规则构成</span>
-          <span>端口转发 <b class="ops-mono">{{ formatCount(stats.rules.forward_type) }}</b></span>
-          <span>隧道转发 <b class="ops-mono">{{ formatCount(stats.rules.tunnel_type) }}</b></span>
+          <span>端点构成</span>
+          <span>节点端点 <b class="ops-mono">{{ formatCount(stats.rules.forward_type) }}</b></span>
+          <span>旧版隧道端点 <b class="ops-mono">{{ formatCount(stats.rules.tunnel_type) }}</b></span>
         </div>
       </section>
 
@@ -168,7 +168,7 @@
       <div v-else-if="!logsError" class="overview-activity-state overview-empty">
         <el-icon aria-hidden="true"><Document /></el-icon>
         <strong>暂无操作记录</strong>
-        <span>节点、规则、隧道的管理活动和自动升级事件会显示在这里。</span>
+        <span>节点、端点、隧道的管理活动和自动升级事件会显示在这里。</span>
       </div>
     </section>
   </div>
@@ -244,7 +244,7 @@ const groups = computed(() => [
     activeLabel: '在线', inactiveLabel: '离线'
   },
   {
-    name: '规则', eyebrow: 'FORWARDING RULES', icon: Switch, total: stats.value?.rules.total,
+    name: '端点', eyebrow: 'ENDPOINTS', icon: Switch, total: stats.value?.rules.total,
     active: stats.value?.rules.running, inactive: stats.value?.rules.stopped,
     activeLabel: '运行', inactiveLabel: '未运行'
   },

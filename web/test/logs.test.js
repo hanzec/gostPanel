@@ -1,4 +1,5 @@
 import { flushPromises } from '@vue/test-utils'
+import { ElOption } from 'element-plus'
 import { describe, expect, it, vi } from 'vitest'
 import Logs from '@/views/Logs.vue'
 import { getLogList } from '@/api/log'
@@ -13,7 +14,7 @@ const auditRecords = [
     action: 'delete', resource_type: 'node', resource_id: 7,
     user_agent: 'Fixture browser', details: 'Removed a decommissioned node'
   },
-  { id: 8, username: 'alice', action: 'update', resource_type: 'node', resource_id: 7 },
+  { id: 8, username: 'alice', action: 'update', resource_type: 'rule', resource_id: 7 },
   { id: 6, username: 'bob', action: 'custom', resource_type: 'other' },
   { id: 5 }
 ]
@@ -29,11 +30,15 @@ describe('audit logs', () => {
 
     response.resolve(result(auditRecords, 15))
     await flushPromises()
-    expect(wrapper.findAll('.metric-strip-value').map(item => item.text())).toEqual(['15', '2', '1', '1'])
+    expect(wrapper.findAll('.metric-strip-value').map(item => item.text())).toEqual(['15', '2', '2', '1'])
     expect(wrapper.get('time').attributes('datetime')).toBe(createdAt)
     expect(wrapper.get('time').text()).toBe(new Date(createdAt).toLocaleString('zh-CN', { hour12: false }))
     expect(wrapper.get('tbody').text()).toContain('custom')
     expect(wrapper.get('tbody').text()).toContain('other')
+    expect(wrapper.findAll('tbody tr')[1].get('[data-label="资源"]').text()).toContain('端点')
+    expect(select(wrapper, 'audit-resource').findAllComponents(ElOption).map(option => [option.props('label'), option.props('value')])).toEqual([
+      ['节点', 'node'], ['端点', 'rule'], ['隧道', 'tunnel']
+    ])
     expect(wrapper.findAll('tbody tr').at(-1).text()).toContain('—')
 
     await wrapper.get('[aria-label="查看操作记录 9"]').trigger('click')
@@ -92,11 +97,11 @@ describe('audit logs', () => {
     getLogList.mockResolvedValueOnce({ data: {} })
     await wrapper.get('#audit-user').setValue('  alice  ')
     await choose(select(wrapper, 'audit-action'), 'delete')
-    await choose(select(wrapper, 'audit-resource'), 'node')
+    await choose(select(wrapper, 'audit-resource'), 'rule')
     await wrapper.get('form[aria-label="日志筛选"]').trigger('submit')
     await flushPromises()
     expect(getLogList).toHaveBeenLastCalledWith({
-      page: 1, pageSize: 10, username: 'alice', action: 'delete', resource_type: 'node'
+      page: 1, pageSize: 10, username: 'alice', action: 'delete', resource_type: 'rule'
     })
     expect(wrapper.get('.audit-placeholder').text()).toContain('没有匹配的记录')
     getLogList.mockResolvedValueOnce(result())
