@@ -22,6 +22,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type TransparentRedirectAction int32
+
+const (
+	TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED TransparentRedirectAction = 0
+	TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_PREPARE     TransparentRedirectAction = 1
+	TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY       TransparentRedirectAction = 2
+	TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE      TransparentRedirectAction = 3
+)
+
+// Enum value maps for TransparentRedirectAction.
+var (
+	TransparentRedirectAction_name = map[int32]string{
+		0: "TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED",
+		1: "TRANSPARENT_REDIRECT_ACTION_PREPARE",
+		2: "TRANSPARENT_REDIRECT_ACTION_APPLY",
+		3: "TRANSPARENT_REDIRECT_ACTION_REMOVE",
+	}
+	TransparentRedirectAction_value = map[string]int32{
+		"TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED": 0,
+		"TRANSPARENT_REDIRECT_ACTION_PREPARE":     1,
+		"TRANSPARENT_REDIRECT_ACTION_APPLY":       2,
+		"TRANSPARENT_REDIRECT_ACTION_REMOVE":      3,
+	}
+)
+
+func (x TransparentRedirectAction) Enum() *TransparentRedirectAction {
+	p := new(TransparentRedirectAction)
+	*p = x
+	return p
+}
+
+func (x TransparentRedirectAction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TransparentRedirectAction) Descriptor() protoreflect.EnumDescriptor {
+	return file_node_proto_enumTypes[0].Descriptor()
+}
+
+func (TransparentRedirectAction) Type() protoreflect.EnumType {
+	return &file_node_proto_enumTypes[0]
+}
+
+func (x TransparentRedirectAction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TransparentRedirectAction.Descriptor instead.
+func (TransparentRedirectAction) EnumDescriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{0}
+}
+
 type CommandRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Method        string                 `protobuf:"bytes,1,opt,name=method,proto3" json:"method,omitempty"`
@@ -1368,6 +1420,158 @@ func (x *StreamFrame) GetTimeoutMillis() int64 {
 	return 0
 }
 
+type TransparentRedirectRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Action        TransparentRedirectAction `protobuf:"varint,1,opt,name=action,proto3,enum=yagp.node.v1.TransparentRedirectAction" json:"action,omitempty"`
+	Owner         string                    `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	Port          uint32                    `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	RelayHost     string                    `protobuf:"bytes,4,opt,name=relay_host,json=relayHost,proto3" json:"relay_host,omitempty"`
+	Mark          uint32                    `protobuf:"varint,5,opt,name=mark,proto3" json:"mark,omitempty"`
+	DockerAddress string                    `protobuf:"bytes,6,opt,name=docker_address,json=dockerAddress,proto3" json:"docker_address,omitempty"`
+	RequireActive bool                      `protobuf:"varint,7,opt,name=require_active,json=requireActive,proto3" json:"require_active,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransparentRedirectRequest) Reset() {
+	*x = TransparentRedirectRequest{}
+	mi := &file_node_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransparentRedirectRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransparentRedirectRequest) ProtoMessage() {}
+
+func (x *TransparentRedirectRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransparentRedirectRequest.ProtoReflect.Descriptor instead.
+func (*TransparentRedirectRequest) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *TransparentRedirectRequest) GetAction() TransparentRedirectAction {
+	if x != nil {
+		return x.Action
+	}
+	return TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED
+}
+
+func (x *TransparentRedirectRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *TransparentRedirectRequest) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *TransparentRedirectRequest) GetRelayHost() string {
+	if x != nil {
+		return x.RelayHost
+	}
+	return ""
+}
+
+func (x *TransparentRedirectRequest) GetMark() uint32 {
+	if x != nil {
+		return x.Mark
+	}
+	return 0
+}
+
+func (x *TransparentRedirectRequest) GetDockerAddress() string {
+	if x != nil {
+		return x.DockerAddress
+	}
+	return ""
+}
+
+func (x *TransparentRedirectRequest) GetRequireActive() bool {
+	if x != nil {
+		return x.RequireActive
+	}
+	return false
+}
+
+type TransparentRedirectReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mark          uint32                 `protobuf:"varint,1,opt,name=mark,proto3" json:"mark,omitempty"`
+	DockerAddress string                 `protobuf:"bytes,2,opt,name=docker_address,json=dockerAddress,proto3" json:"docker_address,omitempty"`
+	Active        bool                   `protobuf:"varint,3,opt,name=active,proto3" json:"active,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransparentRedirectReply) Reset() {
+	*x = TransparentRedirectReply{}
+	mi := &file_node_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransparentRedirectReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransparentRedirectReply) ProtoMessage() {}
+
+func (x *TransparentRedirectReply) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransparentRedirectReply.ProtoReflect.Descriptor instead.
+func (*TransparentRedirectReply) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *TransparentRedirectReply) GetMark() uint32 {
+	if x != nil {
+		return x.Mark
+	}
+	return 0
+}
+
+func (x *TransparentRedirectReply) GetDockerAddress() string {
+	if x != nil {
+		return x.DockerAddress
+	}
+	return ""
+}
+
+func (x *TransparentRedirectReply) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
@@ -1476,7 +1680,25 @@ const file_node_proto_rawDesc = "" +
 	"\apayload\x18\x03 \x01(\fR\apayload\x12\x12\n" +
 	"\x04code\x18\x04 \x01(\x05R\x04code\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12%\n" +
-	"\x0etimeout_millis\x18\x06 \x01(\x03R\rtimeoutMillisB\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
+	"\x0etimeout_millis\x18\x06 \x01(\x03R\rtimeoutMillis\"\x88\x02\n" +
+	"\x1aTransparentRedirectRequest\x12?\n" +
+	"\x06action\x18\x01 \x01(\x0e2'.yagp.node.v1.TransparentRedirectActionR\x06action\x12\x14\n" +
+	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x12\n" +
+	"\x04port\x18\x03 \x01(\rR\x04port\x12\x1d\n" +
+	"\n" +
+	"relay_host\x18\x04 \x01(\tR\trelayHost\x12\x12\n" +
+	"\x04mark\x18\x05 \x01(\rR\x04mark\x12%\n" +
+	"\x0edocker_address\x18\x06 \x01(\tR\rdockerAddress\x12%\n" +
+	"\x0erequire_active\x18\a \x01(\bR\rrequireActive\"m\n" +
+	"\x18TransparentRedirectReply\x12\x12\n" +
+	"\x04mark\x18\x01 \x01(\rR\x04mark\x12%\n" +
+	"\x0edocker_address\x18\x02 \x01(\tR\rdockerAddress\x12\x16\n" +
+	"\x06active\x18\x03 \x01(\bR\x06active*\xc0\x01\n" +
+	"\x19TransparentRedirectAction\x12+\n" +
+	"'TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED\x10\x00\x12'\n" +
+	"#TRANSPARENT_REDIRECT_ACTION_PREPARE\x10\x01\x12%\n" +
+	"!TRANSPARENT_REDIRECT_ACTION_APPLY\x10\x02\x12&\n" +
+	"\"TRANSPARENT_REDIRECT_ACTION_REMOVE\x10\x03B\x13Z\x11yagp/pkg/nodegrpcb\x06proto3"
 
 var (
 	file_node_proto_rawDescOnce sync.Once
@@ -1490,41 +1712,46 @@ func file_node_proto_rawDescGZIP() []byte {
 	return file_node_proto_rawDescData
 }
 
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
 var file_node_proto_goTypes = []any{
-	(*CommandRequest)(nil),       // 0: yagp.node.v1.CommandRequest
-	(*CommandReply)(nil),         // 1: yagp.node.v1.CommandReply
-	(*ListenerCheckRequest)(nil), // 2: yagp.node.v1.ListenerCheckRequest
-	(*ListenerCheckReply)(nil),   // 3: yagp.node.v1.ListenerCheckReply
-	(*ObserverEndpoint)(nil),     // 4: yagp.node.v1.ObserverEndpoint
-	(*GostServiceStatus)(nil),    // 5: yagp.node.v1.GostServiceStatus
-	(*GostLogsRequest)(nil),      // 6: yagp.node.v1.GostLogsRequest
-	(*GostLogEntry)(nil),         // 7: yagp.node.v1.GostLogEntry
-	(*GostLogsReply)(nil),        // 8: yagp.node.v1.GostLogsReply
-	(*NftConfig)(nil),            // 9: yagp.node.v1.NftConfig
-	(*NodeConfig)(nil),           // 10: yagp.node.v1.NodeConfig
-	(*TrafficQuotaRequest)(nil),  // 11: yagp.node.v1.TrafficQuotaRequest
-	(*TrafficQuotaReply)(nil),    // 12: yagp.node.v1.TrafficQuotaReply
-	(*NodeUpgradeRequest)(nil),   // 13: yagp.node.v1.NodeUpgradeRequest
-	(*NodeUpgradeStatus)(nil),    // 14: yagp.node.v1.NodeUpgradeStatus
-	(*ReportRequest)(nil),        // 15: yagp.node.v1.ReportRequest
-	(*RegisterNodeRequest)(nil),  // 16: yagp.node.v1.RegisterNodeRequest
-	(*RegisterNodeReply)(nil),    // 17: yagp.node.v1.RegisterNodeReply
-	(*NodeCredentials)(nil),      // 18: yagp.node.v1.NodeCredentials
-	(*RefreshNodeRequest)(nil),   // 19: yagp.node.v1.RefreshNodeRequest
-	(*NodeIPsRequest)(nil),       // 20: yagp.node.v1.NodeIPsRequest
-	(*StreamFrame)(nil),          // 21: yagp.node.v1.StreamFrame
-	(*proto.ObserveRequest)(nil), // 22: proto.ObserveRequest
+	(TransparentRedirectAction)(0),     // 0: yagp.node.v1.TransparentRedirectAction
+	(*CommandRequest)(nil),             // 1: yagp.node.v1.CommandRequest
+	(*CommandReply)(nil),               // 2: yagp.node.v1.CommandReply
+	(*ListenerCheckRequest)(nil),       // 3: yagp.node.v1.ListenerCheckRequest
+	(*ListenerCheckReply)(nil),         // 4: yagp.node.v1.ListenerCheckReply
+	(*ObserverEndpoint)(nil),           // 5: yagp.node.v1.ObserverEndpoint
+	(*GostServiceStatus)(nil),          // 6: yagp.node.v1.GostServiceStatus
+	(*GostLogsRequest)(nil),            // 7: yagp.node.v1.GostLogsRequest
+	(*GostLogEntry)(nil),               // 8: yagp.node.v1.GostLogEntry
+	(*GostLogsReply)(nil),              // 9: yagp.node.v1.GostLogsReply
+	(*NftConfig)(nil),                  // 10: yagp.node.v1.NftConfig
+	(*NodeConfig)(nil),                 // 11: yagp.node.v1.NodeConfig
+	(*TrafficQuotaRequest)(nil),        // 12: yagp.node.v1.TrafficQuotaRequest
+	(*TrafficQuotaReply)(nil),          // 13: yagp.node.v1.TrafficQuotaReply
+	(*NodeUpgradeRequest)(nil),         // 14: yagp.node.v1.NodeUpgradeRequest
+	(*NodeUpgradeStatus)(nil),          // 15: yagp.node.v1.NodeUpgradeStatus
+	(*ReportRequest)(nil),              // 16: yagp.node.v1.ReportRequest
+	(*RegisterNodeRequest)(nil),        // 17: yagp.node.v1.RegisterNodeRequest
+	(*RegisterNodeReply)(nil),          // 18: yagp.node.v1.RegisterNodeReply
+	(*NodeCredentials)(nil),            // 19: yagp.node.v1.NodeCredentials
+	(*RefreshNodeRequest)(nil),         // 20: yagp.node.v1.RefreshNodeRequest
+	(*NodeIPsRequest)(nil),             // 21: yagp.node.v1.NodeIPsRequest
+	(*StreamFrame)(nil),                // 22: yagp.node.v1.StreamFrame
+	(*TransparentRedirectRequest)(nil), // 23: yagp.node.v1.TransparentRedirectRequest
+	(*TransparentRedirectReply)(nil),   // 24: yagp.node.v1.TransparentRedirectReply
+	(*proto.ObserveRequest)(nil),       // 25: proto.ObserveRequest
 }
 var file_node_proto_depIdxs = []int32{
-	7,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
-	22, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
-	18, // 2: yagp.node.v1.RegisterNodeReply.credentials:type_name -> yagp.node.v1.NodeCredentials
-	3,  // [3:3] is the sub-list for method output_type
-	3,  // [3:3] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	8,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
+	25, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	19, // 2: yagp.node.v1.RegisterNodeReply.credentials:type_name -> yagp.node.v1.NodeCredentials
+	0,  // 3: yagp.node.v1.TransparentRedirectRequest.action:type_name -> yagp.node.v1.TransparentRedirectAction
+	4,  // [4:4] is the sub-list for method output_type
+	4,  // [4:4] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -1538,13 +1765,14 @@ func file_node_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   22,
+			NumEnums:      1,
+			NumMessages:   24,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_node_proto_goTypes,
 		DependencyIndexes: file_node_proto_depIdxs,
+		EnumInfos:         file_node_proto_enumTypes,
 		MessageInfos:      file_node_proto_msgTypes,
 	}.Build()
 	File_node_proto = out.File

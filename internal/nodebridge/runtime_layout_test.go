@@ -72,6 +72,10 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if err != nil || !strings.Contains(string(gost), "BindsTo=yagp-daemon.service\nAfter=yagp-daemon.service\nPartOf=yagp-daemon.service") {
 				t.Fatalf("Gost unit is missing the daemon lifecycle dependency: %v\n%s", err, gost)
 			}
+			daemon, err := os.ReadFile(filepath.Join(unitDir, cfg.runtimeUnit("daemon")))
+			if err != nil || !strings.Contains(string(daemon), "After=network.target nftables.service docker.service") {
+				t.Fatalf("daemon unit is missing network ordering: %v\n%s", err, daemon)
+			}
 			if err := migrateSystemdUnits(t.Context(), cfg, configPath, unitDir); err == nil {
 				t.Fatal("migration overwrote an installed fixed unit")
 			}
@@ -80,6 +84,53 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			}
 			if err := restartAndCheckUpgrade(t.Context(), cfg, cfg.runtimeUnit("daemon"), "daemon", ""); err != nil {
 				t.Fatalf("restart of the fixed daemon unit did not wait for both services: %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateSystemdNetworkOrder(t *testing.T) {
+	for _, state := range []string{"loaded", "not-found"} {
+		t.Run(state, func(t *testing.T) {
+			unitDir, nodeDir := t.TempDir(), t.TempDir()
+			configPath := filepath.Join(nodeDir, "node.yaml")
+			cfg := Config{NodeID: 42, RuntimeLayout: singleNodeLayoutVersion}
+			unit := filepath.Join(unitDir, cfg.runtimeUnit("daemon"))
+			logPath := filepath.Join(unitDir, "commands")
+			t.Setenv("PATH", unitDir)
+			t.Setenv("TEST_SYSTEMCTL_LOG", logPath)
+			t.Setenv("TEST_NFTABLES_STATE", state)
+			writeRuntimeTestFile(t, unit, "existing unit")
+			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
+printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
+if [ "$1" = "show" ]; then
+    printf '%s\n' "$TEST_NFTABLES_STATE"
+fi
+`)
+			writeRuntimeTestFile(t, filepath.Join(nodeDir, runtimeLayoutFile), "1\n")
+
+			if err := updateSystemdNetworkOrder(t.Context(), cfg, configPath, unitDir); err != nil {
+				t.Fatal(err)
+			}
+			if version := ReadRuntimeLayout(configPath); version != RuntimeLayoutVersion {
+				t.Fatalf("runtime layout version = %d", version)
+			}
+			order, err := os.ReadFile(filepath.Join(unit+".d", redirectOrderDropIn))
+			if err != nil || string(order) != "[Unit]\nAfter=nftables.service docker.service\n" {
+				t.Fatalf("network ordering = %q, %v", order, err)
+			}
+			current, err := os.ReadFile(unit)
+			if err != nil || string(current) != "existing unit" {
+				t.Fatalf("original unit was changed: %q, %v", current, err)
+			}
+			want := "show --property=LoadState --value nftables.service\n"
+			if state == "loaded" {
+				want += "enable nftables.service\n"
+			}
+			want += "daemon-reload\n"
+			log, err := os.ReadFile(logPath)
+			if err != nil || string(log) != want {
+				t.Fatalf("systemctl commands = %q, %v, want %q", log, err, want)
 			}
 		})
 	}

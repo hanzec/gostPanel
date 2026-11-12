@@ -74,6 +74,13 @@ func TestWebSocketWireRoundTrip(t *testing.T) {
 			empty, liveConfig),
 		exchange(V1_ApplyNftConfig_FullMethodName, V1Client.ApplyNftConfig,
 			config, config),
+		exchange(V1_ConfigureTransparentRedirect_FullMethodName, V1Client.ConfigureTransparentRedirect,
+			&TransparentRedirectRequest{
+				Action: TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY,
+				Owner:  "rule-42", Port: 12345, RelayHost: "192.0.2.42", Mark: 100, DockerAddress: "172.17.0.1",
+				RequireActive: true,
+			},
+			&TransparentRedirectReply{Mark: 100, DockerAddress: "172.17.0.1", Active: true}),
 		exchange(V1_SyncTrafficQuota_FullMethodName, V1Client.SyncTrafficQuota,
 			&TrafficQuotaRequest{LimitBytes: 1000, UsedBytes: 123, WindowStart: 456, TcpPorts: []uint32{80, 443}, UdpPorts: []uint32{53}},
 			&TrafficQuotaReply{UsedBytes: 200}),

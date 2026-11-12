@@ -19,3 +19,9 @@ func (c *Client) ApplyNftConfig(ctx context.Context, config string) (*nodegrpc.N
 		return client.ApplyNftConfig(ctx, &nodegrpc.NftConfig{Config: config})
 	})
 }
+
+func (c *Client) ConfigureTransparentRedirect(ctx context.Context, request *nodegrpc.TransparentRedirectRequest) (*nodegrpc.TransparentRedirectReply, error) {
+	return callNode(ctx, c, nodeMutationTimeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.TransparentRedirectReply, error) {
+		return client.ConfigureTransparentRedirect(ctx, request)
+	})
+}

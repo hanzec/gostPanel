@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Run in the disposable Linux CI container with /run/systemd/system present.
 test_dir=$(mktemp -d)
-trap 'rm -rf -- "$test_dir"' EXIT
+trap 'command rm -rf -- "$test_dir"' EXIT
 export requests="$test_dir/requests"
 
 systemctl() { printf '%s\n' not-found; }
@@ -35,3 +35,21 @@ check_download "$release_base/latest/yagp-daemon-linux-amd64.tar.gz" \
     -u GH_PROXY -u YAGP_DAEMON_VERSION test_arch=x86_64
 check_download "$release_base/releases/download/0.1.156-b9ae23e/yagp-daemon-linux-arm64.tar.gz" \
     GH_PROXY=https://proxy.example.test/ YAGP_DAEMON_VERSION=0.1.156-b9ae23e test_arch=aarch64
+
+export nft_requests="$test_dir/nft-requests"
+export test_node=900000000000000042
+nft() {
+    printf '%s\n' "$*" >> "$nft_requests"
+    [[ "$*" == "list table inet yagp_redirect_$test_node" || "$*" == "delete table inet yagp_redirect_$test_node" ]]
+}
+rm() { :; }
+rmdir() { :; }
+export -f nft rm rmdir
+bash "${BASH_SOURCE[0]%/*}/install_node.sh" uninstall --node-id "$test_node"
+expected="list table inet yagp_quota_$test_node
+list table inet yagp_redirect_$test_node
+delete table inet yagp_redirect_$test_node"
+if [[ $(cat "$nft_requests") != "$expected" ]]; then
+    printf 'Unexpected nftables commands during uninstall:\n%s\n' "$(cat "$nft_requests")" >&2
+    exit 1
+fi

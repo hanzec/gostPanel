@@ -148,3 +148,26 @@ message StreamFrame {
   string error = 5;
   int64 timeout_millis = 6;
 }
+
+enum TransparentRedirectAction {
+  TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED = 0;
+  TRANSPARENT_REDIRECT_ACTION_PREPARE = 1;
+  TRANSPARENT_REDIRECT_ACTION_APPLY = 2;
+  TRANSPARENT_REDIRECT_ACTION_REMOVE = 3;
+}
+
+message TransparentRedirectRequest {
+  TransparentRedirectAction action = 1;
+  string owner = 2;
+  uint32 port = 3;
+  string relay_host = 4;
+  uint32 mark = 5;
+  string docker_address = 6;
+  bool require_active = 7;
+}
+
+message TransparentRedirectReply {
+  uint32 mark = 1;
+  string docker_address = 2;
+  bool active = 3;
+}

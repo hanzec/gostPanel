@@ -101,6 +101,7 @@ var (
 	ErrTunnelEntryInvalid         = New(10222, "来源入口须配置固定目标或 Clash 规则集", http.StatusBadRequest)
 	ErrTunnelExitInvalid          = New(10223, "出口须选择可达监听地址的空入口（无需填写目标）", http.StatusBadRequest)
 	ErrTunnelEndpointSave         = New(10224, "保存节点 Gost 配置失败，请检查节点连接后重试", http.StatusBadGateway)
+	ErrTunnelTransparentRedirect  = New(10225, "配置入口节点透明分流失败，请检查节点 nftables、守护程序版本和面板日志", http.StatusBadGateway)
 )
 
 // ==================== 认证相关错误 (103xx) ====================

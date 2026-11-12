@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -11,7 +12,10 @@ import (
 	"yagp/internal/utils"
 	"yagp/pkg/gost"
 	"yagp/pkg/logger"
+	"yagp/pkg/nodegrpc"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gorm.io/gorm"
 )
 
@@ -181,6 +185,9 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 		if t.EntryNodeID != nodeID {
 			continue
 		}
+		if t.EntryRuleID != nil && t.Status != model.TunnelStatusRunning {
+			continue
+		}
 		managedName := tunnelChainName(t.ID)
 		chainName := t.ChainID
 		if chainName == "" {
@@ -194,11 +201,18 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 			continue
 		}
 		exitHost := relayHost(&t, exitAddresses[t.ExitNodeID])
-		for _, name := range []string{chainName, clashTunnelChainName(t.ID)} {
+		clashChain := clashTunnelChainName(t.ID)
+		for _, name := range []string{chainName, clashChain} {
 			addr, ok := chainsByName[name].TunnelRelayAddress()
 			oldHost, _, err := net.SplitHostPort(addr)
 			if !ok || err != nil || exitHost == "" || oldHost == exitHost {
 				continue
+			}
+			if t.EntryRuleID != nil && name == clashChain {
+				if err := s.syncTransparentRelayHost(client, *t.EntryRuleID, exitHost); err != nil {
+					logger.Warnf("[Sync] 更新隧道 %d 入口透明分流的出口地址失败: %v", t.ID, err)
+					continue
+				}
 			}
 			updated, err := client.UpdateTunnelRelayHost(name, exitHost)
 			if err != nil {
@@ -219,6 +233,27 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 			s.unsavedTunnelConfig.Delete(nodeID)
 		}
 	}
+}
+
+func (s *RuleSyncService) syncTransparentRelayHost(client *gost.Client, ruleID uint, exitHost string) error {
+	rule, err := s.ruleRepo.FindByID(ruleID)
+	if err != nil {
+		return err
+	}
+	request := transparentRedirectRequest(rule, exitHost)
+	request.RequireActive = true
+	ctx := context.Background()
+	prepared, err := client.ConfigureTransparentRedirect(ctx, request)
+	if code := status.Code(err); code == codes.Unimplemented || code == codes.NotFound {
+		return nil
+	}
+	if err != nil || !prepared.GetActive() {
+		return err
+	}
+	request.Action = nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY
+	request.Mark, request.DockerAddress = prepared.GetMark(), prepared.GetDockerAddress()
+	_, err = client.ConfigureTransparentRedirect(ctx, request)
+	return err
 }
 
 // syncRuleStatus 同步规则状态

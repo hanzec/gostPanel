@@ -210,7 +210,7 @@ func startServiceTestNode(t *testing.T, server nodegrpc.V1Server) model.GostNode
 	}
 	session := streamtest.Open(t, nodegrpc.NewDispatcher(server,
 		nodegrpc.V1_Execute_FullMethodName, nodegrpc.V1_GetObserverEndpoint_FullMethodName, nodegrpc.V1_SyncTrafficQuota_FullMethodName,
-		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName))
+		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName, nodegrpc.V1_ConfigureTransparentRedirect_FullMethodName))
 	t.Cleanup(gost.RegisterNodeStream(node.ID, node.SessionGeneration, node.Username, node.Password, session))
 	return node
 }

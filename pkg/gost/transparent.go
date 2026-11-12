@@ -10,6 +10,10 @@ import (
 const ClashRedirectMark = 0x59414750
 
 func BuildClashRedirectService(name string) *ServiceConfig {
+	return BuildMarkedClashRedirectService(name, ClashRedirectMark)
+}
+
+func BuildMarkedClashRedirectService(name string, mark uint32) *ServiceConfig {
 	return &ServiceConfig{
 		Name:     name,
 		Listener: &ListenerConfig{Type: "red"},
@@ -17,25 +21,37 @@ func BuildClashRedirectService(name string) *ServiceConfig {
 			Type:     "red",
 			Metadata: map[string]any{"sniffing": true, "sniffing.fallback": true, "sniffing.timeout": "5s"},
 		},
-		SockOpts: &SocketOptions{Mark: ClashRedirectMark},
+		SockOpts: &SocketOptions{Mark: int(mark)},
 	}
 }
 
 // EnsureClashChain leaves the fixed-target tunnel's route and configuration intact.
 func (c *Client) EnsureClashChain(source, name string) error {
+	return c.ensureClashChain(source, name, ClashRedirectMark, false)
+}
+
+func (c *Client) EnsureMarkedClashChain(source, name string, mark uint32) error {
+	return c.ensureClashChain(source, name, mark, true)
+}
+
+func (c *Client) ensureClashChain(source, name string, mark uint32, replace bool) error {
 	current, err := c.resource("/config/chains/" + name)
-	if err != nil || len(current) != 0 {
+	if err != nil || (!replace && len(current) != 0) {
 		return err
 	}
 	raw, err := c.resource("/config/chains/" + source)
 	if err != nil {
 		return err
 	}
-	chain, err := clashChain(raw, name)
+	chain, err := markedClashChain(raw, name, mark)
 	if err != nil {
 		return err
 	}
-	resp, err := c.doRequest(http.MethodPost, "/config/chains", chain)
+	method, path := http.MethodPost, "/config/chains"
+	if len(current) != 0 {
+		method, path = http.MethodPut, path+"/"+name
+	}
+	resp, err := c.doRequest(method, path, chain)
 	if err != nil {
 		return err
 	}
@@ -46,7 +62,7 @@ func (c *Client) EnsureClashChain(source, name string) error {
 	return nil
 }
 
-func clashChain(raw json.RawMessage, name string) (map[string]json.RawMessage, error) {
+func markedClashChain(raw json.RawMessage, name string, mark uint32) (map[string]json.RawMessage, error) {
 	var chain map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &chain); err != nil {
 		return nil, err
@@ -62,7 +78,7 @@ func clashChain(raw json.RawMessage, name string) (map[string]json.RawMessage, e
 	}
 	// A whitelist on the first hop sends unmatched destinations directly.
 	hop["bypass"], _ = json.Marshal(TransparentBypassName)
-	sockOpts, _ := json.Marshal(SocketOptions{Mark: ClashRedirectMark})
+	sockOpts, _ := json.Marshal(SocketOptions{Mark: int(mark)})
 	hop["sockopts"] = sockOpts
 	nodes[exit]["sockopts"] = sockOpts
 	hop["nodes"], err = json.Marshal(nodes)

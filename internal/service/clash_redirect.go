@@ -21,7 +21,7 @@ func clashTunnelChainName(id uint) string {
 	return fmt.Sprintf("tunnel-%d-clash-chain", id)
 }
 
-func (s *RuleService) prepareClashChain(client *gost.Client, tunnel *model.GostTunnel) (string, error) {
+func (s *RuleService) prepareClashChain(client *gost.Client, tunnel *model.GostTunnel, mark uint32) (string, error) {
 	ruleset, err := s.rulesetService.Get(context.Background())
 	if err != nil {
 		return "", err
@@ -34,7 +34,7 @@ func (s *RuleService) prepareClashChain(client *gost.Client, tunnel *model.GostT
 		logger.Warnf("配置 Clash 分流白名单失败: %v", err)
 		return "", errors.ErrRuleChainCreateFailed
 	}
-	if err := client.EnsureClashChain(tunnel.ChainID, name); err != nil {
+	if err := client.EnsureMarkedClashChain(tunnel.ChainID, name, mark); err != nil {
 		logger.Warnf("创建 Clash 分流链失败: %v", err)
 		return "", errors.ErrRuleChainCreateFailed
 	}
