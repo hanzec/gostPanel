@@ -28,7 +28,7 @@ func (h *NodeHandler) setNodeRegions(ctx context.Context, nodes ...*model.GostNo
 					if ctx.Err() != nil {
 						return
 					}
-					logger.Warnf("GeoIP 数据库查询失败，使用在线查询: %v", err)
+					logger.Warnf("GeoIP 数据库查询失败，回退到旧版 GeoJS 在线查询: %v", err)
 					// One time budget covers online lookups for the whole response.
 					var cancel context.CancelFunc
 					fallbackCtx, cancel = context.WithTimeout(ctx, 3*time.Second)

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/oschwald/maxminddb-golang/v2"
-	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -23,12 +22,12 @@ const (
 	maxDatabaseSize     = 32 << 20
 )
 
+var ErrDatabaseNotReady = errors.New("GeoIP database is not ready")
+
 type Database struct {
 	path        string
 	downloadURL string
-
-	loading singleflight.Group
-	reader  atomic.Pointer[maxminddb.Reader]
+	reader      atomic.Pointer[maxminddb.Reader]
 }
 
 func NewDatabase(path, downloadURL string) *Database {
@@ -39,15 +38,53 @@ func NewDatabase(path, downloadURL string) *Database {
 	return &Database{path: path, downloadURL: downloadURL}
 }
 
-// Country returns the country code for a public address, downloading the database on first use if needed.
+// Load makes a validated local database available without making a network request.
+func (db *Database) Load() error {
+	data, err := os.ReadFile(db.path)
+	if err != nil {
+		return err
+	}
+	reader, err := openDatabase(data)
+	if err != nil {
+		return err
+	}
+	db.reader.Store(reader)
+	return nil
+}
+
+// Refresh downloads a new database while lookups continue using the current one.
+func (db *Database) Refresh(ctx context.Context) error {
+	data, err := downloadDatabase(ctx, db.downloadURL)
+	if err != nil {
+		return err
+	}
+	reader, err := openDatabase(data)
+	if err != nil {
+		return err
+	}
+	if err := saveDatabase(db.path, data); err != nil {
+		return err
+	}
+	db.reader.Store(reader)
+	return nil
+}
+
+func (db *Database) Ready() bool {
+	return db.reader.Load() != nil
+}
+
+// Country only reads the loaded database; downloads never delay a lookup.
 func (db *Database) Country(ctx context.Context, ip netip.Addr) (string, error) {
 	ip = ip.Unmap()
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.Zone() != "" {
 		return "", nil
 	}
-	reader, err := db.load(ctx)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", err
+	}
+	reader := db.reader.Load()
+	if reader == nil {
+		return "", ErrDatabaseNotReady
 	}
 	var code string
 	if err := reader.Lookup(ip).DecodePath(&code, "country", "iso_code"); err != nil {
@@ -59,54 +96,13 @@ func (db *Database) Country(ctx context.Context, ip netip.Addr) (string, error) 
 	return code, nil
 }
 
-func (db *Database) load(ctx context.Context) (*maxminddb.Reader, error) {
-	if reader := db.reader.Load(); reader != nil {
-		return reader, nil
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// A caller can stop waiting while the shared first download continues.
-	loaded := db.loading.DoChan("country", func() (any, error) {
-		if db.reader.Load() != nil {
-			return nil, nil
-		}
-		reader, err := db.open(context.WithoutCancel(ctx))
-		if err == nil {
-			db.reader.Store(reader)
-		}
-		return nil, err
-	})
-	wait, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	select {
-	case result := <-loaded:
-		return db.reader.Load(), result.Err
-	case <-wait.Done():
-		return nil, wait.Err()
-	}
-}
-
-func (db *Database) open(ctx context.Context) (*maxminddb.Reader, error) {
-	data, err := os.ReadFile(db.path)
-	missing := errors.Is(err, os.ErrNotExist)
-	if missing {
-		data, err = downloadDatabase(ctx, db.downloadURL)
-	}
-	if err != nil {
-		return nil, err
-	}
+func openDatabase(data []byte) (*maxminddb.Reader, error) {
 	reader, err := maxminddb.OpenBytes(data)
 	if err != nil {
 		return nil, fmt.Errorf("open GeoIP database: %w", err)
 	}
 	if err := reader.Verify(); err != nil {
 		return nil, fmt.Errorf("verify GeoIP database: %w", err)
-	}
-	if missing {
-		if err := saveDatabase(db.path, data); err != nil {
-			return nil, err
-		}
 	}
 	return reader, nil
 }
