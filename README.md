@@ -31,12 +31,34 @@ docker compose up -d
 
 在项目根目录以 root 执行。需要 systemd 和大于 128 MB 的内存。默认监听 `39100`，配置位于 `/etc/gost-panel`，服务为 `gost-panel.service`。安装后配置下文的认证与节点接入。
 
+#### 安装
+
+使用默认端口安装：
+
 ```bash
-bash scripts/install_panel.sh
-# 指定端口
+bash scripts/install_panel.sh install
+```
+
+如需指定端口，改用以下命令，两者任选其一：
+
+```bash
 bash scripts/install_panel.sh install --port 8080
-# 卸载，保留配置和数据库
+```
+
+#### 卸载
+
+以下命令会停止并移除服务及二进制文件，保留 `/etc/gost-panel` 中的配置和数据库。仅在需要卸载时执行：
+
+```bash
 bash scripts/install_panel.sh uninstall
+```
+
+#### 升级
+
+先备份配置和数据库，再重新执行安装命令以下载最新发布版，无需先卸载。脚本没有独立的 `upgrade` 子命令；不传 `--port` 时保留已有配置及端口。升级会重写 `gost-panel.service` 并重启面板，服务会短暂中断；若直接修改过该服务文件，请先备份。
+
+```bash
+bash scripts/install_panel.sh install
 ```
 
 ### Authentik 正向认证
