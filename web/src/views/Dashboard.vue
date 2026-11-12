@@ -204,12 +204,12 @@ const timeFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeSt
 const formatCount = (value) => value == null ? '—' : countFormat.format(value)
 const formatTime = (value) => value ? timeFormat.format(new Date(value)) : '—'
 const trafficDirections = [{ key: 'input_bytes', label: '入站' }, { key: 'output_bytes', label: '出站' }]
-const trafficUnits = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB']
+const trafficUnits = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB']
 const trafficFormat = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 })
 
 function formatTraffic(bytes) {
-  const index = Math.min(Math.floor(Math.log2(Math.max(1, bytes)) / 10), trafficUnits.length - 1)
-  return `${trafficFormat.format(bytes / 1024 ** index)} ${trafficUnits[index]}`
+  const index = Math.min(Math.floor(Math.log10(Math.max(1, bytes)) / 3), trafficUnits.length - 1)
+  return `${trafficFormat.format(bytes / 1000 ** index)} ${trafficUnits[index]}`
 }
 
 const formatRate = (bytes) => bytes == null ? '—' : `${formatTraffic(bytes)}/s`

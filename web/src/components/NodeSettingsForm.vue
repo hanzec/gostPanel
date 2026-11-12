@@ -36,9 +36,9 @@
       </div>
       <el-button ref="addMappingButton" :disabled="!canAddMapping" @click="addMapping">添加映射</el-button>
     </fieldset>
-    <el-form-item label="流量上限（GiB，可选）" prop="trafficLimitGiB">
-      <el-input v-model.trim="form.trafficLimitGiB" inputmode="decimal" placeholder="例如 100.5" aria-describedby="node-traffic-limit-help" clearable />
-      <p id="node-traffic-limit-help" class="node-settings-help ops-muted">留空或输入 0 表示不限。达额后节点拦截转发，额度恢复后解除限制。</p>
+    <el-form-item label="流量上限（GB，可选）" prop="trafficLimitGB">
+      <el-input v-model.trim="form.trafficLimitGB" inputmode="decimal" placeholder="例如 100.5" aria-describedby="node-traffic-limit-help" clearable />
+      <p id="node-traffic-limit-help" class="node-settings-help ops-muted">1 GB = 1,000,000,000 字节。留空或输入 0 表示不限。达额后节点拦截转发，额度恢复后解除限制。</p>
     </el-form-item>
     <el-form-item label="重置周期" prop="trafficResetPeriod">
       <el-select v-model="form.trafficResetPeriod" :disabled="!hasTrafficLimit" aria-describedby="node-traffic-reset-help">
