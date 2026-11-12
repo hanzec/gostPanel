@@ -31,8 +31,12 @@ func Country(ctx context.Context, client *http.Client, ip netip.Addr) string {
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, 16))
 	code := strings.TrimSpace(string(body))
-	if err != nil || len(code) != 2 || code[0] < 'A' || code[0] > 'Z' || code[1] < 'A' || code[1] > 'Z' {
+	if err != nil || !isCountryCode(code) {
 		return ""
 	}
 	return code
+}
+
+func isCountryCode(code string) bool {
+	return len(code) == 2 && code[0] >= 'A' && code[0] <= 'Z' && code[1] >= 'A' && code[1] <= 'Z'
 }

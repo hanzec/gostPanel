@@ -9,6 +9,9 @@ database:
   path: "./data/gost-panel.db"  # SQLite 文件路径
   dsn: ""  # MySQL 连接串，也可用 YAGP_DATABASE_DSN
 
+geoip:
+  download_url: ""  # .mmdb 文件直链，留空使用项目默认下载地址
+
 authentik:
   trusted_proxies: ["127.0.0.1", "::1"]
   admin_group: "yagp-admins"

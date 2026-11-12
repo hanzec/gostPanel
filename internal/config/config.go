@@ -14,6 +14,7 @@ type Config struct {
 	Host      string          `mapstructure:"host"`
 	Server    ServerConfig    `mapstructure:"server"`
 	Database  DatabaseConfig  `mapstructure:"database"`
+	GeoIP     GeoIPConfig     `mapstructure:"geoip"`
 	Authentik AuthentikConfig `mapstructure:"authentik"`
 	Report    ReportConfig    `mapstructure:"report"`
 	Log       LogConfig       `mapstructure:"log"`
@@ -30,6 +31,10 @@ type DatabaseConfig struct {
 	Type string `mapstructure:"type"`
 	Path string `mapstructure:"path"`
 	DSN  string `mapstructure:"dsn"`
+}
+
+type GeoIPConfig struct {
+	DownloadURL string `mapstructure:"download_url"`
 }
 
 type AuthentikConfig struct {

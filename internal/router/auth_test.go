@@ -26,7 +26,7 @@ import (
 func TestRouterRejectsMalformedTrustedProxy(t *testing.T) {
 	if _, err := NewRouter(nil, config.AuthentikConfig{
 		TrustedProxies: []string{"not-a-proxy"}, AdminGroup: "yagp-admins",
-	}, nil, ""); err == nil {
+	}, nil, "", nil); err == nil {
 		t.Fatal("router started with an invalid trusted proxy")
 	}
 }
@@ -55,7 +55,7 @@ func TestAdminRouteBoundary(t *testing.T) {
 	routes, err := NewRouter(db, config.AuthentikConfig{
 		TrustedProxies: []string{"192.0.2.20"},
 		AdminGroup:     "yagp-admins",
-	}, service.NewNodeUpgradeService(db), fingerprint)
+	}, service.NewNodeUpgradeService(db), fingerprint, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

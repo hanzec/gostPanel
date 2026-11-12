@@ -30,7 +30,7 @@ func TestLoadDefaultsAndDatabaseEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	if Get() != loaded || loaded.Server.Port != ":39100" || loaded.Server.Mode != "debug" ||
-		loaded.Database.Type != "sqlite" || loaded.Database.Path != "./data/gost-panel.db" ||
+		loaded.Database.Type != "sqlite" || loaded.Database.Path != "./data/gost-panel.db" || loaded.GeoIP.DownloadURL != "" ||
 		loaded.Authentik.AdminGroup != "yagp-admins" || !slices.Equal(loaded.Authentik.TrustedProxies, []string{"127.0.0.1", "::1"}) ||
 		loaded.Log.Level != "info" || loaded.Log.Format != "json" || loaded.Log.Output != "./logs/app.log" {
 		t.Fatalf("unexpected defaults: %+v", loaded)
@@ -52,6 +52,21 @@ func TestLoadDefaultsAndDatabaseEnvironment(t *testing.T) {
 		loaded.Authentik.AdminGroup != "Operators" || !slices.Equal(loaded.Authentik.TrustedProxies, []string{"10.0.0.0/8"}) ||
 		loaded.Host != "panel.example.test" || loaded.Report.Listen != ":9000" || !loaded.Report.DirectTLS || loaded.Log.Output != "stdout" {
 		t.Fatalf("file values or environment overrides were lost: %+v", loaded)
+	}
+}
+
+func TestLoadGeoIPDownloadURL(t *testing.T) {
+	const downloadURL = "https://mirror.example.test/server-country.mmdb"
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("geoip:\n  download_url: "+downloadURL+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.GeoIP.DownloadURL != downloadURL {
+		t.Fatalf("GeoIP download URL = %q, want %q", loaded.GeoIP.DownloadURL, downloadURL)
 	}
 }
 

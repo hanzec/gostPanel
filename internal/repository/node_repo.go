@@ -95,7 +95,6 @@ func (r *NodeRepository) EnrollNode(ctx context.Context, node *model.GostNode, h
 		values["address"] = node.Address
 		values["ipv4"] = node.IPv4
 		values["ipv6"] = node.IPv6
-		values["region"] = ""
 		values["addresses"] = nil
 		values["session_generation"] = gorm.Expr("session_generation + 1")
 		result := tx.Model(&model.GostNode{}).
@@ -140,7 +139,6 @@ func (r *NodeRepository) UpdateIPs(ctx context.Context, node *model.GostNode, ip
 		if ipv4 == "" {
 			updates["address"] = ipv6
 		}
-		updates["region"] = ""
 		if len(addresses) == 0 {
 			updates["addresses"] = nil
 		}

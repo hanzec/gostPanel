@@ -42,7 +42,7 @@ type GostNode struct {
 	Status    NodeStatus `gorm:"size:20;default:offline" json:"status"` // 状态
 	IPv4      string     `gorm:"column:ipv4;size:45" json:"ipv4"`
 	IPv6      string     `gorm:"column:ipv6;size:45" json:"ipv6"`
-	Region    string     `gorm:"size:2;not null;default:''" json:"region"`
+	Region    string     `gorm:"-" json:"region"`
 	Addresses []string   `gorm:"serializer:json;type:text" json:"addresses,omitempty"`
 
 	GostVersion          string     `gorm:"size:64;not null;default:''" json:"gost_version"`

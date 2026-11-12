@@ -7,6 +7,7 @@ import (
 	"yagp/internal/middleware"
 	"yagp/internal/repository"
 	"yagp/internal/service"
+	"yagp/pkg/geoip"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -18,10 +19,11 @@ type Router struct {
 	adminAuth               gin.HandlerFunc
 	nodeUpgrade             *service.NodeUpgradeService
 	registrationFingerprint string
+	geoIP                   *geoip.Database
 }
 
 // NewRouter 创建路由实例
-func NewRouter(db *gorm.DB, cfg config.AuthentikConfig, nodeUpgrade *service.NodeUpgradeService, registrationFingerprint string) (*Router, error) {
+func NewRouter(db *gorm.DB, cfg config.AuthentikConfig, nodeUpgrade *service.NodeUpgradeService, registrationFingerprint string, geoIP *geoip.Database) (*Router, error) {
 	adminAuth, err := middleware.NewAuthentikAuth(cfg)
 	if err != nil {
 		return nil, err
@@ -31,6 +33,7 @@ func NewRouter(db *gorm.DB, cfg config.AuthentikConfig, nodeUpgrade *service.Nod
 		adminAuth:               adminAuth,
 		nodeUpgrade:             nodeUpgrade,
 		registrationFingerprint: registrationFingerprint,
+		geoIP:                   geoIP,
 	}, nil
 }
 
@@ -67,7 +70,7 @@ func (r *Router) Setup(engine *gin.Engine) {
 	backupService := service.NewBackupService(r.db)
 
 	// 初始化控制器
-	nodeHandler := handler.NewNodeHandler(nodeService, r.nodeUpgrade)
+	nodeHandler := handler.NewNodeHandler(nodeService, r.nodeUpgrade, r.geoIP)
 	ruleHandler := handler.NewRuleHandler(ruleService)
 	tunnelHandler := handler.NewTunnelHandler(tunnelService)
 	statsHandler := handler.NewStatsHandler(statsService)
