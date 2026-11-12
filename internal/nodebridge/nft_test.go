@@ -16,6 +16,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestNftConfigTableScope(t *testing.T) {
@@ -102,6 +103,10 @@ func TestNftConfigApplyAndRestore(t *testing.T) {
 	control := controlServer{config: Config{
 		NodeID: id, Username: controlTestUser, Password: controlTestPassword, NftConfigFile: configPath,
 	}}
+	empty, err := control.GetNftConfig(ctx, &emptypb.Empty{})
+	if err != nil || empty.GetLiveConfig() != "{\n  \"nftables\": []\n}" || empty.GetConfig() != "" {
+		t.Fatalf("preview of a node without managed tables returned %v, %v", empty, err)
+	}
 	reply, err := control.ApplyNftConfig(ctx, &nodegrpc.NftConfig{Config: initial})
 	if err != nil || reply.GetConfig() != initial {
 		t.Fatalf("applying nft config through control API returned %v, %v", reply, err)
@@ -114,6 +119,11 @@ func TestNftConfigApplyAndRestore(t *testing.T) {
 	}
 	if got := run("list", "table", "inet", table); !strings.Contains(got, "chain before") {
 		t.Fatalf("active config changed after invalid update: %s", got)
+	}
+	preview, err := control.GetNftConfig(ctx, &emptypb.Empty{})
+	if err != nil || preview.GetConfig() != initial || !strings.Contains(preview.GetLiveConfig(), `"name": "before"`) ||
+		strings.Contains(preview.GetLiveConfig(), other) {
+		t.Fatalf("preview did not show the node's active table alone: %v, %v", preview, err)
 	}
 	if err := applyNftConfig(ctx, id, configPath, config("after", "prerouting")); err != nil {
 		t.Fatal(err)

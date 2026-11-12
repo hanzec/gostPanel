@@ -30,8 +30,12 @@ func (r *NodeRepository) Create(node *model.GostNode) error {
 }
 
 // Update 更新节点元数据，不覆盖并发完成的注册或健康检查。
-func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string) error {
+func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string, manualAddresses []string) error {
 	fields := []string{"Name", "Remark"}
+	if manualAddresses != nil {
+		node.ManualAddresses = manualAddresses
+		fields = append(fields, "ManualAddresses")
+	}
 	limitChanged := trafficLimitBytes != nil && node.TrafficLimitBytes != *trafficLimitBytes
 	periodChanged := trafficResetPeriod != nil && node.TrafficResetPeriod != *trafficResetPeriod
 	if limitChanged {

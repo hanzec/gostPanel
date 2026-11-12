@@ -30,9 +30,9 @@ defineProps({
 
 .page-heading h1 {
   color: var(--ops-text);
-  font-size: clamp(27px, 3vw, 38px);
-  font-weight: 730;
-  line-height: 1.22;
+  font-size: var(--ops-text-page);
+  font-weight: var(--ops-weight-bold);
+  line-height: var(--ops-leading-heading);
   text-wrap: balance;
 }
 
@@ -40,7 +40,7 @@ defineProps({
   max-width: 56ch;
   margin-top: 9px;
   color: var(--ops-muted);
-  font-size: 14px;
+  font-size: var(--ops-text-base);
 }
 
 .page-heading__actions {
@@ -50,10 +50,10 @@ defineProps({
   align-items: center;
   gap: 8px;
 }
+.page-heading__actions :deep(.el-button) { margin: 0; }
 
 @media (max-width: 640px) {
   .page-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
-  .page-heading p { font-size: 16px; }
   .page-heading__actions { width: 100%; }
   .page-heading__actions :deep(.el-button) { min-height: 44px; }
 }

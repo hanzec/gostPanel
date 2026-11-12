@@ -101,7 +101,6 @@ func (r *Router) Setup(engine *gin.Engine) {
 		authRoutes.POST("/nodes/:id/gost/restart", nodeHandler.RestartGostService)
 		authRoutes.GET("/nodes/:id/gost/logs", nodeHandler.GostLogs)
 		authRoutes.GET("/nodes/:id/nft", nodeHandler.GetNftConfig)
-		authRoutes.PUT("/nodes/:id/nft", nodeHandler.ApplyNftConfig)
 
 		// 规则管理
 		authRoutes.GET("/rules", ruleHandler.List)

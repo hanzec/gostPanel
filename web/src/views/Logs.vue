@@ -1,6 +1,6 @@
 <template>
   <div class="ops-page">
-    <PageHeader title="操作日志" description="按管理员、操作和资源追溯面板变更，查看来源与详情。">
+    <PageHeader title="操作日志" description="按执行者、操作和资源追溯面板变更与自动升级，查看来源与详情。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="fetchData">刷新日志</el-button>
       </template>
@@ -21,8 +21,8 @@
 
       <form class="ops-toolbar audit-filters" aria-label="日志筛选" @submit.prevent="applyFilters">
         <div class="audit-filter">
-          <label for="audit-user">管理员</label>
-          <el-input id="audit-user" v-model="filters.username" :prefix-icon="Search" placeholder="输入用户名" clearable />
+          <label for="audit-user">执行者</label>
+          <el-input id="audit-user" v-model="filters.username" :prefix-icon="Search" placeholder="输入用户名或系统" clearable />
         </div>
         <div class="audit-filter">
           <label for="audit-action">操作类型</label>
@@ -56,7 +56,7 @@
       <div v-else-if="!logList.length && !listError" class="audit-placeholder">
         <el-icon aria-hidden="true"><Document /></el-icon>
         <strong>{{ hasFilters ? '没有匹配的记录' : '还没有操作记录' }}</strong>
-        <p>{{ hasFilters ? '修改筛选条件，或清除筛选查看全部记录。' : '管理员对节点、规则和隧道的变更会记录在这里。' }}</p>
+        <p>{{ hasFilters ? '修改筛选条件，或清除筛选查看全部记录。' : '管理员变更与系统自动升级事件会记录在这里。' }}</p>
         <el-button v-if="hasFilters" @click="clearFilters">清除筛选</el-button>
       </div>
 
@@ -71,7 +71,7 @@
           <thead role="rowgroup">
             <tr role="row">
               <th scope="col" role="columnheader">操作时间</th>
-              <th scope="col" role="columnheader">管理员 / 来源</th>
+              <th scope="col" role="columnheader">执行者 / 来源</th>
               <th scope="col" role="columnheader">操作</th>
               <th scope="col" role="columnheader">资源</th>
               <th scope="col" role="columnheader">详情</th>
@@ -83,7 +83,7 @@
                 <time class="ops-mono" :datetime="row.created_at">{{ formatDate(row.created_at) }}</time>
                 <span class="audit-secondary ops-mono">#{{ row.id }}</span>
               </th>
-              <td role="cell" data-label="管理员 / 来源">
+              <td role="cell" data-label="执行者 / 来源">
                 <strong>{{ row.username || '—' }}</strong>
                 <span class="audit-secondary ops-mono">{{ row.ip_address || '—' }}</span>
               </td>
@@ -130,7 +130,7 @@
             <dd class="ops-mono">{{ formatDate(selectedRecord.created_at) }}</dd>
           </div>
           <div>
-            <dt>管理员</dt>
+            <dt>执行者</dt>
             <dd>{{ selectedRecord.username || '—' }}</dd>
           </div>
           <div>
@@ -189,8 +189,8 @@ const filters = reactive({ ...emptyFilters })
 const activeFilters = ref({ ...emptyFilters })
 const hasFilters = computed(() => Object.values(activeFilters.value).some(Boolean))
 
-const actionLabels = { create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止' }
-const actionClass = { create: 'is-success', update: 'is-warning', delete: 'is-danger', start: 'is-success', stop: 'is-muted' }
+const actionLabels = { create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止', auto_upgrade: '自动升级' }
+const actionClass = { create: 'is-success', update: 'is-warning', delete: 'is-danger', start: 'is-success', stop: 'is-muted', auto_upgrade: 'is-muted' }
 const resourceLabels = { node: '节点', rule: '转发规则', tunnel: '隧道' }
 const resourceLabel = type => resourceLabels[type] || type || '—'
 const formatDate = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
@@ -201,7 +201,7 @@ const summary = computed(() => {
     .map(log => log.resource_type + '/' + log.resource_id))
   return [
     { label: '匹配记录', value: unavailable ? null : total.value, detail: '所有匹配页', icon: Document },
-    { label: '本页管理员', value: unavailable ? null : actors.size, icon: User },
+    { label: '本页执行者', value: unavailable ? null : actors.size, icon: User },
     { label: '本页涉及资源', value: unavailable ? null : resources.size, icon: Collection },
     { label: '本页删除操作', value: unavailable ? null : logList.value.filter(log => log.action === 'delete').length, icon: Delete, tone: 'warning' }
   ]
@@ -265,7 +265,7 @@ onMounted(fetchData)
 .audit-section-head {
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 20px 20px 16px;
+  padding: var(--ops-card-padding);
 }
 
 .audit-mark {
@@ -275,20 +275,20 @@ onMounted(fetchData)
   flex: none;
   place-items: center;
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   color: var(--ops-accent);
   background: var(--ops-inset);
 }
 
 .audit-section-head h2 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: var(--ops-text-title);
+  font-weight: var(--ops-weight-semibold);
 }
 
 .audit-section-head p {
   margin: 4px 0 0;
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .audit-filters {
@@ -296,7 +296,7 @@ onMounted(fetchData)
   grid-template-columns: minmax(155px, 1.4fr) repeat(2, minmax(120px, 1fr)) auto;
   gap: 12px;
   align-items: end;
-  padding: 16px 20px;
+  padding: var(--ops-inset-padding) var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
   border-bottom: 0;
 }
@@ -309,8 +309,8 @@ onMounted(fetchData)
 
 .audit-filter label {
   color: var(--ops-muted);
-  font-size: .8125rem;
-  font-weight: 550;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-medium);
 }
 
 .audit-filter-actions {
@@ -330,7 +330,7 @@ onMounted(fetchData)
   min-width: 670px;
   border-collapse: collapse;
   text-align: left;
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .audit-table th,
@@ -341,12 +341,12 @@ onMounted(fetchData)
 }
 
 .audit-table th:first-child {
-  padding-left: 20px;
+  padding-left: var(--ops-card-padding);
 }
 
 .audit-table th:last-child,
 .audit-table td:last-child {
-  padding-right: 20px;
+  padding-right: var(--ops-card-padding);
 }
 
 .audit-table thead {
@@ -355,8 +355,8 @@ onMounted(fetchData)
 }
 
 .audit-table thead th {
-  font-size: .75rem;
-  font-weight: 650;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semibold);
   white-space: nowrap;
 }
 
@@ -371,15 +371,15 @@ onMounted(fetchData)
 
 .audit-when {
   min-width: 144px;
-  font-weight: 550;
+  font-weight: var(--ops-weight-medium);
 }
 
 .audit-secondary {
   display: block;
   margin-top: 4px;
   color: var(--ops-muted);
-  font-size: .75rem;
-  font-weight: 450;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-normal);
 }
 
 .audit-detail-cell {
@@ -407,9 +407,9 @@ onMounted(fetchData)
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 16px;
-  padding: 12px 20px;
+  padding: 12px var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
-  font-size: .8125rem;
+  font-size: var(--ops-text-sm);
 }
 
 .audit-pagination :deep(.el-pagination) {
@@ -447,10 +447,10 @@ onMounted(fetchData)
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 12px 20px;
+  padding: 12px var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
   color: var(--ops-warning);
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .audit-record {
@@ -466,7 +466,7 @@ onMounted(fetchData)
 
 .audit-record dt {
   color: var(--ops-muted);
-  font-size: .8125rem;
+  font-size: var(--ops-text-sm);
 }
 
 .audit-record dd {
@@ -479,7 +479,7 @@ onMounted(fetchData)
   margin: 0;
   padding: 12px;
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
   font: inherit;
   white-space: pre-wrap;
@@ -505,8 +505,8 @@ onMounted(fetchData)
   .audit-filters,
   .audit-pagination,
   .audit-error {
-    padding-left: 14px;
-    padding-right: 14px;
+    padding-left: var(--ops-card-padding);
+    padding-right: var(--ops-card-padding);
   }
 
   .audit-table {
@@ -550,7 +550,7 @@ onMounted(fetchData)
     display: block;
     margin-bottom: 4px;
     color: var(--ops-muted);
-    font-size: .75rem;
+    font-size: var(--ops-text-xs);
     content: attr(data-label);
   }
 

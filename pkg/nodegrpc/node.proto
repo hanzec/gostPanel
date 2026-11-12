@@ -56,6 +56,7 @@ message GostLogsReply {
 message NftConfig {
   string config = 1;
   string table = 2;
+  string live_config = 3;
 }
 
 message NodeConfig {

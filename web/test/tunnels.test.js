@@ -278,6 +278,31 @@ describe('Relay tunnel configuration', () => {
     })
   })
 
+  it('merges supplementary IPs into allowlist previews and allows manually addressed nodes', async () => {
+    getRoutingNodes.mockResolvedValue([
+      { ...ingress, manual_addresses: ['192.0.2.1', '198.51.100.40'] },
+      { ...egress, manual_addresses: ['198.51.100.90', '2001:db8:1::9'] },
+      { ...legacyNode, manual_addresses: ['198.51.100.3', '198.51.100.50'] }
+    ])
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await command(row(wrapper, 'Office relay'), 'allowlist')
+    const editor = dialog(wrapper)
+    const allowlist = selectField(editor, 'allowlist_node_ids')
+    expect(allowlist.findAllComponents(ElOption).map(option => [option.props('label'), option.props('disabled')])).toEqual([
+      ['入口 A（192.0.2.1 / 192.0.2.2 / 2001:db8::1 / 198.51.100.40）', false],
+      ['出口 B（198.51.100.90 / 2001:db8:1::9）', false],
+      ['旧版节点（198.51.100.3 / 198.51.100.50）', false],
+      ['节点 #88（未找到）', false]
+    ])
+    expect(editor.findAll('code').map(item => item.text())).toEqual(['192.0.2.1', '192.0.2.2', '2001:db8::1', '198.51.100.40'])
+    await choose(allowlist, [egress.id])
+    expect(editor.findAll('code').map(item => item.text())).toEqual(['198.51.100.90', '2001:db8:1::9'])
+    await button(editor, '保存更改').trigger('click')
+    await flushPromises()
+    expect(updateTunnelAllowlist).toHaveBeenCalledWith(relay.id, [egress.id])
+  })
+
   it('edits and clears a running tunnel allowlist without changing its endpoints or other tunnels', async () => {
     const wrapper = mountInventory(Tunnels)
     await flushPromises()

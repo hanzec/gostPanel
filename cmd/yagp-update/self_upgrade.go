@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,39 +24,37 @@ import (
 )
 
 const (
-	selfUpgradeRepo      = "hanzec/yagp"
-	selfUpgradeWorkflow  = selfUpgradeRepo + "/.github/workflows/release.yml"
-	selfUpgradeBundle    = "yagp-depoly-attestations.jsonl"
-	selfUpgradeLockPath  = "/etc/yagp-depoly/deploy.lock"
-	selfUpgradeMaxTar    = 64 << 20
-	selfUpgradeMaxBundle = 2 << 20
+	selfUpgradeLockPath = "/etc/yagp-depoly/deploy.lock"
+	selfUpgradeMaxTar   = 64 << 20
 )
 
-var selfUpgradeGHVersion = regexp.MustCompile(`^gh version ([0-9]+)\.([0-9]+)\.[0-9]+(?: |$)`)
-
 type selfUpgradeEnvironment struct {
-	client      *http.Client
-	gh          string
 	systemctl   string
 	lockPath    string
 	credentials *syscall.Credential
 }
 
-func selfUpgrade(executable string) error {
+func applyToolRelease(ctx context.Context, executable, tag string, verifiedArchive io.Reader) error {
 	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		return errors.New("tool self-upgrade requires Linux amd64 or arm64")
 	}
 	current := buildinfo.Version
-	if !upgrade.ValidateTag("daemon", current) {
-		return errors.New("tool self-upgrade requires an installed release version")
+	if !upgrade.ValidateTag("daemon", current) || !upgrade.ValidateTag("daemon", tag) {
+		return errors.New("tool self-upgrade requires valid installed and target release versions")
+	}
+	if !upgrade.IsNewer("daemon", current, tag) {
+		log.Printf("no newer tool release (installed %s, latest %s)", current, tag)
+		return nil
+	}
+	receiver := filepath.Join(filepath.Dir(executable), "yagp-depoly")
+	if err := checkSelfUpgradeFile(receiver); err != nil {
+		return err
 	}
 	env, err := prepareSelfUpgrade(executable, selfUpgradeLockPath, findSelfUpgradeTool, user.Lookup)
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	return env.install(ctx, executable, current)
+	return env.install(ctx, executable, receiver, current, tag, verifiedArchive)
 }
 
 func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (string, error), lookupUser func(string) (*user.User, error)) (selfUpgradeEnvironment, error) {
@@ -66,10 +62,6 @@ func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (stri
 		return selfUpgradeEnvironment{}, err
 	}
 	if err := checkSelfUpgradePath(filepath.Dir(lockPath), false); err != nil {
-		return selfUpgradeEnvironment{}, err
-	}
-	gh, err := findTool("gh")
-	if err != nil {
 		return selfUpgradeEnvironment{}, err
 	}
 	systemctl, err := findTool("systemctl")
@@ -81,62 +73,36 @@ func prepareSelfUpgrade(executable, lockPath string, findTool func(string) (stri
 		return selfUpgradeEnvironment{}, err
 	}
 	return selfUpgradeEnvironment{
-		client: selfUpgradeClient(), gh: gh, systemctl: systemctl,
-		lockPath: lockPath, credentials: credentials,
+		systemctl: systemctl,
+		lockPath:  lockPath, credentials: credentials,
 	}, nil
 }
 
-func (env selfUpgradeEnvironment) install(ctx context.Context, executable, current string) error {
-	log.Printf("checking the release cache for a tool upgrade (installed %s)", current)
-	tag, cacheErr := upgrade.CachedYAGPReleaseTag(ctx, env.client)
-	if cacheErr != nil {
-		log.Print("tool release cache lookup failed, querying GitHub directly")
-		var err error
-		tag, err = latestGitHubDeployRelease(ctx, env.client)
-		if err != nil {
-			return fmt.Errorf("query latest tool release: %w", errors.Join(cacheErr, err))
-		}
-	}
-	if !upgrade.IsNewer("daemon", current, tag) {
-		log.Printf("no newer tool release (installed %s, latest %s)", current, tag)
-		return nil
-	}
-
+func (env selfUpgradeEnvironment) install(ctx context.Context, executable, receiver, current, tag string, verifiedArchive io.Reader) error {
 	dir := filepath.Dir(executable)
-	stage, err := os.MkdirTemp(dir, ".yagp-depoly-upgrade-")
+	stage, err := os.MkdirTemp(dir, ".yagp-update-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(stage)
-	if err := verifySelfUpgradeGHVersion(ctx, env.gh, stage); err != nil {
-		return err
+	receiverName := "yagp-depoly-linux-" + runtime.GOARCH
+	updaterName := "yagp-update-linux-" + runtime.GOARCH
+	newUpdater := filepath.Join(stage, updaterName)
+	newReceiver := filepath.Join(stage, receiverName)
+	entries := map[string]string{updaterName: newUpdater, receiverName: newReceiver}
+	if err := extractSelfUpgradeBinaries(verifiedArchive, entries); err != nil {
+		return fmt.Errorf("extract signed tools: %w", err)
 	}
 
-	name := "yagp-depoly-linux-" + runtime.GOARCH
-	archive := filepath.Join(stage, name+".tar.gz")
-	bundle := filepath.Join(stage, selfUpgradeBundle)
-	log.Printf("preparing tool self-upgrade %s → %s", current, tag)
-	if err := env.downloadReleaseFile(ctx, tag, archive, selfUpgradeMaxTar, cacheErr == nil); err != nil {
-		return fmt.Errorf("download tool release: %w", err)
-	}
-	if err := env.downloadReleaseFile(ctx, tag, bundle, selfUpgradeMaxBundle, cacheErr == nil); err != nil {
-		return fmt.Errorf("download tool attestation bundle: %w", err)
-	}
-	log.Printf("verifying the attestation for tool release %s", tag)
-	if err := verifySelfUpgradeAttestation(ctx, env.gh, stage, archive, bundle); err != nil {
-		return err
-	}
-	candidate := filepath.Join(stage, name)
-	if err := extractSelfUpgradeBinary(archive, name, candidate); err != nil {
-		return fmt.Errorf("extract signed tool: %w", err)
-	}
-
-	// Keep the staging directory root-owned. Only the signed candidate needs to
-	// be accessible to the unprivileged version check.
+	// Keep the staging directory root-owned while allowing the unprivileged
+	// version checks to execute the signed candidates.
 	if err := os.Chmod(stage, 0711); err != nil {
 		return err
 	}
-	if err := checkSelfUpgradeVersion(ctx, candidate, tag, env.credentials); err != nil {
+	if err := checkSelfUpgradeVersion(ctx, newUpdater, tag, env.credentials, true); err != nil {
+		return err
+	}
+	if err := checkSelfUpgradeVersion(ctx, newReceiver, tag, env.credentials, false); err != nil {
 		return err
 	}
 
@@ -146,14 +112,22 @@ func (env selfUpgradeEnvironment) install(ctx context.Context, executable, curre
 	}
 	defer lock.Close()
 	// Another root invocation may have installed a release while downloading.
-	if err := checkSelfUpgradeVersion(ctx, executable, current, env.credentials); err != nil {
-		return fmt.Errorf("installed tool changed during self-upgrade: %w", err)
+	if err := checkSelfUpgradeVersion(ctx, executable, current, env.credentials, true); err != nil {
+		return fmt.Errorf("installed updater changed during self-upgrade: %w", err)
+	}
+	if err := checkSelfUpgradeVersion(ctx, receiver, current, env.credentials, false); err != nil {
+		return fmt.Errorf("installed receiver changed during self-upgrade: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	log.Printf("installing tool release %s and restarting yagp-depoly.service", tag)
-	if err := replaceSelfUpgradeBinary(executable, candidate, func(rollback bool) error {
+
+	log.Printf("installing both tools from release %s and restarting yagp-depoly.service", tag)
+	binaries := []binaryReplacement{
+		{target: executable, candidate: newUpdater},
+		{target: receiver, candidate: newReceiver},
+	}
+	if err := replaceSelfUpgradeBinaries(binaries, func(rollback bool) error {
 		return restartSelfUpgradeService(env.systemctl, rollback)
 	}); err != nil {
 		return err
@@ -167,34 +141,12 @@ func selfUpgradeClient() *http.Client {
 		Timeout: 90 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			u := req.URL
-			origin := via[0].URL.Host
-			if len(via) >= 5 || u.Scheme != "https" || u.User != nil ||
-				(u.Host != origin && (origin != "github.com" || u.Host != "release-assets.githubusercontent.com")) {
+			if len(via) >= 5 || u.Scheme != "https" || u.User != nil || u.Host != via[0].URL.Host {
 				return errors.New("unexpected tool release redirect")
 			}
 			return nil
 		},
 	}
-}
-
-func latestGitHubDeployRelease(ctx context.Context, client *http.Client) (string, error) {
-	body, err := getSelfUpgradeFile(ctx, client, "https://api.github.com/repos/"+selfUpgradeRepo+"/releases/latest")
-	if err != nil {
-		return "", err
-	}
-	defer body.Close()
-	var release struct {
-		Tag        string `json:"tag_name"`
-		Draft      bool   `json:"draft"`
-		Prerelease bool   `json:"prerelease"`
-	}
-	if err := json.NewDecoder(io.LimitReader(body, 2<<20)).Decode(&release); err != nil {
-		return "", err
-	}
-	if release.Draft || release.Prerelease || !upgrade.ValidateTag("daemon", release.Tag) {
-		return "", errors.New("invalid stable tool release")
-	}
-	return release.Tag, nil
 }
 
 func getSelfUpgradeFile(ctx context.Context, client *http.Client, url string) (io.ReadCloser, error) {
@@ -211,29 +163,6 @@ func getSelfUpgradeFile(ctx context.Context, client *http.Client, url string) (i
 		return nil, fmt.Errorf("tool release request returned %s", resp.Status)
 	}
 	return resp.Body, nil
-}
-
-func (env selfUpgradeEnvironment) downloadReleaseFile(ctx context.Context, tag, target string, limit int64, useCache bool) error {
-	asset := filepath.Base(target)
-	path := "/releases/download/" + tag + "/" + asset
-	var cacheErr error
-	if useCache {
-		log.Printf("downloading %s from the tool release cache", asset)
-		cacheCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-		cacheErr = downloadSelfUpgradeFile(cacheCtx, env.client, upgrade.YAGPReleaseCache+path, target, limit)
-		cancel()
-		if cacheErr == nil {
-			return nil
-		}
-		log.Printf("tool release cache download failed for %s, retrying GitHub directly", asset)
-	} else {
-		log.Printf("downloading %s directly from GitHub", asset)
-	}
-	err := downloadSelfUpgradeFile(ctx, env.client, "https://github.com/"+selfUpgradeRepo+path, target, limit)
-	if err != nil && cacheErr != nil {
-		return errors.Join(cacheErr, err)
-	}
-	return err
 }
 
 func downloadSelfUpgradeFile(ctx context.Context, client *http.Client, url, target string, limit int64) error {
@@ -303,47 +232,13 @@ func selfUpgradeCommand(ctx context.Context, workdir, executable string, args ..
 	cmd.Env = []string{
 		"PATH=/usr/bin:/bin:/usr/local/bin",
 		"HOME=" + workdir,
-		"GH_CONFIG_DIR=" + filepath.Join(workdir, ".gh"),
-		"GH_PROMPT_DISABLED=1",
 		"LC_ALL=C",
 	}
 	return cmd
 }
 
-func verifySelfUpgradeGHVersion(ctx context.Context, gh, stage string) error {
-	output, err := selfUpgradeCommand(ctx, stage, gh, "--version").Output()
-	if err != nil {
-		return fmt.Errorf("check GitHub CLI version: %w", err)
-	}
-	matches := selfUpgradeGHVersion.FindSubmatch(output)
-	if len(matches) != 0 {
-		major, majorErr := strconv.ParseUint(string(matches[1]), 10, 32)
-		minor, minorErr := strconv.ParseUint(string(matches[2]), 10, 32)
-		if majorErr == nil && minorErr == nil && (major > 2 || (major == 2 && minor >= 102)) {
-			return nil
-		}
-	}
-	return errors.New("tool self-upgrade requires GitHub CLI 2.102.0 or newer")
-}
-
-func verifySelfUpgradeAttestation(ctx context.Context, gh, stage, archive, bundle string) error {
-	cmd := selfUpgradeCommand(ctx, stage, gh, "attestation", "verify", archive,
-		"--bundle", bundle, "--repo", selfUpgradeRepo, "--signer-workflow", selfUpgradeWorkflow,
-		"--source-ref", "refs/heads/master", "--deny-self-hosted-runners")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("verify tool attestation: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-func extractSelfUpgradeBinary(archive, name, target string) error {
-	file, err := os.Open(archive)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	compressed, err := gzip.NewReader(file)
+func extractSelfUpgradeBinaries(archive io.Reader, targets map[string]string) error {
+	compressed, err := gzip.NewReader(archive)
 	if err != nil {
 		return err
 	}
@@ -351,7 +246,7 @@ func extractSelfUpgradeBinary(archive, name, target string) error {
 
 	bounded := &io.LimitedReader{R: compressed, N: selfUpgradeMaxTar + 1}
 	reader := tar.NewReader(bounded)
-	found := false
+	found := make(map[string]bool, len(targets))
 	for {
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
@@ -360,13 +255,14 @@ func extractSelfUpgradeBinary(archive, name, target string) error {
 		if err != nil {
 			return err
 		}
-		if header.Name != name {
+		target, wanted := targets[header.Name]
+		if !wanted {
 			continue
 		}
-		if found || header.Typeflag != tar.TypeReg || header.Size <= 0 || header.Size >= bounded.N {
-			return errors.New("signed archive contains an invalid tool executable entry")
+		if found[header.Name] || header.Typeflag != tar.TypeReg || header.Size <= 0 || header.Size >= bounded.N {
+			return fmt.Errorf("signed archive contains an invalid executable entry for %s", header.Name)
 		}
-		found = true
+		found[header.Name] = true
 		binary, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
 		if err != nil {
 			return err
@@ -376,8 +272,8 @@ func extractSelfUpgradeBinary(archive, name, target string) error {
 			return err
 		}
 	}
-	if !found || bounded.N == 0 {
-		return errors.New("signed archive does not contain the expected bounded executable")
+	if len(found) != len(targets) || bounded.N == 0 {
+		return errors.New("signed archive does not contain the expected bounded executables")
 	}
 	return nil
 }
@@ -395,10 +291,17 @@ func selfUpgradeCredentials(lookupUser func(string) (*user.User, error)) (*sysca
 	return &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)}, nil
 }
 
-func checkSelfUpgradeVersion(ctx context.Context, executable, expected string, credentials *syscall.Credential) error {
+func checkSelfUpgradeVersion(ctx context.Context, executable, expected string, credentials *syscall.Credential, updater bool) error {
 	versionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := selfUpgradeCommand(versionCtx, "/", executable, "version")
+	arg := "version"
+	if updater {
+		arg = "depoly"
+	}
+	cmd := selfUpgradeCommand(versionCtx, "/", executable, arg)
+	if updater {
+		cmd.Env = append(cmd.Env, "YAGP_UPDATE_PHASE=version")
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: credentials}
 	output, err := cmd.Output()
 	if err != nil {
@@ -446,33 +349,57 @@ func acquireSelfUpgradeLock(ctx context.Context, path string) (*os.File, error) 
 	return lock, nil
 }
 
-func replaceSelfUpgradeBinary(executable, candidate string, restart func(rollback bool) error) error {
-	previous := filepath.Join(filepath.Dir(executable), ".yagp-depoly.previous")
-	stagedPrevious := filepath.Join(filepath.Dir(candidate), "previous")
-	if err := os.Link(executable, stagedPrevious); err != nil {
-		return fmt.Errorf("back up installed tool: %w", err)
+type binaryReplacement struct {
+	target    string
+	candidate string
+}
+
+func (binary binaryReplacement) previous() string {
+	return filepath.Join(filepath.Dir(binary.target), "."+filepath.Base(binary.target)+".previous")
+}
+
+func replaceSelfUpgradeBinaries(binaries []binaryReplacement, restart func(rollback bool) error) error {
+	for _, binary := range binaries {
+		backup := filepath.Join(filepath.Dir(binary.candidate), filepath.Base(binary.target)+".previous")
+		if err := os.Link(binary.target, backup); err != nil {
+			return fmt.Errorf("back up installed tool %s: %w", binary.target, err)
+		}
+		if err := os.Rename(backup, binary.previous()); err != nil {
+			return fmt.Errorf("save previous tool version %s: %w", binary.target, err)
+		}
 	}
-	if err := os.Rename(stagedPrevious, previous); err != nil {
-		return fmt.Errorf("save previous tool version: %w", err)
-	}
-	if err := os.Rename(candidate, executable); err != nil {
-		return fmt.Errorf("replace installed tool: %w", err)
+	for i, binary := range binaries {
+		if err := os.Rename(binary.candidate, binary.target); err != nil {
+			return errors.Join(fmt.Errorf("replace installed tool %s: %w", binary.target, err),
+				restoreSelfUpgradeBinaries(binaries[:i]))
+		}
 	}
 	if err := restart(false); err != nil {
-		log.Print("tool restart failed, restoring the previous version")
-		restore := filepath.Join(filepath.Dir(candidate), "rollback")
-		if restoreErr := os.Link(previous, restore); restoreErr != nil {
-			return errors.Join(err, fmt.Errorf("stage tool rollback from %s: %w", previous, restoreErr))
-		}
-		if restoreErr := os.Rename(restore, executable); restoreErr != nil {
-			return errors.Join(err, fmt.Errorf("restore previous tool from %s: %w", previous, restoreErr))
+		log.Print("tool restart failed, restoring both previous versions")
+		if restoreErr := restoreSelfUpgradeBinaries(binaries); restoreErr != nil {
+			return errors.Join(err, restoreErr)
 		}
 		if rollbackErr := restart(true); rollbackErr != nil {
 			return errors.Join(err, fmt.Errorf("restart previous tool: %w", rollbackErr))
 		}
-		return fmt.Errorf("tool self-upgrade failed and previous version was restored: %w", err)
+		return fmt.Errorf("tool self-upgrade failed and both previous versions were restored: %w", err)
 	}
 	return nil
+}
+
+func restoreSelfUpgradeBinaries(binaries []binaryReplacement) error {
+	var restoreErr error
+	for _, binary := range binaries {
+		restore := filepath.Join(filepath.Dir(binary.candidate), filepath.Base(binary.target)+".rollback")
+		if err := os.Link(binary.previous(), restore); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("stage tool rollback from %s: %w", binary.previous(), err))
+			continue
+		}
+		if err := os.Rename(restore, binary.target); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore previous tool from %s: %w", binary.previous(), err))
+		}
+	}
+	return restoreErr
 }
 
 func restartSelfUpgradeService(systemctl string, rollback bool) error {

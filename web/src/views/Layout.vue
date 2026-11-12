@@ -122,10 +122,10 @@ watch(() => route.path, async () => {
   left: 8px;
   padding: 9px 13px;
   transform: translateY(-150%);
-  border-radius: 7px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-accent);
   color: var(--ops-on-accent);
-  font-weight: 650;
+  font-weight: var(--ops-weight-semibold);
 }
 
 .console-skip:focus { transform: none; }
@@ -177,8 +177,8 @@ watch(() => route.path, async () => {
 
 .console-identity { gap: 9px; }
 .console-identity__text { display: grid; min-width: 0; line-height: 1.4; }
-.console-identity__text strong { overflow: hidden; max-width: 22ch; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.console-identity__text small { color: var(--ops-faint); font-size: 10px; white-space: nowrap; }
+.console-identity__text strong { overflow: hidden; max-width: 22ch; font-size: var(--ops-text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.console-identity__text small { color: var(--ops-faint); font-size: var(--ops-text-xs); white-space: nowrap; }
 
 .console-identity__avatar, .console-icon-button {
   display: grid;
@@ -187,7 +187,7 @@ watch(() => route.path, async () => {
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--ops-border);
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-panel);
   color: var(--ops-muted);
   font-size: 17px;
@@ -205,13 +205,13 @@ watch(() => route.path, async () => {
   place-content: center;
   justify-items: center;
   gap: 12px;
-  padding: 24px;
+  padding: var(--ops-card-padding);
   color: var(--ops-muted);
   text-align: center;
 }
 
 .console-gate .el-icon { color: var(--ops-accent); font-size: 25px; }
-.console-gate h1 { color: var(--ops-text); font-size: 22px; }
+.console-gate h1 { color: var(--ops-text); font-size: var(--ops-text-page); }
 
 .console-footer {
   display: flex;
@@ -221,7 +221,7 @@ watch(() => route.path, async () => {
   padding-block: 14px 20px;
   border-top: 1px solid var(--ops-border);
   color: var(--ops-faint);
-  font-size: 12px;
+  font-size: var(--ops-text-xs);
   overflow-wrap: anywhere;
 }
 

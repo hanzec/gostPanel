@@ -40,7 +40,8 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	db := openRepositoryDB(t)
 	nodes := NewNodeRepository(db)
 	ctx := t.Context()
-	stale := model.GostNode{Name: "edge", Port: 39110}
+	manual := []string{"203.0.113.10", "2001:db8::10"}
+	stale := model.GostNode{Name: "edge", Port: 39110, ManualAddresses: manual}
 	mustPersist(t, nodes.Create(&stale))
 	if err := nodes.SetRegistrationToken(ctx, 99, "unknown", time.Now().UTC().Add(time.Hour)); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("issuing token for absent node: %v", err)
@@ -69,11 +70,11 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	mustPersist(t, nodes.UpdateLastCheck(stale.ID))
 	legacyPort := stale.Port
 	stale.Name, stale.Remark, stale.Port = "renamed", "saved after enrollment", 39111
-	mustPersist(t, nodes.Update(&stale, nil, nil))
+	mustPersist(t, nodes.Update(&stale, nil, nil, nil))
 	current, err := nodes.FindByName("renamed")
 	mustPersist(t, err)
 	if current.Password != enrolled.Password || current.Status != model.NodeStatusOnline || current.LastCheckAt == nil ||
-		current.RegistrationTokenHash != "" || current.RegistrationExpiresAt != nil || current.Port != legacyPort || current.Remark != stale.Remark {
+		current.RegistrationTokenHash != "" || current.RegistrationExpiresAt != nil || current.Port != legacyPort || current.Remark != stale.Remark || !slices.Equal(current.ManualAddresses, manual) {
 		t.Fatalf("metadata update overwrote enrollment or health state: %+v", current)
 	}
 
@@ -82,7 +83,7 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	mustPersist(t, nodes.SetRegistrationToken(ctx, current.ID, "second", time.Now().UTC().Add(time.Hour)))
 	credentials.AccessTokenHash = "new access"
 	mustPersist(t, nodes.EnrollNode(ctx, current, "second", credentials))
-	if current.Password != old.Password || current.SessionGeneration != old.SessionGeneration+1 || current.AccessTokenHash != credentials.AccessTokenHash {
+	if current.Password != old.Password || current.SessionGeneration != old.SessionGeneration+1 || current.AccessTokenHash != credentials.AccessTokenHash || !slices.Equal(current.ManualAddresses, manual) {
 		t.Fatal("enrollment did not advance public credentials while preserving the Gost password")
 	}
 	if err := nodes.UpdateIPs(ctx, &old, "", "2001:db8::99"); !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -104,7 +105,7 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	online, err := nodes.GetAllOnline()
 	mustPersist(t, err)
 	if len(online) != 1 || online[0].ID != current.ID || online[0].Address != "198.51.100.2" || online[0].IPv6 != "2001:db8::2" ||
-		online[0].InputBytes != 3 || online[0].OutputBytes != 13 || online[0].TotalBytes != 16 {
+		online[0].InputBytes != 3 || online[0].OutputBytes != 13 || online[0].TotalBytes != 16 || !slices.Equal(online[0].ManualAddresses, manual) {
 		t.Fatalf("online node state: %+v", online)
 	}
 }
@@ -122,7 +123,7 @@ func TestNodeRepositoryRejectsStaleQuotaSnapshots(t *testing.T) {
 	mustPersist(t, nodes.UpdateTrafficQuota(*current, 24, 50, model.TrafficQuotaActive))
 	stale := *current
 	limit, reset := int64(200), "weekly"
-	mustPersist(t, nodes.Update(current, &limit, &reset))
+	mustPersist(t, nodes.Update(current, &limit, &reset, nil))
 	mustPersist(t, nodes.UpdateTrafficQuota(stale, 24, 100, model.TrafficQuotaBlocked))
 	current, err = nodes.FindByID(node.ID)
 	mustPersist(t, err)

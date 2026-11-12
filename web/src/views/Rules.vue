@@ -162,7 +162,6 @@
                           command="listener-check"
                           :disabled="listenerChecks.get(row.id)?.pending"
                         >检查监听</el-dropdown-item>
-                        <el-dropdown-item v-if="row.use_clash_ruleset && row.status === 'running'" command="nft-template">nftables 模板</el-dropdown-item>
                         <el-dropdown-item command="delete" divided :disabled="pendingRuleIds.has(row.id) || !!row.linked_tunnel_id">删除规则</el-dropdown-item>
                       </el-dropdown-menu>
                     </template>
@@ -235,7 +234,7 @@
               </el-select>
               <p id="rule-listen-ip-help" class="rule-form-hint ops-muted">
                 {{ form.listen_ip === '127.0.0.1' || form.listen_ip === '::1'
-                  ? '回环地址仅接受本机连接。可在入口节点配置 nftables 重定向。'
+                  ? '回环地址仅接受本机连接。'
                   : '可输入自定义 IPv4 或 IPv6。探测地址经过 NAT 时，请选择入口节点本机的地址。' }}
               </p>
             </el-form-item>
@@ -262,7 +261,7 @@
               <p id="rule-target-mode-help" class="rule-form-hint ops-muted">
                 {{ canUseClashRuleset ? 'Clash 分流使用系统设置中的规则集。' : 'Clash 分流需要 TCP 与 127.0.0.1。' }}
                 <template v-if="form.use_clash_ruleset && canUseClashRuleset">
-                  在隧道管理将本入口选为源端。匹配的流量经过隧道，其余流量直连。隧道启动后，可从「更多」打开 nftables 模板。
+                  在隧道管理将本入口选为源端。匹配的流量经过隧道，其余流量直连。
                 </template>
               </p>
             </el-form-item>
@@ -307,14 +306,6 @@
       </template>
     </PanelDialog>
 
-    <NodeNftDialog
-      v-if="nftEntry"
-      v-model="nftDialogVisible"
-      :node="nftEntry.node"
-      :loopback-port="nftEntry.port"
-      @closed="nftEntry = null"
-    />
-
     <PanelDialog
       v-model="exportDialogVisible"
       title="导出规则"
@@ -357,7 +348,6 @@ import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, CopyDocument, Download, Plus, Refresh, Remove, Right, Search, Switch, Upload, VideoPause, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import NodeNftDialog from '@/components/NodeNftDialog.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { getRoutingNodes } from '@/api/node'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
@@ -399,8 +389,6 @@ const summary = computed(() => {
 })
 
 const dialogVisible = ref(false)
-const nftDialogVisible = ref(false)
-const nftEntry = ref(null)
 const isEdit = ref(false)
 const editId = ref(null)
 const submitLoading = ref(false)
@@ -612,16 +600,6 @@ const handleRowCommand = async (row, command) => {
     return
   }
   if (command === 'listener-check') return checkListener(row)
-  if (command === 'nft-template') {
-    const node = row.node ?? nodeList.value.find(item => item.id === row.node_id) ?? row.tunnel?.entry_node
-    if (!node?.id) {
-      ElMessage.warning('找不到所在节点，无法打开 nftables 模板。')
-      return
-    }
-    nftEntry.value = { node, port: row.listen_port }
-    nftDialogVisible.value = true
-    return
-  }
   try {
     await confirmPanelAction('确定删除规则「' + row.name + '」？', '删除规则', {
       confirmButtonText: '删除规则',
@@ -776,21 +754,20 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-section-head {
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 20px 20px 16px;
+  padding: var(--ops-card-padding);
 }
 
-.rule-section-head h2,
-.rule-form-section h3 {
+.rule-section-head h2 {
   margin: 0;
   color: var(--ops-text);
-  font-size: 1rem;
-  font-weight: 650;
+  font-size: var(--ops-text-title);
+  font-weight: var(--ops-weight-semibold);
 }
 
 .rule-section-head p,
 .rule-form-section header p {
   margin: 4px 0 0;
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .rule-filters {
@@ -798,7 +775,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   grid-template-columns: minmax(140px, 1.5fr) repeat(2, minmax(110px, 1fr)) auto;
   gap: 12px;
   align-items: end;
-  padding: 16px 20px;
+  padding: var(--ops-inset-padding) var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
   border-bottom: 0;
 }
@@ -811,8 +788,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-filter label {
   color: var(--ops-muted);
-  font-size: .8125rem;
-  font-weight: 550;
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-medium);
 }
 
 .rule-filter-actions {
@@ -833,7 +810,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   min-width: 830px;
   border-collapse: collapse;
   text-align: left;
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .rule-table th,
@@ -844,12 +821,12 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-table th:first-child,
 .rule-table td:first-child {
-  padding-left: 20px;
+  padding-left: var(--ops-card-padding);
 }
 
 .rule-table th:last-child,
 .rule-table td:last-child {
-  padding-right: 20px;
+  padding-right: var(--ops-card-padding);
 }
 
 .rule-table thead {
@@ -858,8 +835,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 }
 
 .rule-table thead th {
-  font-size: .75rem;
-  font-weight: 650;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semibold);
   white-space: nowrap;
 }
 
@@ -881,7 +858,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-traffic-total {
   display: block;
   color: var(--ops-text);
-  font-weight: 650;
+  font-weight: var(--ops-weight-semibold);
 }
 
 .rule-secondary {
@@ -890,8 +867,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   gap: 4px 8px;
   margin-top: 4px;
   color: var(--ops-muted);
-  font-size: .75rem;
-  font-weight: 450;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-normal);
 }
 
 .rule-path {
@@ -901,7 +878,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 }
 
 .rule-path-entry {
-  font-weight: 550;
+  font-weight: var(--ops-weight-medium);
 }
 
 .rule-path-target {
@@ -920,7 +897,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-target-details {
   margin-top: 4px;
   color: var(--ops-muted);
-  font-size: .75rem;
+  font-size: var(--ops-text-xs);
 }
 
 .rule-target-details summary {
@@ -942,7 +919,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   border: 1px solid var(--ops-border);
   border-radius: 4px;
   color: var(--ops-muted);
-  font-size: .6875rem;
+  font-size: var(--ops-text-xs);
 }
 
 .rule-row-actions {
@@ -963,9 +940,9 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 8px 16px;
-  padding: 12px 20px;
+  padding: 12px var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
-  font-size: .8125rem;
+  font-size: var(--ops-text-sm);
 }
 
 .rule-pagination :deep(.el-pagination) {
@@ -1004,10 +981,10 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 12px 20px;
+  padding: 12px var(--ops-card-padding);
   border-top: 1px solid var(--ops-border);
   color: var(--ops-warning);
-  font-size: .875rem;
+  font-size: var(--ops-text-body);
 }
 
 .rule-node-status { padding: 12px 20px; font-size: .875rem; }
@@ -1021,11 +998,13 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 .rule-form-section {
   min-width: 0;
-  padding: 14px 16px 2px;
+  padding: var(--ops-inset-padding) var(--ops-inset-padding) 2px;
   border: 1px solid var(--ops-border);
-  border-radius: var(--ops-radius);
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-inset);
 }
+
+.rule-form-section h3 { font-size: var(--ops-text-base); }
 
 .rule-form-section header {
   margin-bottom: 12px;
@@ -1044,7 +1023,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .rule-form-hint {
   margin: 4px 0 0;
   line-height: 1.45;
-  font-size: .75rem;
+  font-size: var(--ops-text-xs);
 }
 
 .rule-form-link { color: var(--ops-accent); }
@@ -1096,8 +1075,8 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   .rule-pagination,
   .rule-node-status,
   .rule-error {
-    padding-left: 14px;
-    padding-right: 14px;
+    padding-left: var(--ops-card-padding);
+    padding-right: var(--ops-card-padding);
   }
 
   .rule-table {
@@ -1142,7 +1121,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
     display: block;
     margin-bottom: 4px;
     color: var(--ops-muted);
-    font-size: .75rem;
+    font-size: var(--ops-text-xs);
     content: attr(data-label);
   }
 

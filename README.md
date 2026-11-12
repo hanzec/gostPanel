@@ -76,13 +76,13 @@ TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT=websecure
 AUTHENTIK_OUTPOST_URL=http://authentik-server:9000
 ```
 
-从部署目录启动 Compose 中指定的 [GHCR 镜像](https://github.com/hanzec/yagp/pkgs/container/yagp)。
+从部署目录运行 Compose。面板和初始化服务默认从 `release.hanzec-overseas.cn/images/yagp:latest` 拉取镜像。
 
 ```bash
 docker compose up -d
 ```
 
-镜像支持 Linux amd64 和 arm64。可以在 `docker-compose.yml` 中将镜像设为 `ghcr.io/hanzec/yagp:RELEASE_TAG` 来固定面板版本。节点的安装、重新注册和升级使用同一发布标签。
+镜像支持 Linux amd64 和 arm64。可以在 `docker-compose.yml` 中将镜像设为 `release.hanzec-overseas.cn/images/yagp:RELEASE_TAG` 来固定面板版本。节点的安装、重新注册和升级使用同一发布标签。
 
 Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板容器中的 `/app/config`、`/app/data` 和 `/app/logs`。启动时，初始化服务会在 `config/config.yaml` 缺失时从镜像复制模板。面板以只读方式挂载配置，已有配置会继续使用。
 
@@ -92,48 +92,57 @@ Compose 将部署目录的 `config/`、`data/` 和 `logs/` 分别绑定到面板
 
 #### 通过 Webhook 自动更新面板
 
-该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
+该方式适用于使用 systemd 247 或更新版本和 Traefik Docker bridge 网络的 Compose 部署。请将 Cosign 3.1.3 或更新版本安装到 `/usr/local/bin` 等由 root 管理的目录，供首次安装及旧版更新器首次迁移时验证二进制发布包。 [Cosign 安装说明](https://docs.sigstore.dev/cosign/system_config/installation/)
+
+先列出公网网络上的容器，将命令中的 `public` 替换为部署目录 `.env` 中的 `TRAEFIK_PUBLIC_NETWORK` 值。
 
 ```bash
 docker ps --filter network=public --format 'table {{.Names}}\t{{.Image}}'
 ```
 
-从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。ARM64 服务器将 `pkg` 改为 `yagp-depoly-linux-arm64`。
+从 `NAMES` 列找到公网 Traefik 的容器名，并用它替换下面的 `traefik-public`。示例的部署目录为 `/opt/yagp-panel`。以下 Bash 命令从 GitHub Raw 下载安装脚本到 `/tmp`，再用 sudo 执行。
 
 ```bash
-pkg=yagp-depoly-linux-amd64
-tmpdir=$(mktemp -d) &&
+tmpdir=$(mktemp -d /tmp/yagp-deploy.XXXXXXXX) &&
   cd "$tmpdir" &&
-  { curl -fL --connect-timeout 10 --speed-limit 1 --speed-time 20 \
-      -o "$pkg.tar.gz" "https://release.hanzec-overseas.cn/yagp/latest/$pkg.tar.gz" ||
-    curl -fL -o "$pkg.tar.gz" "https://github.com/hanzec/yagp/releases/latest/download/$pkg.tar.gz"; } &&
-  tar -xzf "$pkg.tar.gz" &&
-  sudo "./$pkg" install /opt/yagp-panel --traefik traefik-public
+  curl -q -fsS --connect-timeout 10 --max-time 30 -o setup_deploy.sh \
+    https://raw.githubusercontent.com/hanzec/yagp/refs/heads/master/scripts/setup_deploy.sh &&
+  sudo bash ./setup_deploy.sh install /opt/yagp-panel --traefik traefik-public
 ```
 
-安装程序将接收器和部署命令装到同一个 `/usr/local/sbin/yagp-depoly`，并将实际面板路径写入 `/etc/yagp-depoly/project-dir`。它会迁移旧部署布局并保留镜像版本。首次安装时，shell 使用系统随机源分别生成 HMAC 密钥和 Bearer Token，在交互终端显示，并写入 root 专用的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`。重装时复用现有凭据。
+安装脚本会自动识别 AMD64 或 ARM64，从 `release.hanzec-overseas.cn` 将对应的发布包和同版本的 Sigstore 证明下载到 `/tmp` 下的临时目录。Cosign 确认发布包由 `hanzec/yagp` 的 `master` 发布工作流签发后，脚本将两个程序安装到 `/usr/local/sbin/`，并一次配置面板部署和工具升级的 Webhook。退出时清理下载的发布包。`yagp-depoly` 以低权限账号常驻接收 Webhook，并通过 sudo 发起 `yagp-update compose` 或 `yagp-update depoly`。
+
+从使用两套凭据的旧版迁移时，等支持共用凭据的 Release 可从发布缓存下载后，执行一次上述 `install` 命令。脚本会更新 systemd 服务，替换旧 sudo 规则，停用并移除旧工具升级单元，并保留部署目录和镜像覆盖配置。两个入口复用现有的 `/etc/yagp-depoly/panel.secret` 和 `panel.token`，仅在缺失时生成，并在交互终端显示这组凭据。
 
 安装程序优先从部署目录的 `.env` 读取 `YAGP_PUBLIC_HOST`、`TRAEFIK_PUBLIC_HTTPS_ENTRYPOINT` 和 `TRAEFIK_PUBLIC_NETWORK`。已有部署的 `YAGP_HOST` 和容器上的 Traefik 标签仍可作为后备值。`--traefik` 接受公网 Traefik 的容器名或 ID，也可写成 `--traefik=<容器名或 ID>`。省略时默认查找名为 `traefik` 的容器，原有位置参数写法仍可使用。安装成功后会显示实际容器名和内网 IPv4，即使传入的是容器 ID。
 
-安装程序用公网域名生成 Traefik 路由和以 `/api/deploy` 结尾的 `DEPLOY_WEBHOOK_URL`。为 Traefik 容器配置固定内网 IP，并将 `/etc/yagp-depoly/traefik-panel.yml` 复制到公网 Traefik file provider 加载的动态目录。迁移时先运行上面的 `install` 命令，然后替换旧路由配置，并从动态目录移除旧的独立升级路由。仅复制路由文件，凭据留在 `/etc/yagp-depoly/`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
+为公网 Traefik 配置固定内网 IP，将 file provider 的 `directory` 设为容器内的 `/etc/traefik/dynamic`，启用 `watch`，并将该目录绑定到宿主机上由 root 管理的目录。安装脚本会从指定容器的挂载找到宿主机目录，并将 `traefik-panel.yml` 写入该目录。如果 file provider 使用其他目录，在安装命令后加上 `--traefik-dynamic-dir <容器内目录>`。没有绑定目录时，按安装提示将生成的 `/etc/yagp-depoly/traefik-panel.yml` 加入 Traefik 实际读取的位置。迁移时，从动态目录移除旧的独立升级路由。
 
-在 GitHub 的 `production` Environment 中限制 `master` 部署，将安装输出的 `DEPLOY_WEBHOOK_SECRET` 和 `DEPLOY_WEBHOOK_TOKEN` 配为 Environment secrets。将 `DEPLOY_WEBHOOK_URL` 配为仓库级 Actions Secret，两个工作流任务可共用该基地址。面板任务会补上 `/panel`，也接受 `production` 中现有的完整面板 URL。最后将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
+安装程序根据公网域名生成以 `/api/deploy` 结尾的 `DEPLOY_WEBHOOK_URL`。Traefik 将 `/api/deploy` 和 `/api/deploy/` 下的请求转发到宿主机内网端口 `39102`，面板更新使用 `POST /api/deploy/panel`。保持 `forwardedHeaders.insecure=false`。若有前置代理，仅在 `forwardedHeaders.trustedIPs` 中加入会覆盖 `X-Real-IP` 的可信代理地址。
 
-两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`。两个入口共用每 IP 每分钟 20 次的限额。未定义的路径、方法和未启用的升级入口返回 `404`，与鉴权失败一起计数。1 分钟内累计 5 次后，两个入口对该 IP 封禁 15 分钟。封禁、限流或冷却期间，有效入口返回 `429`。收到 `429` 且 `Retry-After` 为 1 到 300 秒时，GitHub Actions 按指定时间等待，用新的时间戳和签名重试，最多重试两次。面板更新每次发送前都确认该版本仍是 `master` 最新提交。HTTP `202` 表示已受理，实际部署结果可用 `sudo journalctl -u yagp-depoly.service -f` 查看。
+在 GitHub 的 `production` Environment 中限制 `master` 部署，并配置安装输出的 `DEPLOY_WEBHOOK_URL`、`DEPLOY_WEBHOOK_SECRET` 和 `DEPLOY_WEBHOOK_TOKEN`。两个工作流任务共用这三个值，并分别请求 `/api/deploy/panel` 和 `/api/deploy/deploy-tool`。仓库级同名 Secrets 和现有的完整端点 URL 也可继续使用。要自动部署面板，将仓库级 Actions Variable `YAGP_DEPLOY_ENABLED` 设为 `true`。接收器以 `nologin` 账号 `yagp-deploy` 运行，sudo 只允许调用固定的部署子命令。已健康运行的相同 digest 会跳过容器更新。
 
-#### 通过独立 Webhook 升级部署工具
+两个 Webhook 都验证 Bearer Token 和 HMAC-SHA256。签名原文是 `X-Yagp-Timestamp` 中的 Unix 秒时间戳、一个换行符及原始请求体。签名用 `X-Yagp-Signature: sha256=<十六进制签名>` 发送。接收器接受五分钟内的时间戳，并分别持久化最后受理的时间戳及五分钟冷却状态。重复或更早的时间戳返回 `409`。两个入口共用每 IP 每分钟 20 次的限额。未定义的路径、方法和未启用的升级入口返回 `404`，与鉴权失败一起计数。1 分钟内累计 5 次后，两个入口对该 IP 封禁 15 分钟。封禁、限流或冷却期间，有效入口返回 `429`。收到 `429` 且 `Retry-After` 为 1 到 300 秒时，GitHub Actions 按指定时间等待，用新的时间戳和签名重试，最多重试两次。面板更新每次发送前都确认该版本仍是 `master` 最新提交。
 
-安装正式发布的 `yagp-depoly` 后，可在服务器上启用工具升级入口。服务器需要 GitHub CLI 2.102.0 或更新版本，用于验证随 Release 发布的产物证明。
+Webhook 返回 `202` 后，响应中的 `status_url` 提供短期有效的签名查询地址。GitHub Actions 通过同一域名的 WebSocket 接收任务状态和近期日志，等到任务结束。工具升级会重启接收器，Actions 会用原地址重连。旧版接收器的签名状态地址仍可通过 HTTPS 查询。`yagp-update` 成功退出后，任务状态才会显示 `succeeded`。
+
+如果 Actions 在发送 Webhook 时收到 `404`，核对安装输出的公网域名和 Traefik 实际加载的 `traefik-panel.yml`。环境级 `DEPLOY_WEBHOOK_URL` 会覆盖仓库级同名 Secret。新版接收器会在 journal 记录不支持的请求方法和路径，可用下文的日志命令确认请求是否到达接收器。
+
+也可在服务器上执行 `sudo /usr/local/sbin/yagp-update depoly` 手动升级两个程序。该命令会等到更新结束并返回实际退出码。手动更新镜像时，使用 `sudo /usr/local/sbin/yagp-update compose`，从标准输入传入目标镜像的 `sha256:…` 摘要。手动和 Webhook 部署都按摘要从 `release.hanzec-overseas.cn/images/yagp` 拉取面板镜像。
+
+#### 通过 Webhook 升级部署工具
+
+配置好共用的 Webhook URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布成功后等待 60 秒，为 Release 缓存留出更新时间，再确认 `master` 仍指向本次提交并发送升级请求。面板部署等待工具升级成功后开始。
+
+也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。新版 `yagp-update` 直接从 `release.hanzec-overseas.cn` 下载同版本的程序包和 Sigstore 证明，由程序内的 Go 验签实现确认发布来源，再替换两个二进制并重启接收器。启动失败时恢复旧文件。工具自更新不再下载或执行 `setup_deploy.sh`，也不依赖 Bash、curl、Cosign 命令或 GitHub Raw。
+
+已安装的旧版更新器首次升级到此版本时，仍会按旧流程下载目标版本的脚本，并使用 Cosign 验证发布包。这是一次性迁移；完成后，后续工具升级由新版 `yagp-update` 自行完成。
+
+面板部署和工具升级共用独立的 `yagp-depoly` journal，日志默认写入磁盘并由 journald 轮转。查询链接读取的任务记录保存于 `/var/lib/yagp-update/jobs`，由 systemd-tmpfiles 清理七天前的记录。以下命令可查看接收器和更新任务的日志。
 
 ```bash
-sudo /usr/local/sbin/yagp-depoly install-upgrade --traefik traefik-public
+sudo journalctl --namespace=+yagp-depoly -u yagp-depoly.service -u 'yagp-update-*.service' -f
 ```
-
-在 GitHub 的 `production-tool` Environment 中限制 `master` 部署，设置安装输出的 `UPGRADE_WEBHOOK_SECRET` 和 `UPGRADE_WEBHOOK_TOKEN`。工具升级任务会在仓库级 `DEPLOY_WEBHOOK_URL` 后补上 `/deploy-tool`。若已配置独立的 `UPGRADE_WEBHOOK_URL`，工具升级优先使用它。面板和升级入口共用 Traefik 路由、接收器和 `yagp-deploy` 系统账号，各自使用独立凭据。启用后，该账号的两条 sudo 规则只允许执行面板部署子命令和启动固定的工具升级任务。
-
-配置好工具升级 URL 和凭据后，推送或合并到 `master` 会自动触发工具升级。工作流在 Release 发布成功、面板部署请求受理后等待 60 秒，为 Release 缓存留出更新时间。若面板自动部署已关闭，工作流在 Release 发布成功后开始等待。随后工作流确认 `master` 仍指向本次提交，再发送工具升级请求。
-
-也可在 Actions 的 **Build and Release** 中选择 `master`，勾选 **Upgrade the server's deployment tool** 后手动运行。工具升级 Webhook 的请求体固定为 `upgrade`。宿主机上的独立系统任务优先从 Release 缓存查询最新版本和下载附件，失败时回退到 GitHub。只安装比当前版本更新且通过 `hanzec/yagp` 的 `master` 发布 workflow 验签的工具。它原子替换二进制并重启接收器，启动失败时恢复旧文件。用 `sudo journalctl -u yagp-depoly-upgrade.service -f` 查看升级结果。
 
 **方式 B · Linux 二进制部署**
 
@@ -321,9 +330,9 @@ systemd 节点使用 `yagp-daemon.service` 和 `yagp-gost.service`。Gost 在守
 
 ### 管理节点的 nftables 配置
 
-在装有 `nftables` 的 Linux 节点上，通过节点详情的 **nft 配置** 编辑并应用原生 nftables JSON。默认模板由面板提供，包含一个无规则的 NAT `prerouting` 链，载入时只填入编辑区。守护进程连接后通过 WebSocket 获取配置和模板，并在实例目录中缓存为 `panel-config.pb`。节点可运行 `/etc/yagp-daemon/<ID>/yagp-daemon nft-template -c /etc/yagp-daemon/<ID>/node.yaml` 读取缓存中的模板。
+在 **节点管理 → 配置 → nft 配置** 可以只读预览在线节点上由 yagp 管理的 nftables 规则。预览当前规则需要 Linux、`nftables` 和新版 `yagp-daemon`。旧版守护程序仅提供上次保存的节点规则。
 
-配置使用 `{"nftables":[...]}`，只允许为节点专用的 `inet yagp_node` 表添加链、规则、集合等对象。配额使用独立的 `inet yagp_quota` 表。节点先校验配置，再原子替换该表，把成功应用的配置保存到实例目录中的 `nft.json` 并在桥接服务启动时恢复。应用 `{"nftables":[]}` 会删除规则表。升级运行布局时会迁移原有编号规则表及配额用量。卸载时脚本会清理节点规则和配额表并保留配置文件。[nftables JSON 参考](https://manpages.ubuntu.com/manpages/noble/man5/libnftables-json.5.html)
+流量配额规则随节点的配额设置自动生成，使用独立的 `inet yagp_quota` 表。已有的 `inet yagp_node` 规则继续由守护程序在启动时恢复。升级运行布局时会迁移原有编号规则表及配额用量。卸载时脚本会清理节点规则和配额表并保留配置文件。
 
 ### Gost Relay 来源 IP 白名单
 
@@ -342,7 +351,7 @@ systemd 节点使用 `yagp-daemon.service` 和 `yagp-gost.service`。Gost 在守
 1. 注册 A 和 B，在 **入口管理** 各建一个入口。为两端分别选择节点、监听协议、IP 和端口。保存后面板会让对应的 `yagp-daemon` 检查监听地址是否可用，保存本身不启动转发。旧版守护进程需要升级后才支持监听检查。
 2. 在 A 配置 **固定目标地址**，或选择 TCP、`127.0.0.1` 和 **Clash 规则集** 做本机透明分流。B 选择 **仅监听**，使用 A 可访问的地址。B 监听所有接口时，A 会自动跟随 B 上报的 IP 变化。
 3. 在 **隧道管理** 新建隧道，选择 A 作为来源、B 作为出口。创建时面板保存 A 的转发配置和 B 的 Gost Relay 配置。使用 Clash 时，命中订阅的连接经过 B，其余连接从 A 直连。
-4. 若使用回环透明分流，在运行中的 A 入口打开 **更多 → nftables 模板**，核对并应用到 A。模板使用你选的监听端口，只接管指定进程组的本机 IPv4 TCP 流量。`skgid` 默认示例为 `65534`，请改成实际应用进程组 ID；可单独修改 `dport` 来选择需要接管的原始目的端口。停用隧道前，先移除该重定向。
+4. 回环透明分流依赖入口节点上的流量重定向。升级面板和守护程序会保留此前已应用的重定向，可在节点的 **配置 → nft 配置** 中查看。
 
 ---
 

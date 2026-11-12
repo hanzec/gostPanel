@@ -13,7 +13,7 @@ vi.mock('@/api/node', () => ({
   calibrateNodeTraffic: vi.fn(),
   issueNodeRegistrationToken: vi.fn(), getNodeConfig: vi.fn(),
   getGostService: vi.fn(), getGostLogs: vi.fn(), restartGostService: vi.fn(),
-  getNodeNftConfig: vi.fn(), applyNodeNftConfig: vi.fn(),
+  getNodeNftConfig: vi.fn(),
   getNodeUpgradeStatus: vi.fn(), updateNodeUpgradePolicy: vi.fn(), upgradeNodeComponent: vi.fn()
 }))
 vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
@@ -21,7 +21,7 @@ vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
 const GIB = 1024 ** 3
 const primary = {
   id: 7, name: '边缘节点', remark: '入口', status: 'online', username: 'node-7', region: 'HK',
-  address: '2001:db8::7', ipv4: '192.0.2.7', ipv6: '2001:db8::7', last_check_at: '2026-11-08T02:00:00Z',
+  address: '2001:db8::7', ipv4: '192.0.2.7', ipv6: '2001:db8::7', manual_addresses: ['198.51.100.70', '2001:db8:1::7'], last_check_at: '2026-11-08T02:00:00Z',
   total_bytes: 1536, input_bytes: 512, output_bytes: 1024,
   traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily', traffic_quota_state: 'blocked', traffic_quota_used_bytes: GIB
 }
@@ -41,6 +41,7 @@ beforeEach(async () => {
   messages = mockNodeMessages()
   api.getNodeList.mockResolvedValue(list([primary]))
   api.getNode.mockResolvedValue(response(primary))
+  api.getGostService.mockResolvedValue(response({ unit: 'gost.service', active_state: 'active', load_state: 'loaded' }))
   getPublicSystemConfig.mockResolvedValue(response({ host: 'panel.example.com' }))
   api.issueNodeRegistrationToken.mockImplementation(async () => token())
   router = createRouter({ history: createMemoryHistory(), routes: [{ name: 'Nodes', path: '/nodes', component: Nodes }] })
@@ -188,7 +189,7 @@ describe('node inventory', () => {
     expect(api.getNodeList).toHaveBeenCalledTimes(5)
   })
 
-  it('shows endpoints and quota states and sends the selected status and page', async () => {
+  it('shows only the primary IP with quota states and sends the selected status and page', async () => {
     api.getNodeList.mockResolvedValue(list([
       { ...primary, addresses: ['192.0.2.7', '192.0.2.17', '2001:db8::7', '2001:db8::17'] },
       { id: 8, name: '待注册', status: 'offline', traffic_quota_state: 'pending' },
@@ -201,15 +202,20 @@ describe('node inventory', () => {
     await flushPromises()
     const rows = view.findAll('tbody tr').map(row => row.text())
     expect(rows[0]).toContain('2001:db8::7')
-    expect(rows[0]).toContain('192.0.2.17')
-    expect(rows[0]).toContain('2001:db8::17')
+    expect(rows[0]).not.toContain('192.0.2.7')
+    expect(rows[0]).not.toContain('192.0.2.17')
+    expect(rows[0]).not.toContain('2001:db8::17')
+    expect(rows[0]).not.toContain(primary.manual_addresses[0])
+    expect(rows[0]).not.toContain(primary.manual_addresses[1])
+    expect(view.get('tbody tr td:nth-child(2)').text()).toBe('节点 IP2001:db8::7')
     expect(rows[0]).toContain('1.5 KiB')
     expect(rows[0]).toContain('已达上限')
     expect(rows[0]).toContain('本期用量')
     expect(rows[1]).toContain('待获取地址')
     expect(rows[1]).toContain('解除限制待同步')
     expect(rows[2]).toContain('192.0.2.9')
-    expect(rows[2]).toContain('IPv6 · 不支持')
+    expect(rows[2]).not.toContain('IPv6')
+    expect(rows[2]).not.toContain('检查')
     expect(rows[2]).toContain('未设上限')
     expect(rows[3]).toContain('2001:db8::10')
     expect(rows[3]).toContain('需要支持流量配额的 yagp-daemon')
@@ -270,6 +276,59 @@ describe('node inventory', () => {
 })
 
 describe('node registration and quota settings', () => {
+  it('creates a node with supplementary IPs entered on separate lines', async () => {
+    api.createNode.mockResolvedValue(response(newNode))
+    const view = open()
+    await flushPromises()
+    await click(view, '添加节点')
+    const form = editForm(view, '添加节点')
+    await form.get('[placeholder="例如 华东入口"]').setValue(newNode.name)
+    const field = form.get('#node-manual-addresses')
+    expect(field.attributes('aria-describedby')).toBe('node-manual-addresses-help')
+    expect(form.get('#node-manual-addresses-help').text()).toContain('不替代自动获取的主要 IP')
+    await field.setValue(' 198.51.100.90 \n\n 2001:db8:1::9 \n')
+    await click(dialog(view, '添加节点'), '添加节点')
+    expect(api.createNode).toHaveBeenCalledWith({
+      name: newNode.name, remark: '', traffic_limit_bytes: 0, traffic_reset_period: 'none',
+      manual_addresses: ['198.51.100.90', '2001:db8:1::9']
+    })
+    expect(api.issueNodeRegistrationToken).toHaveBeenCalledWith(newNode.id)
+  })
+
+  it('retains invalid supplementary IP input after server validation, then saves and clears it', async () => {
+    const view = open()
+    await flushPromises()
+    await click(view, '配置')
+    const form = editForm(view, settingsTitle)
+    expect(form.get('#node-manual-addresses').element.value).toBe(primary.manual_addresses.join('\n'))
+    const logger = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const message = '补充 IP 必须是有效的 IPv4 或 IPv6 地址'
+    api.updateNode.mockRejectedValueOnce({ response: { data: { message } } })
+    await form.get('#node-manual-addresses').setValue('198.51.100.70:3333')
+    await click(dialog(view, settingsTitle), '保存更改')
+    expect(form.get('[role="alert"]').text()).toBe(message)
+    expect(form.get('#node-manual-addresses').element.value).toBe('198.51.100.70:3333')
+    expect(logger).toHaveBeenCalledOnce()
+
+    const updated = { ...primary, manual_addresses: ['198.51.100.71', '2001:db8:1::8'] }
+    api.updateNode.mockResolvedValue(response(updated))
+    api.getNodeList.mockResolvedValue(list([updated]))
+    await form.get('#node-manual-addresses').setValue(' 198.51.100.71 \n\n2001:db8:1::8\n')
+    await click(dialog(view, settingsTitle), '保存更改')
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
+      name: primary.name, remark: primary.remark, manual_addresses: updated.manual_addresses
+    })
+    await click(view, '配置')
+    const updatedForm = editForm(view, settingsTitle)
+    expect(updatedForm.get('#node-manual-addresses').element.value).toBe(updated.manual_addresses.join('\n'))
+    expect(updatedForm.find('[role="alert"]').exists()).toBe(false)
+    await updatedForm.get('#node-manual-addresses').setValue(' \n ')
+    await click(dialog(view, settingsTitle), '保存更改')
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, {
+      name: primary.name, remark: primary.remark, manual_addresses: []
+    })
+  })
+
   it('hides installation in both views and closes an open dialog once the node is online', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     api.getNodeList.mockResolvedValueOnce(list([offlinePrimary]))
@@ -489,23 +548,71 @@ describe('node actions', () => {
     expect(messages.success).toHaveBeenCalledTimes(2)
   })
 
-  it('opens each asynchronous node control and cleans it up when closed', async () => {
-    api.getGostService.mockResolvedValue(response({ unit: 'gost.service' }))
-    api.getGostLogs.mockResolvedValue(response({ entries: [] }))
-    api.getNodeNftConfig.mockResolvedValue(response({ table: 'yagp_7' }))
+  it('links directly to the inline Gost section and fetches logs when expanded', async () => {
+    api.getGostLogs.mockResolvedValue(response({ entries: [{ message: '启动完成', priority: 6 }] }))
+    const view = open()
+    await flushPromises()
+    expect(api.getGostService).not.toHaveBeenCalled()
+    await view.get('.inventory-service-link').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.hash).toBe('#node-gost-service')
+    expect(document.activeElement).toBe(view.get('#node-gost-title').element)
+    const service = view.get('#node-gost-service')
+    const overview = view.get('.detail-overview')
+    expect(overview.get('h2').text()).toBe('IP 信息')
+    expect(overview.findAll('h2')).toHaveLength(1)
+    expect(service.get('h2').text()).toBe('Gost 服务')
+    expect(overview.get('.detail-network').text()).toContain(primary.ipv4)
+    expect(overview.get('.detail-network').text()).toContain(primary.ipv6)
+    const addresses = Object.fromEntries(overview.findAll('.detail-endpoints > div').map(item => [item.get('dt').text(), item.get('dd').text()]))
+    expect(addresses).toEqual({
+      '节点 IP': primary.address, IPv4: primary.ipv4, IPv6: primary.ipv6, '补充 IP': primary.manual_addresses.join(' · ')
+    })
+    expect(view.get('[aria-labelledby="node-traffic-title"]').text()).toContain('流量统计与配额')
+    expect(overview.find('[aria-labelledby="node-traffic-title"]').exists()).toBe(false)
+    expect(service.classes()).toContain('ops-panel')
+    expect(view.get('.detail-cards').findAll(':scope > .ops-panel').map(card => card.get('h2').text())).toEqual(['IP 信息', 'Gost 服务'])
+    const traffic = view.get('[aria-labelledby="node-traffic-title"]')
+    expect(traffic.element.previousElementSibling).toBe(view.get('.detail-cards').element)
+    expect(overview.findAll('.ops-panel')).toHaveLength(0)
+    expect(api.getGostService).toHaveBeenCalledWith(primary.id)
+    expect(service.text()).toContain('运行中')
+    expect(view.find('[role="dialog"]').exists()).toBe(false)
+    expect(api.getGostLogs).not.toHaveBeenCalled()
+    await service.get('button[aria-controls="node-gost-logs"]').trigger('click')
+    await flushPromises()
+    expect(api.getGostLogs).toHaveBeenCalledWith(primary.id)
+    expect(service.get('#node-gost-logs').text()).toContain('启动完成')
+  })
+
+  it('opens upgrades separately and previews nft only from node configuration', async () => {
+    api.getNodeNftConfig.mockResolvedValue(response({
+      config: '{"nftables":[{"table":{"family":"inet","name":"yagp_quota"}}]}',
+      live: true
+    }))
     api.getNodeUpgradeStatus.mockResolvedValue(response({ available: false }))
     const view = open()
     await flushPromises()
     await openDetail(view)
-    for (const [action, request] of [['Gost 服务', api.getGostService], ['版本与升级', api.getNodeUpgradeStatus], ['nft 配置', api.getNodeNftConfig]]) {
-      await click(view, action)
-      await vi.dynamicImportSettled()
-      await flushPromises()
-      expect(request).toHaveBeenCalledWith(primary.id)
-      const title = `${action} · ${primary.name}`
-      await click(dialog(view, title), '关闭')
-      expect(view.find(`[aria-label="${title}"]`).exists()).toBe(false)
-    }
+    await click(view, '管理升级')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(api.getNodeUpgradeStatus).toHaveBeenCalledWith(primary.id)
+    await click(dialog(view, `版本与升级 · ${primary.name}`), '关闭')
+
+    expect(view.find('#tab-nft').exists()).toBe(false)
+    await click(view, '配置')
+    const settings = dialog(view, settingsTitle)
+    expect(api.getNodeNftConfig).not.toHaveBeenCalled()
+    await settings.get('#tab-nft').trigger('click')
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(api.getNodeNftConfig).toHaveBeenCalledWith(primary.id)
+    expect(view.findAll('[role="dialog"]')).toHaveLength(1)
+    const preview = settings.get('#pane-nft')
+    expect(preview.get('pre').text()).toContain('yagp_quota')
+    expect(preview.find('textarea').exists()).toBe(false)
+    expect(preview.text()).not.toContain('应用到节点')
   })
 
   it('cancels deletion, reports a failed delete and reloads after a successful one', async () => {

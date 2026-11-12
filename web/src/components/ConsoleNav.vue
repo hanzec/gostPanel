@@ -75,7 +75,7 @@ const groups = [
   align-items: center;
   gap: 11px;
   margin-inline: 4px;
-  border-radius: 9px;
+  border-radius: var(--ops-radius-inset);
   color: var(--ops-text);
   text-decoration: none;
 }
@@ -87,7 +87,7 @@ const groups = [
   flex: 0 0 39px;
   place-items: center;
   border: 1px solid var(--ops-accent-line);
-  border-radius: 10px;
+  border-radius: var(--ops-radius-inset);
   background: var(--ops-accent-bg);
   color: var(--ops-accent);
 }
@@ -96,11 +96,11 @@ const groups = [
 .console-brand__mark img { opacity: 0; border-radius: 4px; object-fit: contain; }
 .console-brand__mark img.is-loaded { opacity: 1; }
 .console-brand__type { display: grid; min-width: 0; gap: 2px; }
-.console-brand__type strong { overflow-wrap: anywhere; font-size: 21px; line-height: 1.15; }
+.console-brand__type strong { overflow-wrap: anywhere; font-size: var(--ops-text-title); line-height: var(--ops-leading-heading); font-weight: var(--ops-weight-bold); }
 
 .console-brand__type small {
   color: var(--ops-faint);
-  font: 600 9px/1.5 var(--ops-mono);
+  font: var(--ops-weight-semibold) var(--ops-text-xs)/var(--ops-leading-body) var(--ops-mono);
   letter-spacing: .13em;
 }
 
@@ -110,8 +110,8 @@ const groups = [
 .console-nav__label {
   padding: 0 11px 3px;
   color: var(--ops-faint);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semibold);
   letter-spacing: .1em;
 }
 
@@ -122,10 +122,10 @@ const groups = [
   gap: 11px;
   padding: 8px 11px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--ops-radius-inset);
   color: var(--ops-muted);
-  font-size: 14px;
-  font-weight: 570;
+  font-size: var(--ops-text-body);
+  font-weight: var(--ops-weight-medium);
   text-decoration: none;
   transition: color 150ms, background-color 150ms, border-color 150ms;
 }
@@ -148,7 +148,7 @@ const groups = [
   padding: 13px 10px 2px;
   border-top: 1px solid var(--ops-border);
   color: var(--ops-faint);
-  font-size: 12px;
+  font-size: var(--ops-text-xs);
 }
 
 @media (max-width: 900px) {

@@ -10,20 +10,26 @@ readonly legacy_upgrade_receiver_unit=/etc/systemd/system/yagp-depoly-upgrade-we
 readonly listener_unit=/etc/systemd/system/yagp-depoly.service
 readonly upgrade_unit=/etc/systemd/system/yagp-depoly-upgrade.service
 readonly install_path=/usr/local/sbin/yagp-depoly
+readonly update_path=/usr/local/sbin/yagp-update
+readonly update_dir=/var/lib/yagp-update
+readonly job_dir="$update_dir/jobs"
+readonly log_query="journalctl --namespace=+yagp-depoly -u yagp-depoly.service -u 'yagp-update-*.service' -f"
 readonly managed_dir=/etc/yagp-depoly
 readonly managed_project="$managed_dir/project-dir"
 readonly managed_override="$managed_dir/compose.yml"
 readonly previous_override_name=.yagp-depoly.yml
 readonly docker_socket=/var/run/docker.sock
-readonly image_repo=ghcr.io/hanzec/yagp
+readonly image_repo=release.hanzec-overseas.cn/images/yagp
+readonly legacy_image_repo=ghcr.io/hanzec/yagp
+readonly release_cache=https://release.hanzec-overseas.cn/yagp
 readonly webhook_base_path=/api/deploy
-readonly upgrade_endpoint=/api/deploy/deploy-tool
+readonly default_traefik_dynamic_dir=/etc/traefik/dynamic
 
 main() {
     case ${1:-} in
-        install-webhook) shift; install_webhook "$@" ;;
-        install-upgrade) shift; install_upgrade "$@" ;;
-        '') deploy_image ;;
+        install) shift; install_webhook "$@" ;;
+        compose) [[ $# -eq 1 ]] || usage; deploy_image ;;
+        depoly) [[ $# -eq 1 ]] || usage; update_tools ;;
         *) usage ;;
     esac
 }
@@ -31,11 +37,11 @@ main() {
 usage() {
     cat >&2 <<'EOF'
 用法：
-  sudo bash setup_deploy.sh install-webhook Compose部署目录 yagp-depoly二进制 [Traefik容器名]
-  sudo bash setup_deploy.sh install-upgrade [Traefik容器名]
+  sudo bash setup_deploy.sh install Compose部署目录 [--traefik 容器名或ID]
+      [--traefik-dynamic-dir 容器内动态配置目录]
 
-install-webhook 适用于已部署的 Linux Docker Compose 面板，要求部署目录内有
-root 管理的 docker-compose.yml 和 .env。原有部署变量须保存在 .env。
+install 适用于已部署的 Linux Docker Compose 面板，要求部署目录内有
+root 管理的 docker-compose.yml 和 .env。一次配置面板部署和工具升级 Webhook。
 部署账号使用 nologin。安装时保留旧镜像覆盖配置并撤销旧 SSH 部署入口。
 EOF
     exit 2
@@ -50,92 +56,57 @@ log() {
     printf '[%s] %s\n' "$(/bin/date '+%Y-%m-%d %H:%M:%S %z')" "$*" >&2
 }
 
-install_webhook() {
-    [[ $# -eq 2 || $# -eq 3 ]] || usage
+install_webhook() (
+    [[ $# -ge 1 ]] || usage
     check_systemd
-    local project_dir project binary traefik secret token old_secret old_token with_upgrade=false
+    local project_dir project proxy stage cosign arch receiver updater traefik options dynamic_dir route_file
+    local secret token old_secret old_token
+    cosign=$(find_cosign)
     project_dir=$(resolve_project_dir "$1")
-    binary=$(realpath -e -- "$2")
-    [[ -f $binary ]] || fail '请提供 yagp-depoly ELF 二进制。'
+    shift
+    options=$(traefik_options "$@")
+    IFS='|' read -r proxy dynamic_dir <<< "$options"
+    arch=$(tool_arch)
     project=$(inspect_project "$project_dir")
-    traefik=$(inspect_traefik "$project_dir" "$project" "${3:-traefik}")
+    traefik=$(inspect_traefik "$project_dir" "$project" "$proxy")
+    route_file=$(traefik_route_file "$proxy" "$dynamic_dir")
+    stage=$(mktemp -d /tmp/yagp-deploy.XXXXXXXXXX)
+    trap 'rm -rf -- "$stage"' EXIT
+    receiver="yagp-depoly-linux-$arch"
+    updater="yagp-update-linux-$arch"
+    download_tool_archive "$stage" "$cosign" "$receiver.tar.gz"
+    tar -xzf "$stage/$receiver.tar.gz" -C "$stage" -- "$receiver" "$updater" || fail '发布包缺少部署工具。'
     prepare_managed_dir
     lock_deploy
     old_secret="$project_dir/.yagp-webhook-secret"
     old_token="$project_dir/.yagp-webhook-token"
     secret=$(prepare_credential "$managed_dir/panel.secret" "$old_secret")
     token=$(prepare_credential "$managed_dir/panel.token" "$old_token")
-    check_distinct_credentials "$secret" "$token" "$managed_dir/upgrade.secret" "$managed_dir/upgrade.token"
-    if [[ -e $upgrade_unit || -L $upgrade_unit ]]; then
-        check_managed_file "$upgrade_unit"
-        check_managed_file "$managed_dir/upgrade.secret"
-        check_managed_file "$managed_dir/upgrade.token"
-        with_upgrade=true
-    fi
+    [[ $secret != "$token" ]] || fail 'Webhook 签名密钥和 Token 须使用不同的值。'
 
     stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
-    setup_account "$project_dir" "$project" "$binary"
+    setup_account "$project_dir" "$project" "$stage/$receiver" "$stage/$updater"
     printf '%s\n' "$secret" | write_file "$managed_dir/panel.secret" 0600
     printf '%s\n' "$token" | write_file "$managed_dir/panel.token" 0600
-    write_hook_unit "$traefik" "$with_upgrade"
-    write_traefik_route "$traefik"
+    write_hook_unit "$traefik"
+    write_traefik_route "$traefik" "$managed_dir/traefik-panel.yml"
 
     systemctl daemon-reload
     systemctl enable yagp-depoly.service
     systemctl restart yagp-depoly.service
+    if [[ -n $route_file ]]; then
+        write_file "$route_file" 0644 < "$managed_dir/traefik-panel.yml"
+        log "Traefik 路由已写入 $route_file。"
+    else
+        log "未找到容器内 $default_traefik_dynamic_dir 对应的宿主机目录。Webhook 路由仍需配置。"
+        log "请指定 --traefik-dynamic-dir 后重新安装，或将 $managed_dir/traefik-panel.yml 加入 Traefik 实际读取的目录。"
+    fi
     retire_legacy_receiver "$project_dir" "$old_secret" "$old_token"
     retire_legacy_upgrade_receiver
-    log '配置完成。部署账号已禁用登录，本次未更新容器。'
-    log "请将 $managed_dir/traefik-panel.yml 加入 Traefik 的动态配置目录。"
-    log '查看部署日志：journalctl -u yagp-depoly.service -f'
-    show_install_result DEPLOY_WEBHOOK panel "$webhook_base_path" "$traefik" "$secret" "$token"
-}
-
-install_upgrade() {
-    [[ $# -le 1 ]] || usage
-    check_systemd
-    check_upgrade_cli
-    check_managed_file "$listener_unit"
-    check_managed_file "$install_path"
-    require_root_owned "$managed_dir"
-    check_managed_file "$managed_project"
-    local project_dir project traefik secret token
-    project_dir=$(resolve_project_dir "$(<"$managed_project")")
-    project=$(inspect_project "$project_dir")
-    traefik=$(inspect_traefik "$project_dir" "$project" "${1:-traefik}")
-    lock_deploy
-    secret=$(prepare_credential "$managed_dir/upgrade.secret")
-    token=$(prepare_credential "$managed_dir/upgrade.token")
-    check_managed_file "$managed_dir/panel.secret"
-    check_managed_file "$managed_dir/panel.token"
-    check_distinct_credentials "$secret" "$token" "$managed_dir/panel.secret" "$managed_dir/panel.token"
-
-    stop_legacy_receiver "$legacy_upgrade_receiver_unit" "$install_path serve-upgrade"
-    install_account "$deploy_user" "$deploy_home"
-    install_sudo_rule "$deploy_user" yagp-deploy-tool /usr/bin/systemctl --no-block start yagp-depoly-upgrade.service
-    printf '%s\n' "$secret" | write_file "$managed_dir/upgrade.secret" 0600
-    printf '%s\n' "$token" | write_file "$managed_dir/upgrade.token" 0600
-    write_file "$upgrade_unit" 0644 <<EOF
-[Unit]
-Description=yagp deployment tool upgrade
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=$install_path self-upgrade
-TimeoutStartSec=10min
-EOF
-    write_hook_unit "$traefik" true
-    write_traefik_route "$traefik"
-
-    systemctl daemon-reload
-    systemctl restart yagp-depoly.service
-    retire_legacy_upgrade_receiver
-    log "Webhook 共用 Traefik 配置：$managed_dir/traefik-panel.yml"
-    log '查看工具升级日志：journalctl -u yagp-depoly-upgrade.service -f'
-    show_install_result UPGRADE_WEBHOOK upgrade "$upgrade_endpoint" "$traefik" "$secret" "$token"
-}
+    log 'Webhook 接收器安装完成。部署账号已禁用登录，本次未更新容器。'
+    log "查看部署日志：$log_query"
+    show_install_result "$traefik" "$secret" "$token"
+)
 
 check_systemd() {
     root_environment
@@ -146,18 +117,90 @@ check_systemd() {
         fail 'Webhook 接收器需要支持 LoadCredential 的 systemd 247 或更新版本。'
 }
 
-check_upgrade_cli() {
-    local gh_path version
-    local version_pattern='^gh version ([0-9]+)\.([0-9]+)\.[0-9]+([[:space:]]|$)'
-    gh_path=$(PATH=/usr/local/bin:/usr/bin:/bin type -P gh) &&
-        gh_path=$(realpath -e -- "$gh_path") ||
-        fail '工具升级需要 gh 2.102.0 或更新版本。'
-    check_managed_file "$gh_path"
-    require_root_path "$(dirname -- "$gh_path")"
-    version=$("$gh_path" --version) || fail '无法读取 gh 版本。'
+tool_arch() {
+    case $(uname -m) in
+        x86_64) printf '%s\n' amd64 ;;
+        aarch64|arm64) printf '%s\n' arm64 ;;
+        *) fail '部署工具需要 Linux amd64 或 arm64。' ;;
+    esac
+}
+
+find_cosign() {
+    local cosign version
+    local version_pattern='"gitVersion"[[:space:]]*:[[:space:]]*"v([0-9]+)\.([0-9]+)\.([0-9]+)"'
+    cosign=$(PATH=/usr/local/bin:/usr/bin:/bin type -P cosign) &&
+        cosign=$(realpath -e -- "$cosign") && [[ -x $cosign ]] ||
+        fail '验证部署工具发布包需要 Cosign 3.1.3 或更新版本。'
+    check_managed_file "$cosign"
+    require_root_path "$(dirname -- "$cosign")"
+    version=$("$cosign" version --json) || fail '无法读取 Cosign 版本。'
     [[ $version =~ $version_pattern ]] &&
-        (( 10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 102) )) ||
-        fail '工具升级需要 gh 2.102.0 或更新版本。'
+        (( 10#${BASH_REMATCH[1]} > 3 || (10#${BASH_REMATCH[1]} == 3 &&
+            (10#${BASH_REMATCH[2]} > 1 || (10#${BASH_REMATCH[2]} == 1 && 10#${BASH_REMATCH[3]} >= 3))) )) ||
+        fail '验证部署工具发布包需要 Cosign 3.1.3 或更新版本。'
+    printf '%s\n' "$cosign"
+}
+
+download_tool_archive() {
+    local stage=$1 cosign=$2 archive=$3 tag=${4:-}
+    local bundle=yagp-depoly-attestations.jsonl url base="$release_cache/releases/download/"
+    local tag_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-[0-9a-f]{7}$'
+    local -a curl_options=(-q -fsS --proto '=https' --connect-timeout 10 --max-time 120)
+    if [[ -z $tag ]]; then
+        url=$(curl "${curl_options[@]}" --head --output /dev/null --write-out '%{redirect_url}' -- "$release_cache/latest/$archive") ||
+            fail '无法查询最新的部署工具发布包。'
+        [[ $url == "$base"*"/$archive" ]] || fail '发布缓存返回了无效的下载地址。'
+        tag=${url#"$base"}
+        tag=${tag%"/$archive"}
+    fi
+    [[ $tag =~ $tag_pattern ]] || fail '部署工具发布版本无效。'
+
+    log "下载部署工具 $tag（$archive）。"
+    curl "${curl_options[@]}" --max-filesize 67108864 --output "$stage/$archive" -- "$base$tag/$archive" ||
+        fail '无法下载部署工具发布包。'
+    curl "${curl_options[@]}" --max-filesize 2097152 --output "$stage/$bundle" -- "$base$tag/$bundle" ||
+        fail '无法下载发布包证明。'
+    log "验证部署工具 $tag 的发布证明。"
+    env -i PATH="$PATH" HOME="$stage" LC_ALL=C \
+        "$cosign" --timeout 60s verify-blob-attestation --bundle "$stage/$bundle" --type slsaprovenance1 \
+        --certificate-identity https://github.com/hanzec/yagp/.github/workflows/release.yml@refs/heads/master \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com "$stage/$archive" ||
+        fail '部署工具发布包验签失败。'
+}
+
+traefik_options() {
+    local proxy='' dynamic_dir=''
+    while (( $# )); do
+        case $1 in
+            --traefik)
+                [[ $# -ge 2 && -n $2 ]] || usage
+                proxy=$2
+                shift ;;
+            --traefik=*)
+                proxy=${1#*=}
+                [[ -n $proxy ]] || usage ;;
+            --traefik-dynamic-dir)
+                [[ $# -ge 2 && -n $2 ]] || usage
+                dynamic_dir=$2
+                shift ;;
+            --traefik-dynamic-dir=*)
+                dynamic_dir=${1#*=}
+                [[ -n $dynamic_dir ]] || usage ;;
+            *)
+                [[ $# -eq 1 && -z $proxy && $1 != -* ]] || usage
+                proxy=$1 ;;
+        esac
+        shift
+    done
+    proxy=${proxy:-traefik}
+    [[ $proxy != -* && $proxy != *'|'* && $proxy != *$'\n'* ]] || usage
+    if [[ -n $dynamic_dir ]]; then
+        [[ $dynamic_dir == /* && $dynamic_dir != *'|'* && $dynamic_dir != *$'\n'* &&
+           $dynamic_dir/ != *'/../'* && $dynamic_dir/ != *'/./'* ]] || usage
+        dynamic_dir=${dynamic_dir%/}
+        [[ -n $dynamic_dir ]] || usage
+    fi
+    printf '%s|%s\n' "$proxy" "$dynamic_dir"
 }
 
 resolve_project_dir() {
@@ -179,7 +222,7 @@ prepare_managed_dir() {
 }
 
 setup_account() {
-    local project_dir=$1 project=$2 binary=$3
+    local project_dir=$1 project=$2 receiver=$3 updater=$4
     local compose_help legacy=false previous_override="$1/$previous_override_name"
     log "检查部署目录与 Compose 配置：$project_dir"
     cd "$project_dir"
@@ -231,17 +274,45 @@ setup_account() {
 
     log "检查部署账号 $deploy_user 和 Docker 套接字权限。"
     install_account "$deploy_user" "$deploy_home"
+    prepare_job_directory
     if [[ -e $authorized_keys || -L $authorized_keys ]]; then
         require_root_owned "$deploy_home/.ssh"
         check_managed_file "$authorized_keys"
     fi
     check_install_parent
     stop_legacy_receiver "$legacy_receiver_unit" "$project_dir/yagp-deploy-webhook"
-    log "写入部署入口：$install_path"
-    write_file "$install_path" 0755 < "$binary"
+    stop_legacy_upgrade_job
+    log "安装特权更新程序 $update_path。"
+    write_file "$update_path" 0755 < "$updater"
     log '校验并安装 sudo 规则。'
-    install_sudo_rule "$deploy_user" "$deploy_user" "$install_path" deploy
+    install_update_permissions
+    log "安装 Webhook 接收器 $install_path。"
+    write_file "$install_path" 0755 < "$receiver"
     retire_ssh_key "$project_dir/yagp-depoly"
+}
+
+prepare_job_directory() {
+    if [[ ! -e $update_dir && ! -L $update_dir ]]; then
+        mkdir -m 0755 -- "$update_dir"
+    fi
+    require_root_path "$update_dir"
+    if [[ ! -e $job_dir && ! -L $job_dir ]]; then
+        mkdir -m 0750 -- "$job_dir"
+    fi
+    require_root_owned "$job_dir"
+    [[ -d $job_dir ]] || fail "任务路径不是目录：$job_dir"
+    chown "root:$deploy_user" -- "$job_dir"
+    chmod 2750 -- "$job_dir"
+    mkdir -p -- /etc/tmpfiles.d
+    require_root_owned /etc/tmpfiles.d
+    write_file /etc/tmpfiles.d/yagp-update.conf 0644 <<EOF
+d $job_dir 2750 root $deploy_user 7d
+EOF
+}
+
+install_update_permissions() {
+    install_sudo_rule "$deploy_user" "$deploy_user" "$update_path" compose
+    install_sudo_rule "$deploy_user" yagp-deploy-tool "$update_path" depoly
 }
 
 check_install_parent() {
@@ -262,6 +333,16 @@ stop_legacy_receiver() {
         fail '发现非本安装器管理的旧 Webhook 服务，未修改该服务。'
     log "停止旧 Webhook 接收器：${unit##*/}"
     systemctl disable --now "${unit##*/}"
+}
+
+stop_legacy_upgrade_job() {
+    [[ -e $upgrade_unit || -L $upgrade_unit ]] || return 0
+    check_managed_file "$upgrade_unit"
+    grep -Fxq "ExecStart=$install_path self-upgrade" "$upgrade_unit" ||
+        fail '发现非本安装器管理的旧升级服务，未修改该服务。'
+    systemctl stop "${upgrade_unit##*/}"
+    rm -f -- "$upgrade_unit"
+    systemctl daemon-reload
 }
 
 retire_legacy_receiver() {
@@ -312,31 +393,16 @@ read_credential() {
     printf '%s\n' "$value"
 }
 
-check_distinct_credentials() {
-    local secret=$1 token=$2 other_file other_value previous_value=''
-    shift 2
-    [[ $secret =~ ^[0-9a-f]{64}$ && $token =~ ^[0-9a-f]{64}$ && $secret != "$token" ]] ||
-        fail 'Webhook 签名密钥和 Token 须为两份不同的 64 位小写十六进制字符。'
-    for other_file in "$@"; do
-        if [[ -e $other_file || -L $other_file ]]; then
-            other_value=$(read_credential "$other_file")
-            [[ $secret != "$other_value" && $token != "$other_value" && $previous_value != "$other_value" ]] ||
-                fail '面板部署和工具升级须使用不同的凭据。'
-            previous_value=$other_value
-        fi
-    done
-}
-
 show_install_result() {
-    local prefix=$1 role=$2 endpoint=$3 secret=$5 token=$6
+    local traefik=$1 secret=$2 token=$3
     local hostname proxy_ip proxy_name
-    IFS='|' read -r hostname _ _ proxy_ip proxy_name <<< "$4"
-    log "Webhook 信任的公网 Traefik 容器为 $proxy_name（$proxy_ip）。"
-    printf '%s_URL=https://%s%s\n' "$prefix" "$hostname" "$endpoint"
+    IFS='|' read -r hostname _ _ proxy_ip proxy_name <<< "$traefik"
+    log "Webhook 信任的公网 Traefik 容器为 ${proxy_name}（${proxy_ip}）。"
+    printf 'DEPLOY_WEBHOOK_URL=https://%s%s\n' "$hostname" "$webhook_base_path"
     if [[ -t 1 ]]; then
-        printf '%s_SECRET=%s\n%s_TOKEN=%s\n' "$prefix" "$secret" "$prefix" "$token"
+        printf 'DEPLOY_WEBHOOK_SECRET=%s\nDEPLOY_WEBHOOK_TOKEN=%s\n' "$secret" "$token"
     else
-        log "凭据保存在 $managed_dir/$role.secret 和 $managed_dir/$role.token，可在可信终端用 sudo cat 读取。"
+        log "凭据保存在 $managed_dir/panel.secret 和 $managed_dir/panel.token，可在可信终端用 sudo cat 读取。"
     fi
 }
 
@@ -390,15 +456,40 @@ inspect_traefik() {
     printf '%s|%s|%s|%s|%s\n' "$hostname" "$entrypoint" "$gateway" "$proxy_ip" "$proxy_name"
 }
 
-write_hook_unit() {
-    local traefik=$1 with_upgrade=$2 state_directories=yagp-depoly-panel
-    local gateway proxy_ip upgrade_credentials='' upgrade_args=''
-    IFS='|' read -r _ _ gateway proxy_ip _ <<< "$traefik"
-    if [[ $with_upgrade == true ]]; then
-        state_directories+=' yagp-depoly-upgrade-hook'
-        printf -v upgrade_credentials 'LoadCredential=upgrade-secret:%s/upgrade.secret\nLoadCredential=upgrade-token:%s/upgrade.token' "$managed_dir" "$managed_dir"
-        upgrade_args=' -upgrade-secret-file ${CREDENTIALS_DIRECTORY}/upgrade-secret -upgrade-token-file ${CREDENTIALS_DIRECTORY}/upgrade-token -upgrade-state-file /var/lib/yagp-depoly-upgrade-hook/replay'
+traefik_route_file() {
+    local proxy=$1 configured_dir=$2 dynamic_dir mounts type source destination
+    local mount_type='' mount_source='' mount_destination='' host_dir route_file
+    dynamic_dir=${configured_dir:-$default_traefik_dynamic_dir}
+    mounts=$(docker_local inspect --type container --format \
+        '{{range .Mounts}}{{printf "%s\t%s\t%s\n" .Type .Destination .Source}}{{end}}' -- "$proxy") ||
+        fail "无法读取 Traefik 容器 $proxy 的挂载。"
+    # A mount on the dynamic directory takes precedence over a parent mount.
+    while IFS=$'\t' read -r type destination source; do
+        if [[ ( $dynamic_dir == "$destination" || $dynamic_dir == "$destination/"* ) &&
+              ${#destination} -gt ${#mount_destination} ]]; then
+            mount_type=$type
+            mount_source=$source
+            mount_destination=$destination
+        fi
+    done <<< "$mounts"
+    host_dir=$mount_source${dynamic_dir#"$mount_destination"}
+    if [[ $mount_type != bind || ! -d $host_dir ]]; then
+        [[ -z $configured_dir ]] || fail "Traefik 容器 $proxy 的 $dynamic_dir 未通过 bind mount 绑定到宿主机目录。"
+        return 0
     fi
+    host_dir=$(realpath -e -- "$host_dir") ||
+        fail "无法定位 Traefik 容器 $proxy 的动态配置目录 $dynamic_dir。"
+    require_root_path "$host_dir"
+    route_file="$host_dir/traefik-panel.yml"
+    if [[ -e $route_file || -L $route_file ]]; then
+        check_managed_file "$route_file"
+    fi
+    printf '%s\n' "$route_file"
+}
+
+write_hook_unit() {
+    local traefik=$1 gateway proxy_ip
+    IFS='|' read -r _ _ gateway proxy_ip _ <<< "$traefik"
     log "安装 yagp-depoly.service，监听 Docker 内网 $gateway:39102。"
     write_file "$listener_unit" 0644 <<EOF
 [Unit]
@@ -409,12 +500,12 @@ Wants=docker.service
 [Service]
 Type=notify
 User=$deploy_user
-StateDirectory=$state_directories
+LogNamespace=yagp-depoly
+StateDirectory=yagp-depoly-panel yagp-depoly-upgrade-hook
 StateDirectoryMode=0700
 LoadCredential=webhook-secret:$managed_dir/panel.secret
 LoadCredential=webhook-token:$managed_dir/panel.token
-$upgrade_credentials
-ExecStart=$install_path serve -listen $gateway:39102 -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file /var/lib/yagp-depoly-panel/replay$upgrade_args
+ExecStart=$install_path serve -listen $gateway:39102 -trusted-proxy $proxy_ip -secret-file \${CREDENTIALS_DIRECTORY}/webhook-secret -token-file \${CREDENTIALS_DIRECTORY}/webhook-token -state-file /var/lib/yagp-depoly-panel/replay -upgrade-state-file /var/lib/yagp-depoly-upgrade-hook/replay
 TimeoutStartSec=20s
 Restart=on-failure
 RestartSec=5
@@ -428,7 +519,7 @@ write_traefik_route() {
     local hostname entrypoint gateway hook_rule
     IFS='|' read -r hostname entrypoint gateway _ <<< "$1"
     printf -v hook_rule 'Host(`%s`) && (Path(`/api/deploy`) || PathPrefix(`/api/deploy/`))' "$hostname"
-    write_file "$managed_dir/traefik-panel.yml" 0644 <<EOF
+    write_file "$2" 0644 <<EOF
 http:
   routers:
     yagp-deploy-webhook:
@@ -456,7 +547,7 @@ import_override() {
     if [[ -e $source || -L $source ]]; then
         check_managed_file "$source"
         image=$(sed -n '3s/^    image: //p' "$source")
-        [[ $image == "$image_repo@"* && ${image#*@} =~ ^sha256:[0-9a-f]{64}$ ]] ||
+        [[ $image == "$legacy_image_repo@"* && ${image#*@} =~ ^sha256:[0-9a-f]{64}$ ]] ||
             fail '旧镜像覆盖文件中没有有效的 yagp 镜像 digest。'
         log "保留旧镜像：$image"
     else
@@ -496,13 +587,12 @@ inspect_project() {
 }
 
 deploy_image() {
-    [[ $0 == "$install_path" ]] || usage
     root_environment
     local digest project_dir project image running compose_status started=$SECONDS
     IFS= read -r digest && [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] ||
         fail '需要完整的小写 SHA-256 镜像 digest。'
     image="$image_repo@$digest"
-    log "开始部署面板镜像 $image。"
+    log "开始部署面板镜像 ${image}。"
 
     require_root_owned "$managed_dir"
     lock_deploy
@@ -514,8 +604,10 @@ deploy_image() {
     check_services "$project_dir" "$project"
     running=$(docker_local inspect --type container --format \
         '{{.Config.Image}}|{{index .Config.Labels "com.docker.compose.project"}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' yagp 2>/dev/null) || running=''
-    if [[ $running == "$image|$project|healthy" ]]; then
-        write_override "$managed_override" "$project" "$image"
+    if [[ $running == "$image|$project|healthy" ||
+          $running == "$legacy_image_repo@$digest|$project|healthy" ]]; then
+        # 继续引用正在运行的镜像，直到实际拉取了加速地址上的镜像。
+        write_override "$managed_override" "$project" "${running%%|*}"
         log "项目 $project 已运行该镜像且健康，跳过重启：$digest"
         return
     fi
@@ -535,6 +627,21 @@ deploy_image() {
     }
     log "项目 $project 更新完成，健康检查通过，耗时 $((SECONDS - started)) 秒。"
 }
+
+# 仅为已安装的旧版 yagp-update 保留一次性迁移入口；新版自行下载并验签。
+# 必须调用旧版 apply 阶段，直接执行普通 depoly 命令会再次下载本脚本并递归。
+update_tools() (
+    root_environment
+    [[ -n ${YAGP_UPDATE_RELEASE_TAG:-} ]] || fail '工具升级须由 yagp-update 指定发布版本。'
+    local stage cosign arch archive
+    cosign=$(find_cosign)
+    arch=$(tool_arch)
+    archive="yagp-depoly-linux-$arch.tar.gz"
+    stage=$(mktemp -d /tmp/yagp-deploy.XXXXXXXXXX)
+    trap 'rm -rf -- "$stage"' EXIT
+    download_tool_archive "$stage" "$cosign" "$archive" "$YAGP_UPDATE_RELEASE_TAG"
+    YAGP_UPDATE_PHASE=apply "$update_path" depoly < "$stage/$archive"
+)
 
 write_override() {
     local target=$1 project=$2 image=${3:-}

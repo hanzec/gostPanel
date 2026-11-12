@@ -2,18 +2,18 @@ import { flushPromises } from '@vue/test-utils'
 import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plus'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Rules from '@/views/Rules.vue'
-import { getRoutingNodes, getNodeNftConfig } from '@/api/node'
+import { getRoutingNodes } from '@/api/node'
 import request from '@/utils/request'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
-vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn(), getNodeNftConfig: vi.fn(), applyNodeNftConfig: vi.fn() }))
+vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
 vi.mock('@/api/rule', () => ({
   checkRuleListener: vi.fn(), createRule: vi.fn(), deleteRule: vi.fn(), getRuleList: vi.fn(),
   startRule: vi.fn(), stopRule: vi.fn(), updateRule: vi.fn()
 }))
 
-const entryNode = { id: 4, name: '入口 A', ipv4: '192.0.2.10', ipv6: '2001:db8::8' }
+const entryNode = { id: 4, name: '入口 A', ipv4: '192.0.2.10', ipv6: '2001:db8::8', manual_addresses: ['198.51.100.10'] }
 const direct = {
   id: 1, name: 'HTTPS', status: 'running', node: entryNode, node_id: entryNode.id,
   protocol: 'tcp', listen_ip: '192.0.2.10', listen_port: 443, targets: ['primary.test:443', 'fallback.test:443'],
@@ -265,6 +265,7 @@ describe('forwarding rule editor and actions', () => {
       '所有接口', 'IPv4 回环 · 127.0.0.1', 'IPv6 回环 · ::1',
       '入口探测地址 · 192.0.2.10', '入口探测地址 · 2001:db8::8'
     ])
+    expect(listenIP.findAllComponents(ElOption).map(option => option.props('value'))).not.toContain(entryNode.manual_addresses[0])
     await choose(listenIP, entryNode.ipv4)
     await field(dialog, 'listen_port').get('input').setValue('5353')
     expect(dialog.get('#rule-listen-endpoint').text()).toContain('192.0.2.10:5353')
@@ -329,20 +330,17 @@ describe('forwarding rule editor and actions', () => {
     })
   })
 
-  it('opens the selected loopback port template on the tunnel entry node', async () => {
+  it('shows the tunnel link for a running Clash entry', async () => {
     getRuleList.mockResolvedValueOnce(result([{
       ...relayRule, protocol: 'tcp', listen_ip: '127.0.0.1', listen_port: 443,
       use_clash_ruleset: true, targets: [], status: 'running', linked_tunnel_id: 8, tunnel_role: 'entry'
     }]))
-    getNodeNftConfig.mockResolvedValueOnce({ data: { table: 'yagp_node_4', template: '{"nftables":[]}' } })
     const wrapper = mountInventory(Rules)
     await flushPromises()
     expect(row(wrapper, 'DNS').text()).toContain('Clash 规则集')
     expect(row(wrapper, 'DNS').text()).toContain('隧道源端')
     expect(row(wrapper, 'DNS').find('[aria-label="停止 DNS"]').exists()).toBe(false)
-    await command(row(wrapper, 'DNS'), 'nft-template')
-    expect(getNodeNftConfig).toHaveBeenCalledWith(entryNode.id, 443)
-    expect(editDialog(wrapper).attributes('aria-label')).toContain('入口 A')
+    expect(row(wrapper, 'DNS').text()).toContain('隧道管理')
   })
 
   it('keeps edits on a failed save and requires a port when copying', async () => {
