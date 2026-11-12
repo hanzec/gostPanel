@@ -217,14 +217,15 @@
             <p class="tunnel-dialog-hint ops-muted">以下设置来自所选出口，在端点管理中修改。</p>
             <dl class="tunnel-policy-summary">
               <dt>隧道协议</dt><dd>{{ exitEntrance.protocol.toUpperCase() }}</dd>
-              <dt>目标类型</dt><dd>{{ exitEntrance.use_clash_ruleset ? 'Clash 规则集（透明分流）' : '固定目标地址' }}</dd>
-              <template v-if="!exitEntrance.use_clash_ruleset">
+              <dt>目标类型</dt><dd>{{ exitRouting.use_original_target ? '按原始目标' : '固定目标地址' }}</dd>
+              <template v-if="!exitRouting.use_original_target">
                 <dt>目标地址</dt><dd><span v-for="target in exitEntrance.targets" :key="target" class="ops-mono">{{ target }}</span></dd>
                 <dt>负载均衡</dt><dd>{{ strategies[exitEntrance.strategy] || '轮询' }}</dd>
               </template>
             </dl>
+            <TargetRoutingFields v-if="exitRouting.use_original_target" readonly original-target :match-rules="exitRouting.match_rules" :ruleset-ids="exitRouting.ruleset_ids" :manual-domains-text="exitRouting.manualDomainsText" />
             <GostTransportOptions :model-value="exitEntrance.protocol_options || {}" :protocol="exitEntrance.protocol" readonly />
-            <p v-if="exitEntrance.use_clash_ruleset" class="tunnel-form-hint ops-muted">Clash 分流要求入口使用 TCP 与 127.0.0.1。</p>
+            <p v-if="exitRouting.use_original_target" class="tunnel-form-hint ops-muted">此出口需连接“透明转发（HTTP/HTTPS）”入口。</p>
           </section>
           <p v-else-if="!legacyEdit && !exitEntrance" class="tunnel-form-hint ops-muted inventory-form-wide">选择出口后查看其目标与策略。</p>
           <section v-if="legacyTargetEdit" class="tunnel-target-section inventory-form-wide" aria-labelledby="tunnel-target-title">
@@ -238,16 +239,8 @@
                 <p id="tunnel-protocol-help" class="tunnel-form-hint ops-muted">用于源节点到目的节点之间的 Gost 隧道传输。</p>
               </el-form-item>
               <GostTransportOptions v-model="form.protocol_options" :protocol="form.protocol" class="inventory-form-wide" />
-              <el-form-item label="目标类型" prop="use_clash_ruleset" class="inventory-form-wide">
-                <el-select v-model="form.use_clash_ruleset" aria-describedby="tunnel-target-mode-help">
-                  <el-option label="固定目标地址" :value="false" />
-                  <el-option label="Clash 规则集（透明分流）" :value="true" :disabled="!canUseClashRuleset" />
-                </el-select>
-                <p id="tunnel-target-mode-help" class="tunnel-form-hint ops-muted">
-                  {{ canUseClashRuleset ? 'Clash 分流使用系统设置中的规则集，匹配流量经过隧道，其余流量直连。' : 'Clash 分流需要源端点使用 TCP 与 127.0.0.1。' }}
-                </p>
-              </el-form-item>
-              <el-form-item v-if="!form.use_clash_ruleset" label="目标地址" prop="targetList" class="inventory-form-wide">
+              <TargetRoutingFields v-model:original-target="form.use_original_target" v-model:match-rules="form.match_rules" v-model:ruleset-ids="form.ruleset_ids" v-model:manual-domains-text="form.manualDomainsText" />
+              <el-form-item v-if="!form.use_original_target" label="目标地址" prop="targetList" class="inventory-form-wide">
                 <div class="tunnel-target-list">
                   <div v-for="(item, index) in form.targetList" :key="index" class="tunnel-target-item">
                     <el-input v-model.trim="item.address" :aria-label="'目标地址 ' + (index + 1)" aria-describedby="tunnel-target-address-help" placeholder="例如 example.com:443 或 192.168.1.10:8080" />
@@ -257,7 +250,7 @@
                   <p id="tunnel-target-address-help" class="tunnel-form-hint ops-muted">填写域名或 IP 与端口。HTTPS 会透传客户端发送的 SNI，无需额外开启。</p>
                 </div>
               </el-form-item>
-              <el-form-item v-if="!form.use_clash_ruleset" label="负载均衡" prop="strategy">
+              <el-form-item v-if="!form.use_original_target" label="负载均衡" prop="strategy">
                 <el-select v-model="form.strategy">
                   <el-option label="轮询" value="round" />
                   <el-option label="随机" value="rand" />
@@ -324,8 +317,10 @@ import { ElMessage } from 'element-plus'
 import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import GostTransportOptions from '@/components/GostTransportOptions.vue'
+import TargetRoutingFields from '@/components/TargetRoutingFields.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { tunnelProtocols } from '@/utils/gost-protocols'
+import { isLegacyClashSelection, targetRoutingFields, targetRoutingPayload, usesOriginalTarget } from '@/utils/target-policy'
 import { ArrowDown, Connection, Plus, Remove, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
@@ -380,18 +375,23 @@ const submitDisabled = computed(() => allowlistOnly.value
   : !legacyEdit.value && (entryOptionsLoading.value || entryOptionsError.value))
 const dialogTitle = computed(() => allowlistOnly.value ? 'Gost IP 白名单' : (isEdit.value ? '编辑隧道' : '添加隧道'))
 const formRef = ref(null)
-const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', protocol_options: {}, relay_port: null, remark: '', allowlist_node_ids: [], use_clash_ruleset: false, targetList: [{ address: '' }], strategy: 'round' })
+const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', protocol_options: {}, relay_port: null, remark: '', allowlist_node_ids: [], ...targetRoutingFields(), targetList: [{ address: '' }], strategy: 'round' })
 let savedAllowlistNodeIds = []
 let savedProtocolOptions = false
+let savedOriginalTarget = false
+let savedLegacyClash = false
+let savedRuleSelection = false
+let savedEntryRuleId = null
 const missingAllowlistNodes = computed(() => form.allowlist_node_ids.filter(id => !nodeList.value.some(node => node.id === id)))
 const allowlistAddresses = computed(() => [...new Set(nodeList.value
   .filter(node => form.allowlist_node_ids.includes(node.id))
   .flatMap(nodeAddresses))])
 const listenEndpoint = rule => formatEndpoint(rule.listen_ip, rule.listen_port)
-const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
+const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol === 'red' ? '透明转发（HTTP/HTTPS）' : rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
 const entryEntrance = computed(() => entryList.value.find(rule => rule.id === form.entry_rule_id))
 const exitEntrance = computed(() => entryList.value.find(rule => rule.id === form.exit_rule_id))
 const exitOwnsTargets = computed(() => !legacyEdit.value && exitEntrance.value?.role === 'exit')
+const exitRouting = computed(() => targetRoutingFields(exitEntrance.value))
 const legacyTargetEdit = computed(() => !legacyEdit.value && !!exitEntrance.value && !exitOwnsTargets.value)
 const selectedRelayConnectEndpoint = computed(() => mappedConnectEndpoint(exitEntrance.value?.node, exitEntrance.value?.listen_ip, exitEntrance.value?.listen_port))
 const relayConnectEndpoints = computed(() => Object.fromEntries(tunnelList.value.map(tunnel => [
@@ -403,27 +403,33 @@ const availableEntrances = computed(() => entryList.value.filter(rule => rule.li
 const sourceOptions = computed(() => availableEntrances.value.filter(rule => !rule.role || rule.role === 'entry'))
 const destinationOptions = computed(() => availableEntrances.value.filter(rule =>
   (!rule.role || rule.role === 'exit') && !['0.0.0.0', '::', '::1'].includes(rule.listen_ip) && !rule.listen_ip?.startsWith('127.')))
-const canUseClashRuleset = computed(() => entryEntrance.value?.protocol === 'tcp' && entryEntrance.value?.listen_ip === '127.0.0.1')
+const selectedUsesOriginalTarget = computed(() => exitOwnsTargets.value ? exitRouting.value.use_original_target : form.use_original_target)
+const targetModeError = () => {
+  if (!entryEntrance.value || !exitEntrance.value) return
+  const transparent = entryEntrance.value.protocol === 'red'
+  const legacySelection = exitOwnsTargets.value ? exitEntrance.value.use_clash_ruleset : isLegacyClashSelection(form)
+  const legacyTransparent = savedLegacyClash && legacySelection && entryEntrance.value.id === savedEntryRuleId && entryEntrance.value.protocol === 'tcp' && entryEntrance.value.listen_ip === '127.0.0.1'
+  if (selectedUsesOriginalTarget.value && !transparent && !legacyTransparent) return new Error('按原始目标需要选择“透明转发（HTTP/HTTPS）”入口')
+  if (transparent && !selectedUsesOriginalTarget.value) return new Error('透明转发入口需要选择“按原始目标”的出口')
+}
 const validateEndpointNodes = (_rule, _value, callback) => callback(entryEntrance.value?.node_id &&
   entryEntrance.value.node_id === exitEntrance.value?.node_id ? new Error('源端和目的端须位于不同节点') : undefined)
 const formRules = {
   name: [{ required: true, message: '请输入隧道名称', trigger: 'blur' }],
   entry_rule_id: [{ required: true, message: '请选择源端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
   exit_rule_id: [{ required: true, message: '请选择目的端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' },
-    { validator: (_rule, _value, callback) => callback(exitOwnsTargets.value && exitEntrance.value.use_clash_ruleset && !canUseClashRuleset.value
-      ? new Error('此出口的 Clash 分流需要入口使用 TCP 与 127.0.0.1') : undefined), trigger: 'change' }],
-  use_clash_ruleset: [{ validator: (_rule, value, callback) => callback(value && !canUseClashRuleset.value
-    ? new Error('Clash 分流需要源端点使用 TCP 与 127.0.0.1') : undefined), trigger: 'change' }],
-  targetList: [{ required: true, validator: (_rule, value, callback) => callback(!form.use_clash_ruleset && !value.some(item => item.address.trim())
+    { validator: (_rule, _value, callback) => callback(exitOwnsTargets.value ? targetModeError() : undefined), trigger: 'change' }],
+  use_original_target: [{ validator: (_rule, _value, callback) => callback(targetModeError()), trigger: 'change' }],
+  targetList: [{ required: true, validator: (_rule, value, callback) => callback(!form.use_original_target && !value.some(item => item.address.trim())
     ? new Error('请至少填写一个目标地址') : undefined), trigger: 'blur' }],
   protocol: [{ required: true, message: '请选择协议', trigger: 'change' }],
   relay_port: [{ required: true, message: '请输入 Relay 端口', trigger: 'blur' }]
 }
 
-watch(canUseClashRuleset, () => {
-  if (dialogVisible.value && legacyTargetEdit.value && form.use_clash_ruleset) formRef.value?.validateField('use_clash_ruleset').catch(() => {})
+watch([entryEntrance, selectedUsesOriginalTarget], () => {
+  if (dialogVisible.value && legacyTargetEdit.value) formRef.value?.validateField('use_original_target').catch(() => {})
   if (dialogVisible.value && exitOwnsTargets.value) formRef.value?.validateField('exit_rule_id').catch(() => {})
-})
+}, { flush: 'post' })
 
 const removeTarget = index => {
   form.targetList.splice(index, 1)
@@ -433,7 +439,7 @@ const removeTarget = index => {
 const targetFields = row => {
   const config = row?.strategy ? row : row?.entry_rule
   return {
-    use_clash_ruleset: config?.use_clash_ruleset || false,
+    ...targetRoutingFields(config),
     targetList: config?.targets?.length ? config.targets.map(address => ({ address })) : [{ address: '' }],
     strategy: config?.strategy || 'round'
   }
@@ -515,6 +521,11 @@ const openDialog = (row = null, onlyAllowlist = false) => {
   allowlistError.value = ''
   savedAllowlistNodeIds = row?.allowlist_node_ids || []
   savedProtocolOptions = !!row && row.exit_rule?.role !== 'exit' && !!Object.keys(row.protocol_options || {}).length
+  const config = row?.exit_rule?.role === 'exit' ? row.exit_rule : row?.strategy ? row : row?.entry_rule
+  savedOriginalTarget = !!row && usesOriginalTarget(config)
+  savedLegacyClash = !!row && !!config?.use_clash_ruleset
+  savedRuleSelection = !!row && !!(config?.use_clash_ruleset || config?.ruleset_ids?.length || config?.manual_domains?.length)
+  savedEntryRuleId = row?.entry_rule_id ?? null
   Object.assign(form, {
     name: row?.name || '',
     entry_rule_id: row?.entry_rule_id ?? null,
@@ -552,8 +563,13 @@ const handleSubmit = async () => {
         ? { name, remark, protocol, relay_port }
         : exitOwnsTargets.value
           ? { name, remark, entry_rule_id, exit_rule_id }
-          : { name, remark, entry_rule_id, exit_rule_id, protocol, use_clash_ruleset: form.use_clash_ruleset,
-            targets: form.use_clash_ruleset ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.strategy }
+          : { name, remark, entry_rule_id, exit_rule_id, protocol,
+            targets: form.use_original_target ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.use_original_target ? 'round' : form.strategy }
+      if (legacyTargetEdit.value) {
+        Object.assign(payload, targetRoutingPayload(form, {
+          legacyClash: savedLegacyClash, originalTarget: savedOriginalTarget, ruleSelection: savedRuleSelection
+        }))
+      }
       if (!exitOwnsTargets.value && (savedProtocolOptions || Object.keys(form.protocol_options).length)) {
         payload.protocol_options = { ...form.protocol_options }
       }

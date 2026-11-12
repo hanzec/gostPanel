@@ -74,6 +74,44 @@ func TestServerAddsRelayOptionsColumnsWithoutChangingOldEndpoints(t *testing.T) 
 	}
 }
 
+func TestServerMigratesOriginalTargetPolicyToExit(t *testing.T) {
+	for _, sourceOwned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("source owned %t", sourceOwned), func(t *testing.T) {
+			db := legacyEndpointDatabase(t)
+			stamp := time.Now().UTC()
+			insertLegacyEndpoint(t, db, 11, "source", "red", nil, false, "round", stamp)
+			insertLegacyEndpoint(t, db, 12, "destination", "tls", nil, false, "round", stamp)
+			entryID, exitID := uint(11), uint(12)
+			tunnel := model.GostTunnel{Name: "original targets", EntryNodeID: 1, ExitNodeID: 2, EntryRuleID: &entryID, ExitRuleID: &exitID,
+				Protocol: "tls", Strategy: "round", UseOriginalTarget: true, RulesetIDs: []uint{2, 3}, ManualDomains: []string{"example.test"}}
+			if sourceOwned {
+				policy := model.GostRule{UseOriginalTarget: true, RulesetIDs: tunnel.RulesetIDs, ManualDomains: tunnel.ManualDomains}
+				if err := db.Model(&model.GostRule{}).Where("id = ?", entryID).Select("UseOriginalTarget", "RulesetIDs", "ManualDomains").UpdateColumns(&policy).Error; err != nil {
+					t.Fatal(err)
+				}
+				tunnel.Strategy, tunnel.UseOriginalTarget, tunnel.RulesetIDs, tunnel.ManualDomains = "", false, nil, nil
+			}
+			if err := db.Create(&tunnel).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := autoMigrate(db); err != nil {
+				t.Fatal(err)
+			}
+			var source, exit model.GostRule
+			if err := db.First(&source, entryID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.First(&exit, exitID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if source.Role != model.EndpointRoleEntry || source.Protocol != model.RuleProtocolTransparent || source.UseOriginalTarget || len(source.RulesetIDs) != 0 || len(source.ManualDomains) != 0 ||
+				exit.Role != model.EndpointRoleExit || !exit.UseOriginalTarget || !slices.Equal(exit.RulesetIDs, []uint{2, 3}) || !slices.Equal(exit.ManualDomains, []string{"example.test"}) {
+				t.Fatalf("original-target migration lost or duplicated policy: source=%+v exit=%+v", source, exit)
+			}
+		})
+	}
+}
+
 func TestServerMigratesTunnelTargetsToExitEndpoints(t *testing.T) {
 	for _, test := range []struct {
 		name           string

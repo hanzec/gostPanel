@@ -10,8 +10,15 @@ import (
 	"yagp/pkg/logger"
 )
 
-func validateClashTarget(useClash bool, protocol model.RuleProtocol, listenIP string, targets []string) error {
-	if useClash && (protocol != model.RuleProtocolTCP || listenIP != "127.0.0.1" || len(targets) != 0) {
+func validateTransparentTarget(useOriginal, useClash bool, protocol model.RuleProtocol, listenIP string, targets []string) error {
+	if useOriginal && useClash {
+		return errors.ErrEndpointTargets
+	}
+	if (useOriginal && protocol != model.RuleProtocolTransparent) ||
+		((useOriginal || protocol == model.RuleProtocolTransparent) && len(targets) != 0) {
+		return errors.ErrRuleOriginalTargetInvalid
+	}
+	if useClash && ((protocol != model.RuleProtocolTCP && protocol != model.RuleProtocolTransparent) || listenIP != "127.0.0.1" || len(targets) != 0) {
 		return errors.ErrRuleClashInvalid
 	}
 	return nil
@@ -21,20 +28,44 @@ func clashTunnelChainName(id uint) string {
 	return fmt.Sprintf("tunnel-%d-clash-chain", id)
 }
 
-func (s *RuleService) prepareClashChain(client *gost.Client, tunnel *model.GostTunnel, mark uint32) (string, error) {
-	ruleset, err := s.rulesetService.Get(context.Background())
-	if err != nil {
-		return "", err
-	}
-	if ruleset.URL == "" || len(ruleset.Matchers) == 0 {
-		return "", errors.ErrRuleClashUnavailable
-	}
+func transparentPolicyName(id uint) string {
+	return fmt.Sprintf("tunnel-%d-bypass", id)
+}
+
+func transparentFiltering(rule *model.GostRule) bool {
+	return rule.UseClashRuleset || len(rule.RulesetIDs) != 0 || len(rule.ManualDomains) != 0
+}
+
+func (s *RuleService) prepareTransparentChain(client *gost.Client, tunnel *model.GostTunnel, rule *model.GostRule, mark uint32) (string, error) {
 	name := clashTunnelChainName(tunnel.ID)
-	if _, err := client.SetTransparentBypass(ruleset.Matchers); err != nil {
-		logger.Warnf("配置 Clash 分流白名单失败: %v", err)
-		return "", errors.ErrRuleChainCreateFailed
+	bypass := ""
+	if len(rule.RulesetIDs) != 0 || len(rule.ManualDomains) != 0 {
+		matchers, err := s.rulesetService.SelectedMatchers(context.Background(), rule.RulesetIDs, rule.ManualDomains)
+		if err != nil {
+			return "", err
+		}
+		if len(matchers) == 0 {
+			return "", errors.ErrRuleClashUnavailable
+		}
+		bypass = transparentPolicyName(tunnel.ID)
+		if _, err := client.SetNamedTransparentBypass(bypass, matchers); err != nil {
+			return "", errors.ErrRuleChainCreateFailed
+		}
+	} else if rule.UseClashRuleset {
+		ruleset, err := s.rulesetService.Get(context.Background())
+		if err != nil {
+			return "", err
+		}
+		if ruleset.URL == "" || len(ruleset.Matchers) == 0 {
+			return "", errors.ErrRuleClashUnavailable
+		}
+		if _, err := client.SetTransparentBypass(ruleset.Matchers); err != nil {
+			logger.Warnf("配置 Clash 分流白名单失败: %v", err)
+			return "", errors.ErrRuleChainCreateFailed
+		}
+		bypass = gost.TransparentBypassName
 	}
-	if err := client.EnsureMarkedClashChain(tunnel.ChainID, name, mark); err != nil {
+	if err := client.EnsureMarkedTransparentChain(tunnel.ChainID, name, mark, bypass); err != nil {
 		logger.Warnf("创建 Clash 分流链失败: %v", err)
 		return "", errors.ErrRuleChainCreateFailed
 	}

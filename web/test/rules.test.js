@@ -3,11 +3,13 @@ import { ElForm, ElMessage, ElMessageBox, ElOption, ElSelect } from 'element-plu
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Rules from '@/views/Rules.vue'
 import { getRoutingNodes } from '@/api/node'
+import { getGostRulesets } from '@/api/system'
 import request from '@/utils/request'
 import { checkRuleListener, createRule, deleteRule, getRuleList, startRule, stopRule, updateRule } from '@/api/rule'
 import { button, changePage, choose, command, field, mountInventory, result, row, select } from './inventory-fixtures'
 
 vi.mock('@/api/node', () => ({ getRoutingNodes: vi.fn() }))
+vi.mock('@/api/system', () => ({ getGostRulesets: vi.fn() }))
 vi.mock('@/api/rule', () => ({
   checkRuleListener: vi.fn(), createRule: vi.fn(), deleteRule: vi.fn(), getRuleList: vi.fn(),
   startRule: vi.fn(), stopRule: vi.fn(), updateRule: vi.fn()
@@ -33,6 +35,7 @@ const selectField = (wrapper, prop) => field(wrapper, prop).getComponent(ElSelec
 const editDialog = wrapper => wrapper.get('[role="dialog"]')
 
 beforeEach(() => {
+  getGostRulesets.mockResolvedValue({ data: [{ id: 1, name: '旧 Clash 订阅' }, { id: 2, name: '工作域名' }] })
   getRoutingNodes.mockResolvedValue([entryNode])
   getRuleList.mockResolvedValue(result(rules, 28))
   checkRuleListener.mockResolvedValue({ data: { available: true } })
@@ -261,6 +264,129 @@ describe('forwarding rule inventory', () => {
   })
 })
 describe('forwarding rule editor and actions', () => {
+  it('creates a transparent HTTP/HTTPS entry with an automatic listener address', async () => {
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '新建端点').trigger('click')
+    const dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('Transparent entry')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    await choose(selectField(dialog, 'listen_ip'), entryNode.ipv4)
+    await choose(selectField(dialog, 'protocol'), 'red')
+    expect(selectField(dialog, 'protocol').findAllComponents(ElOption).find(option => option.props('value') === 'red').props('label')).toBe('透明转发（HTTP/HTTPS）')
+    expect(dialog.findAll('.el-form-item__label').map(item => item.text())).not.toContain('监听 IP')
+    expect(dialog.find('#rule-target-title').exists()).toBe(false)
+    await field(dialog, 'listen_port').get('input').setValue('18080')
+    expect(dialog.get('#rule-listen-endpoint').text()).toContain('127.0.0.1:18080')
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledExactlyOnceWith({
+      node_id: entryNode.id, name: 'Transparent entry', role: 'entry', protocol: 'red', listen_ip: '127.0.0.1', listen_port: 18080, remark: '',
+      use_clash_ruleset: false, targets: [], strategy: 'round'
+    })
+  })
+
+  it('restores and copies transparent entries, and exposes the IP control when changed to TCP', async () => {
+    const transparent = { ...relayRule, role: 'entry', protocol: 'red', listen_ip: '127.0.0.1', targets: [] }
+    getRuleList.mockResolvedValue(result([transparent]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    expect(row(wrapper, transparent.name).text()).toContain('透明转发（HTTP/HTTPS）')
+    await wrapper.get('[aria-label="编辑 DNS"]').trigger('click')
+    let dialog = editDialog(wrapper)
+    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('red')
+    expect(dialog.findAll('.el-form-item__label').map(item => item.text())).not.toContain('监听 IP')
+    await choose(selectField(dialog, 'protocol'), 'tcp')
+    await choose(selectField(dialog, 'listen_ip'), '')
+    await button(dialog, '保存端点').trigger('click')
+    await flushPromises()
+    expect(updateRule).toHaveBeenCalledWith(transparent.id, expect.objectContaining({ protocol: 'tcp', listen_ip: '' }))
+    await command(row(wrapper, transparent.name), 'copy')
+    dialog = editDialog(wrapper)
+    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('red')
+    expect(dialog.findAll('.el-form-item__label').map(item => item.text())).not.toContain('监听 IP')
+    await field(dialog, 'listen_port').get('input').setValue('18081')
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ name: 'DNS-copy', protocol: 'red', listen_ip: '127.0.0.1', listen_port: 18081 }))
+  })
+
+  it('requires a subscription or manual domain for matching and saves both without the old Clash flag', async () => {
+    getGostRulesets.mockRejectedValueOnce(new Error('rulesets offline'))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '新建端点').trigger('click')
+    const dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('Matched exit')
+    await choose(selectField(dialog, 'role'), 'exit')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    await field(dialog, 'listen_port').get('input').setValue('9443')
+    await choose(selectField(dialog, 'use_original_target'), true)
+    await choose(selectField(dialog, 'match_rules'), true)
+    expect(dialog.text()).toContain('无法加载订阅规则集')
+    await button(dialog, '重新加载').trigger('click')
+    await flushPromises()
+    expect(selectField(dialog, 'ruleset_ids').findAllComponents(ElOption).map(option => option.props('label'))).toEqual(['旧 Clash 订阅', '工作域名'])
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['ruleset_ids', false, '请选择订阅规则集或填写手动域名'])
+    expect(createRule).not.toHaveBeenCalled()
+    await field(dialog, 'manualDomainsText').get('textarea').setValue('example.com\n  example.net  \n')
+    await expect(wrapper.getComponent(ElForm).vm.validate()).resolves.toBe(true)
+    await choose(selectField(dialog, 'ruleset_ids'), [2])
+    expect(dialog.text()).toContain('匹配该域名及其子域')
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledExactlyOnceWith({
+      node_id: entryNode.id, name: 'Matched exit', role: 'exit', protocol: 'tcp', listen_ip: '', listen_port: 9443, remark: '',
+      use_original_target: true, ruleset_ids: [2], manual_domains: ['example.com', 'example.net'], use_clash_ruleset: false, targets: [], strategy: 'round'
+    })
+  })
+
+  it('restores original-target rules and clears them when switching to all traffic or fixed targets', async () => {
+    const exit = { ...relayRule, name: 'Matched exit', role: 'exit', targets: [], use_original_target: true, ruleset_ids: [2], manual_domains: ['saved.example'] }
+    getRuleList.mockResolvedValue(result([exit]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await wrapper.get('[aria-label="编辑 Matched exit"]').trigger('click')
+    let dialog = editDialog(wrapper)
+    expect(selectField(dialog, 'use_original_target').props('modelValue')).toBe(true)
+    expect(selectField(dialog, 'match_rules').props('modelValue')).toBe(true)
+    expect(selectField(dialog, 'ruleset_ids').props('modelValue')).toEqual([2])
+    expect(field(dialog, 'manualDomainsText').get('textarea').element.value).toBe('saved.example')
+    await choose(selectField(dialog, 'match_rules'), false)
+    expect(dialog.findAll('.el-form-item__label').map(item => item.text())).not.toContain('手动域名')
+    await button(dialog, '保存端点').trigger('click')
+    await flushPromises()
+    expect(updateRule).toHaveBeenLastCalledWith(exit.id, expect.objectContaining({ use_original_target: true, ruleset_ids: [], manual_domains: [], use_clash_ruleset: false }))
+    await wrapper.get('[aria-label="编辑 Matched exit"]').trigger('click')
+    dialog = editDialog(wrapper)
+    await choose(selectField(dialog, 'use_original_target'), false)
+    await dialog.get('input[aria-label="目标地址 1"]').setValue('fixed.example:443')
+    await button(dialog, '保存端点').trigger('click')
+    await flushPromises()
+    expect(updateRule).toHaveBeenLastCalledWith(exit.id, expect.objectContaining({ use_original_target: false, ruleset_ids: [], manual_domains: [], use_clash_ruleset: false, targets: ['fixed.example:443'] }))
+  })
+
+  it('maps an old Clash exit to the legacy subscription while preserving its compatibility flag', async () => {
+    const exit = { ...relayRule, name: 'Legacy matching exit', role: 'exit', targets: [], use_clash_ruleset: true }
+    getRuleList.mockResolvedValue(result([exit]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await wrapper.get('[aria-label="编辑 Legacy matching exit"]').trigger('click')
+    const dialog = editDialog(wrapper)
+    expect(selectField(dialog, 'use_original_target').props('modelValue')).toBe(true)
+    expect(selectField(dialog, 'match_rules').props('modelValue')).toBe(true)
+    expect(selectField(dialog, 'ruleset_ids').props('modelValue')).toEqual([1])
+    await button(dialog, '保存端点').trigger('click')
+    await flushPromises()
+    const payload = updateRule.mock.calls[0][1]
+    expect(payload.use_clash_ruleset).toBe(true)
+    expect(payload).not.toHaveProperty('use_original_target')
+    expect(payload).not.toHaveProperty('ruleset_ids')
+    expect(payload).not.toHaveProperty('manual_domains')
+  })
+
   it('saves explicit WebSocket and TLS options while leaving unrelated protocol fields hidden', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
@@ -361,7 +487,7 @@ describe('forwarding rule editor and actions', () => {
     })
   })
 
-  it('allows a Clash exit with QUIC and clears exit settings when changing direction to entry', async () => {
+  it('allows original targets with QUIC and clears exit settings when changing direction to entry', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
     await button(wrapper, '新建端点').trigger('click')
@@ -373,14 +499,17 @@ describe('forwarding rule editor and actions', () => {
     await choose(selectField(dialog, 'protocol'), 'quic')
     await dialog.get('.gost-transport-options [role="button"]').trigger('click')
     await dialog.get('[data-protocol-option="max_idle_timeout"] input').setValue('45s')
-    await choose(selectField(dialog, 'use_clash_ruleset'), true)
+    await choose(selectField(dialog, 'use_original_target'), true)
+    expect(selectField(dialog, 'match_rules').props('modelValue')).toBe(false)
     expect(dialog.find('input[aria-label="目标地址 1"]').exists()).toBe(false)
-    expect(dialog.get('#rule-target-mode-help').text()).toContain('入口须使用 TCP 与 127.0.0.1')
+    expect(dialog.text()).toContain('按原始目标需要连接“透明转发（HTTP/HTTPS）”入口')
+    expect(dialog.findAll('.el-form-item__label').map(item => item.text())).not.toContain('负载均衡')
     await button(dialog, '创建端点').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenCalledExactlyOnceWith({
       node_id: entryNode.id, name: 'Clash exit', role: 'exit', protocol: 'quic', listen_ip: '', listen_port: 9443, remark: '',
-      use_clash_ruleset: true, targets: [], strategy: 'round', protocol_options: { max_idle_timeout: '45s' }
+      use_original_target: true, ruleset_ids: [], manual_domains: [],
+      use_clash_ruleset: false, targets: [], strategy: 'round', protocol_options: { max_idle_timeout: '45s' }
     })
     await button(wrapper, '新建端点').trigger('click')
     dialog = editDialog(wrapper)
@@ -393,7 +522,7 @@ describe('forwarding rule editor and actions', () => {
     await dialog.get('[data-protocol-option="tls_server_name"] input').setValue('unused.example')
     await dialog.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
     await choose(selectField(dialog, 'strategy'), 'rand')
-    await choose(selectField(dialog, 'use_clash_ruleset'), true)
+    await choose(selectField(dialog, 'use_original_target'), true)
     await choose(selectField(dialog, 'role'), 'entry')
     expect(selectField(dialog, 'protocol').props('modelValue')).toBe('tcp')
     expect(dialog.find('#rule-target-title').exists()).toBe(false)
@@ -480,11 +609,11 @@ describe('forwarding rule editor and actions', () => {
     await button(wrapper, '新建端点').trigger('click')
     const dialog = editDialog(wrapper)
     expect(dialog.findAll('.el-form-item__label').map(item => item.text())).toEqual([
-      '端点名称', '端点方向', '所在节点', '协议', '监听 IP', '监听端口', '备注'
+      '端点名称', '端点方向', '所在节点', '入口类型', '监听 IP', '监听端口', '备注'
     ])
     expect(dialog.text()).toContain('入口接收流量，出口配置目标与策略')
     expect(selectField(dialog, 'role').props('modelValue')).toBe('entry')
-    expect(selectField(dialog, 'protocol').findAllComponents(ElOption).map(option => option.props('value'))).toEqual(['tcp', 'udp'])
+    expect(selectField(dialog, 'protocol').findAllComponents(ElOption).map(option => option.props('value'))).toEqual(['tcp', 'udp', 'red'])
     expect(dialog.find('#rule-target-title').exists()).toBe(false)
     await field(dialog, 'name').get('input').setValue('  internal API  ')
     expect(field(dialog, 'listen_port').get('input').element.value).toBe('')

@@ -88,3 +88,47 @@ func TestBuildClashRedirectServiceUsesSelectedMark(t *testing.T) {
 		}
 	}
 }
+
+func TestTransparentRouteUsesItsSelectedWhitelistOrOriginalDestination(t *testing.T) {
+	const path = "/config/chains/transparent"
+	const chain = `{"name":"fixed","hops":[{"name":"hop-0","nodes":[{"name":"exit-relay","addr":"192.0.2.4:443"}]}]}`
+	for _, bypass := range []string{"tunnel-7-bypass", ""} {
+		client, calls := controlFixture(t)
+		filter := ""
+		if bypass != "" {
+			filter = fmt.Sprintf(`"bypass":%q,`, bypass)
+		}
+		want := fmt.Sprintf(`{"name":"transparent","hops":[{"name":"hop-0",%s"sockopts":{"mark":100},"nodes":[{"name":"exit-relay","addr":"192.0.2.4:443","sockopts":{"mark":100}}]}]}`, filter)
+		calls <- gostCommand("GET", path, "", 200, `{"data":`+chain+`}`)
+		calls <- gostCommand("GET", "/config/chains/fixed", "", 200, `{"data":`+chain+`}`)
+		calls <- gostCommand("PUT", path, want, 200, "{}")
+		if err := client.EnsureMarkedTransparentChain("fixed", "transparent", 100, bypass); err != nil {
+			t.Fatal(err)
+		}
+		svc := BuildMarkedTransparentRedirectService("rule-7", 100, bypass != "")
+		if svc.Listener.Type != "red" || svc.Handler.Type != "red" || svc.SockOpts.Mark != 100 ||
+			(svc.Handler.Metadata["sniffing"] == true) != (bypass != "") {
+			t.Fatalf("incorrect RED settings for bypass %q: %+v", bypass, svc)
+		}
+	}
+}
+
+func TestNamedTransparentBypassUsesItsOwnResource(t *testing.T) {
+	client, calls := controlFixture(t)
+	const name = "tunnel-7-bypass"
+	const path = "/config/bypasses/" + name
+	const config = `{"name":"tunnel-7-bypass","whitelist":true,"matchers":[".example.test"]}`
+	calls <- gostCommand("GET", path, "", 200, `{"data":null}`)
+	calls <- gostCommand("POST", "/config/bypasses", config, 201, "{}")
+	if changed, err := client.SetNamedTransparentBypass(name, []string{".example.test"}); err != nil || !changed {
+		t.Fatalf("named bypass creation: changed=%t err=%v", changed, err)
+	}
+	calls <- gostCommand("GET", path, "", 200, `{"data":`+config+`}`)
+	calls <- gostCommand("DELETE", path, "", 204, "")
+	calls <- gostCommand("GET", path, "", 200, `{"data":null}`)
+	for range 2 {
+		if err := client.DeleteNamedTransparentBypass(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

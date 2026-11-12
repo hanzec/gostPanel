@@ -27,7 +27,7 @@ func (r *TunnelRepository) Create(tunnel *model.GostTunnel) error {
 
 // Update 只更新隧道可编辑的配置。
 func (r *TunnelRepository) Update(tunnel *model.GostTunnel, updateAllowlist bool) error {
-	fields := []string{"name", "entry_node_id", "exit_node_id", "entry_rule_id", "exit_rule_id", "protocol", "protocol_options", "relay_port", "targets", "use_clash_ruleset", "strategy", "remark", "updated_at"}
+	fields := []string{"name", "entry_node_id", "exit_node_id", "entry_rule_id", "exit_rule_id", "protocol", "protocol_options", "relay_port", "targets", "use_clash_ruleset", "use_original_target", "ruleset_ids", "manual_domains", "strategy", "remark", "updated_at"}
 	if updateAllowlist {
 		fields = append(fields, "allowlist_node_ids")
 	}

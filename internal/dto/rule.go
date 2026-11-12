@@ -9,16 +9,19 @@ type CreateRuleReq struct {
 	Name       string `json:"name" binding:"required,min=1,max=100"`         // 规则名称
 	Type       string `json:"type" binding:"omitempty,oneof=forward tunnel"` // 规则类型，默认 forward
 	Role       string `json:"role" binding:"omitempty,oneof=entry exit"`
-	Protocol   string `json:"protocol" binding:"required,oneof=tcp mtcp udp tls mtls ws mws wss mwss h2 h2c grpc pht phts kcp quic h3 ohttp otls"` // 入口监听或出口隧道协议
-	ListenIP   string `json:"listen_ip"`                                                                                                           // 监听 IP，空字符串表示所有接口
-	ListenPort int    `json:"listen_port" binding:"required,min=1,max=65535"`                                                                      // 监听端口
+	Protocol   string `json:"protocol" binding:"required,oneof=tcp udp red mtcp tls mtls ws mws wss mwss h2 h2c grpc pht phts kcp quic h3 ohttp otls"` // 入口监听或出口隧道协议
+	ListenIP   string `json:"listen_ip"`                                                                                                               // 监听 IP，空字符串表示所有接口
+	ListenPort int    `json:"listen_port" binding:"required,min=1,max=65535"`                                                                          // 监听端口
 
 	ProtocolOptions map[string]string `json:"protocol_options"`
 
-	Targets         []string `json:"targets"` // 多目标列表
-	UseClashRuleset bool     `json:"use_clash_ruleset"`
-	Strategy        string   `json:"strategy" binding:"omitempty,oneof=round rand fifo hash"` // 负载均衡策略
-	EnableTLS       bool     `json:"enable_tls"`                                              // 是否启用 TLS
+	Targets           []string `json:"targets"` // 多目标列表
+	UseClashRuleset   bool     `json:"use_clash_ruleset"`
+	UseOriginalTarget bool     `json:"use_original_target"`
+	RulesetIDs        []uint   `json:"ruleset_ids" binding:"omitempty,dive,min=1"`
+	ManualDomains     []string `json:"manual_domains"`
+	Strategy          string   `json:"strategy" binding:"omitempty,oneof=round rand fifo hash"` // 负载均衡策略
+	EnableTLS         bool     `json:"enable_tls"`                                              // 是否启用 TLS
 
 	Remark string `json:"remark"` // 备注
 }
@@ -28,16 +31,19 @@ type UpdateRuleReq struct {
 	NodeID     *uint   `json:"node_id"`                                   // 省略时保留已有节点
 	Name       string  `json:"name" binding:"required,min=1,max=100"`     // 规则名称
 	Role       string  `json:"role" binding:"omitempty,oneof=entry exit"` // 省略时保留已有方向
-	Protocol   string  `json:"protocol" binding:"required,oneof=tcp mtcp udp tls mtls ws mws wss mwss h2 h2c grpc pht phts kcp quic h3 ohttp otls"`
+	Protocol   string  `json:"protocol" binding:"required,oneof=tcp udp red mtcp tls mtls ws mws wss mwss h2 h2c grpc pht phts kcp quic h3 ohttp otls"`
 	ListenIP   *string `json:"listen_ip"`                                      // 省略时保留已有监听 IP
 	ListenPort int     `json:"listen_port" binding:"required,min=1,max=65535"` // 监听端口
 
 	ProtocolOptions map[string]string `json:"protocol_options"`
 
-	Targets         []string `json:"targets"` // 多目标列表
-	UseClashRuleset *bool    `json:"use_clash_ruleset"`
-	Strategy        string   `json:"strategy" binding:"omitempty,oneof=round rand fifo hash"` // 负载均衡策略
-	EnableTLS       bool     `json:"enable_tls"`                                              // 是否启用 TLS
+	Targets           []string `json:"targets"` // 多目标列表
+	UseClashRuleset   *bool    `json:"use_clash_ruleset"`
+	UseOriginalTarget *bool    `json:"use_original_target"`
+	RulesetIDs        []uint   `json:"ruleset_ids" binding:"omitempty,dive,min=1"`
+	ManualDomains     []string `json:"manual_domains"`
+	Strategy          string   `json:"strategy" binding:"omitempty,oneof=round rand fifo hash"` // 负载均衡策略
+	EnableTLS         bool     `json:"enable_tls"`                                              // 是否启用 TLS
 
 	Remark string `json:"remark"` // 备注
 }

@@ -19,8 +19,9 @@ const (
 type RuleProtocol string
 
 const (
-	RuleProtocolTCP RuleProtocol = "tcp" // TCP 协议
-	RuleProtocolUDP RuleProtocol = "udp" // UDP 协议
+	RuleProtocolTCP         RuleProtocol = "tcp" // TCP 协议
+	RuleProtocolUDP         RuleProtocol = "udp" // UDP 协议
+	RuleProtocolTransparent RuleProtocol = "red" // 原始目标透明代理入口
 )
 
 // ListenerNetwork is the socket transport used by a Gost listener.
@@ -69,12 +70,15 @@ type GostRule struct {
 
 	ProtocolOptions map[string]string `gorm:"type:text;serializer:json" json:"protocol_options"`
 
-	Targets         []string   `gorm:"type:json;serializer:json" json:"targets"` // 多目标列表 (host:port)
-	UseClashRuleset bool       `gorm:"not null;default:false" json:"use_clash_ruleset"`
-	Strategy        string     `gorm:"size:20;default:round" json:"strategy"` // 负载均衡策略 (round, random, fifo)
-	EnableTLS       bool       `gorm:"default:false" json:"enable_tls"`       // 是否启用 TLS
-	Status          RuleStatus `gorm:"size:20;default:stopped" json:"status"` // 状态
-	ServiceID       string     `gorm:"size:100" json:"service_id"`            // Gost 服务 ID
+	Targets           []string   `gorm:"type:json;serializer:json" json:"targets"` // 多目标列表 (host:port)
+	UseClashRuleset   bool       `gorm:"not null;default:false" json:"use_clash_ruleset"`
+	UseOriginalTarget bool       `gorm:"not null;default:false" json:"use_original_target"`
+	RulesetIDs        []uint     `gorm:"type:text;serializer:json" json:"ruleset_ids"`
+	ManualDomains     []string   `gorm:"type:text;serializer:json" json:"manual_domains"`
+	Strategy          string     `gorm:"size:20;default:round" json:"strategy"` // 负载均衡策略 (round, random, fifo)
+	EnableTLS         bool       `gorm:"default:false" json:"enable_tls"`       // 是否启用 TLS
+	Status            RuleStatus `gorm:"size:20;default:stopped" json:"status"` // 状态
+	ServiceID         string     `gorm:"size:100" json:"service_id"`            // Gost 服务 ID
 
 	// 流量监控配置
 	ObserverID string `gorm:"size:100" json:"observer_id"` // 观察器 ID
