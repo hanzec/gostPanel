@@ -399,8 +399,8 @@ const formRules = {
 const byteUnits = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 const formatBytes = (bytes = 0) => {
   if (!bytes) return '0 B'
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), byteUnits.length - 1)
-  return Math.round((bytes / 1024 ** index) * 100) / 100 + ' ' + byteUnits[index]
+  const index = Math.min(Math.floor(Math.log10(bytes) / 3), byteUnits.length - 1)
+  return Math.round((bytes / 1000 ** index) * 100) / 100 + ' ' + byteUnits[index]
 }
 
 const fetchNodes = async () => {

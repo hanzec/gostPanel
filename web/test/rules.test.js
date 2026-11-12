@@ -190,7 +190,7 @@ describe('forwarding rule inventory', () => {
     await flushPromises()
     expect(wrapper.findAll('.metric-strip-value').map(item => item.text())).toEqual(['28', '1', '1', '1'])
     expect(row(wrapper, 'HTTPS').get('details li').text()).toBe('fallback.test:443')
-    expect(row(wrapper, 'HTTPS').get('.rule-traffic-total').text()).toBe('3 KB')
+    expect(row(wrapper, 'HTTPS').get('.rule-traffic-total').text()).toBe('3.07 KB')
     expect(row(wrapper, 'DNS').text()).toContain('入口 A')
     expect(row(wrapper, 'HTTPS').text()).toContain('192.0.2.10:443')
     expect(row(wrapper, 'DNS').text()).toContain('[2001:db8::8]:65535')

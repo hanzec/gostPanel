@@ -494,6 +494,7 @@ describe('node registration and quota settings', () => {
     await click(view, '添加节点')
     const form = editForm(view, '添加节点')
     const name = form.get('[placeholder="例如 华东入口"]')
+    expect(form.text()).toContain('流量上限（GB，可选）')
     await name.setValue(newNode.name)
     for (const invalid of ['1e2', '.00000000001', '999999999999']) {
       await form.get(quotaInput).setValue(invalid)
@@ -507,7 +508,7 @@ describe('node registration and quota settings', () => {
     await nextTick()
     await click(dialog(view, '添加节点'), '添加节点')
     expect(api.createNode).toHaveBeenCalledWith({
-      name: newNode.name, remark: '', traffic_limit_bytes: GIB / 2, traffic_reset_period: 'weekly'
+      name: newNode.name, remark: '', traffic_limit_bytes: 500_000_000, traffic_reset_period: 'weekly'
     })
     expect(api.issueNodeRegistrationToken).toHaveBeenCalledExactlyOnceWith(newNode.id)
     const install = dialog(view, '安装节点 · 新节点')
@@ -526,7 +527,7 @@ describe('node registration and quota settings', () => {
     await openDetail(view)
     expect(view.text()).not.toContain('复制节点')
     await click(view, '配置')
-    expect(editForm(view, settingsTitle).get(quotaInput).element.value).toBe('1.0000000009')
+    expect(editForm(view, settingsTitle).get(quotaInput).element.value).toBe('1.073741825')
     await click(dialog(view, settingsTitle), '保存更改')
     expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, remark: primary.remark })
     expect(messages.success).toHaveBeenCalledWith('节点已更新')
@@ -660,6 +661,8 @@ describe('node actions', () => {
     await click(view, '配置')
     const settings = dialog(view, settingsTitle)
     await settings.get('#tab-traffic').trigger('click')
+    expect(settings.get('form[aria-labelledby="node-calibrate-totals"]').text()).toContain('当前 1.02 KB')
+    expect(settings.get('form[aria-labelledby="node-calibrate-quota"]').text()).toContain('当前 1.07 GB / 1.07 GB')
     await settings.get('#calibrate-input').setValue('-1')
     expect(button(settings, '保存累计流量').element.disabled).toBe(true)
     await settings.get('#calibrate-input').setValue('60')

@@ -293,7 +293,7 @@ const configTabs = [
   { name: 'chains', label: '转发链' },
   { name: 'observers', label: '观察器' }
 ]
-const GIB = 1024 ** 3
+const GB = 1000 ** 3
 
 defineProps({ headingTarget: { type: Object, default: null } })
 
@@ -345,28 +345,28 @@ const submitError = ref('')
 const deleting = ref(false)
 const formRef = ref(null)
 const daemonUpgradePanel = ref(null)
-const form = reactive({ name: '', remark: '', addressMappings: [], trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const form = reactive({ name: '', remark: '', addressMappings: [], trafficLimitGB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
 let originalAddressMappings = []
-const originalTrafficLimitGiB = computed(() => {
+const originalTrafficLimitGB = computed(() => {
   const bytes = originalTrafficLimitBytes.value
-  return bytes > 0 ? (bytes / GIB).toFixed(10).replace(/\.?0+$/, '') : ''
+  return bytes > 0 ? (bytes / GB).toFixed(9).replace(/\.?0+$/, '') : ''
 })
 const trafficLimitBytes = computed(() => {
-  const value = form.trafficLimitGiB
-  if (value === originalTrafficLimitGiB.value) return originalTrafficLimitBytes.value
+  const value = form.trafficLimitGB
+  if (value === originalTrafficLimitGB.value) return originalTrafficLimitBytes.value
   if (!value) return 0
   if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value)) return null
-  const bytes = Number(value) * GIB
+  const bytes = Number(value) * GB
   const rounded = Math.round(bytes)
   return Number.isSafeInteger(rounded) && (bytes === 0 || rounded > 0) ? rounded : null
 })
 const rules = {
   name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
-  trafficLimitGiB: [{
+  trafficLimitGB: [{
     validator: () => trafficLimitBytes.value !== null && (isEdit.value || Number.isSafeInteger(trafficLimitBytes.value)),
-    message: '请输入 0 或至少 1 字节且小于 8 PiB 的 GiB 数值。',
+    message: '请输入 0 或至少 1 字节且不超过 9007199.254740991 GB 的数值。',
     trigger: 'blur'
   }]
 }
@@ -598,7 +598,7 @@ const openDialog = (row = null) => {
     name: row?.name ?? '',
     remark: row?.remark || '',
     addressMappings: originalAddressMappings.map(mapping => ({ ...mapping, key: Symbol() })),
-    trafficLimitGiB: originalTrafficLimitGiB.value,
+    trafficLimitGB: originalTrafficLimitGB.value,
     trafficResetPeriod: originalTrafficResetPeriod
   })
   formRef.value?.clearValidate()

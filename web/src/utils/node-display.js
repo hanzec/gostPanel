@@ -34,7 +34,7 @@ function formatGigabytes(bytes) {
 
 export const formatBytes = (bytes) => {
   if (!bytes) return '0 B'
-  const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB']
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), sizes.length - 1)
-  return Number((bytes / 1024 ** index).toFixed(2)) + ' ' + sizes[index]
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB']
+  const index = Math.min(Math.floor(Math.log10(bytes) / 3), sizes.length - 1)
+  return Number((bytes / 1000 ** index).toFixed(2)) + ' ' + sizes[index]
 }
