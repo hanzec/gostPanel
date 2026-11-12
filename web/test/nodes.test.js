@@ -20,7 +20,7 @@ vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
 
 const GIB = 1024 ** 3
 const primary = {
-  id: 7, name: '边缘节点', remark: '入口', status: 'online', username: 'node-7', region: 'HK',
+  id: 7, name: '边缘节点', remark: '入口', status: 'online', username: 'node-7', region: 'HK', gost_version: 'v3.2.8',
   address: '2001:db8::7', ipv4: '192.0.2.7', ipv6: '2001:db8::7', manual_addresses: ['198.51.100.70', '2001:db8:1::7'], last_check_at: '2026-11-08T02:00:00Z',
   total_bytes: 1536, input_bytes: 512, output_bytes: 1024,
   traffic_limit_bytes: GIB + 1, traffic_reset_period: 'daily', traffic_quota_state: 'blocked',
@@ -77,14 +77,14 @@ describe('node inventory', () => {
     await flushPromises()
     expect(view.text()).not.toContain('更多')
     expect(view.get('#node-link-7').attributes('href')).toBe('/nodes?node=7')
-    await view.get('tbody tr td:nth-child(2)').trigger('click')
+    await view.get('tbody tr td:first-child').trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.query.node).toBe('7')
     expect(api.getNode).toHaveBeenCalledWith(primary.id)
     expect(view.get('.detail-title h2').text()).toBe(primary.name)
-    expect(view.text()).toContain('中国香港')
-    expect(view.get('progress').element.max).toBe(primary.traffic_limit_bytes)
-    expect(view.get('progress').element.value).toBe(primary.traffic_quota_used_bytes)
+    expect(view.get('.node-region-flag').attributes('aria-label')).toContain('香港')
+    expect(view.get('.node-region-flag').text()).toBe('🇭🇰')
+    expect(view.get('.detail-traffic p').text()).toBe('1.07 GB / 1.07 GB')
     expect(view.find('tbody').exists()).toBe(false)
     await view.get('.node-detail-back').trigger('click')
     await flushPromises()
@@ -190,17 +190,28 @@ describe('node inventory', () => {
     expect(api.getNodeList).toHaveBeenCalledTimes(5)
   })
 
-  it('shows only the primary IP with quota states and sends the selected status and page', async () => {
+  it('shows distinct ID, name and flag cells with the primary IP, and sends the selected status and page', async () => {
     api.getNodeList.mockResolvedValue(list([
-      { ...primary, addresses: ['192.0.2.7', '192.0.2.17', '2001:db8::7', '2001:db8::17'] },
+      { ...primary, addresses: ['192.0.2.7', '192.0.2.17', '2001:db8::7', '2001:db8::17'], traffic_reset_period: 'monthly' },
       { id: 8, name: '待注册', status: 'offline', traffic_quota_state: 'pending' },
-      { id: 9, name: '未限流', status: 'error', address: '192.0.2.9', total_bytes: 1536 },
+      { id: 9, name: '未限流', status: 'error', region: 'US', address: '192.0.2.9', total_bytes: 1536 },
       { id: 10, name: '旧守护程序', status: 'unknown', address: '2001:db8::10', traffic_limit_bytes: GIB, traffic_quota_state: 'unsupported' },
-      { id: 11, name: '待同步', traffic_limit_bytes: GIB },
       { id: 12, name: '生效中', traffic_limit_bytes: GIB, traffic_quota_state: 'active', traffic_current_period_used_bytes: 0 }
     ], 22))
     const view = open()
     await flushPromises()
+    expect(view.findAll('thead th').map(header => header.text())).toEqual([
+      'ID', '节点名称', '区域', '节点 IP', '状态', '本期用量', 'Gost 版本', '操作'
+    ])
+    const cells = view.findAll('tbody tr').map(row => row.findAll('td'))
+    expect(cells[0][0].get('.ops-mono').text()).toBe(String(primary.id))
+    expect(cells[0][1].get('a').text()).toBe(primary.name)
+    expect(cells[0][2].get('[role="img"]').text()).toBe('🇭🇰')
+    expect(cells[1][2].text()).toBe('区域—')
+    expect(cells[2][2].get('[role="img"]').text()).toBe('🇺🇸')
+    expect(cells[0][6].get('.ops-mono').text()).toBe(primary.gost_version)
+    expect(cells[0][6].find('a').exists()).toBe(false)
+    expect(cells[1][6].get('.ops-mono').text()).toBe('—')
     const rows = view.findAll('tbody tr').map(row => row.text())
     expect(rows[0]).toContain('2001:db8::7')
     expect(rows[0]).not.toContain('192.0.2.7')
@@ -208,23 +219,16 @@ describe('node inventory', () => {
     expect(rows[0]).not.toContain('2001:db8::17')
     expect(rows[0]).not.toContain(primary.manual_addresses[0])
     expect(rows[0]).not.toContain(primary.manual_addresses[1])
-    expect(view.get('tbody tr td:nth-child(2)').text()).toBe('节点 IP2001:db8::7')
-    expect(rows[0]).toContain('1.07 GB')
-    expect(rows[0]).not.toContain('1.5 KiB')
-    expect(rows[0]).toContain('已达上限')
-    expect(rows[0]).toContain('本期用量')
+    expect(cells[0][3].text()).toBe('节点 IP2001:db8::7')
+    expect(cells[0][5].text()).toBe('本期用量1.07 GB / 1.07 GB')
     expect(rows[1]).toContain('待获取地址')
-    expect(rows[1]).toContain('解除限制待同步')
     expect(rows[2]).toContain('192.0.2.9')
     expect(rows[2]).not.toContain('IPv6')
     expect(rows[2]).not.toContain('检查')
-    expect(rows[2]).toContain('未统计')
-    expect(rows[2]).not.toContain('1.5 KiB')
-    expect(rows[2]).toContain('未设上限')
+    expect(cells[2][5].text()).toBe('本期用量未统计 / Unlimited')
     expect(rows[3]).toContain('2001:db8::10')
-    expect(rows[3]).toContain('需要支持流量配额的 yagp-daemon')
-    expect(rows[4]).toContain('待同步')
-    expect(rows[5]).toContain('0.00 GB')
+    expect(cells[3][5].text()).toBe('本期用量未统计 / 1.07 GB')
+    expect(cells[4][5].text()).toBe('本期用量0.00 GB / 1.07 GB')
 
     const [status, pageSize] = view.findAllComponents(ElSelect)
     status.vm.$emit('update:modelValue', 'online')
@@ -240,28 +244,30 @@ describe('node inventory', () => {
     expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 20, keyword: '', status: 'online' })
   })
 
-  it('shows only synced current-period traffic in GB in the list and detail', async () => {
+  it('shows only the current usage and limit in the list and detail', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    const previousPeriod = { ...primary, traffic_current_period_used_bytes: null }
+    const previousPeriod = { ...primary, traffic_limit_bytes: 5e9, traffic_reset_period: 'monthly', traffic_current_period_used_bytes: null }
     api.getNodeList.mockResolvedValueOnce(list([previousPeriod]))
     api.getNode.mockResolvedValueOnce(response(previousPeriod))
     const view = open()
     await flushPromises()
-    const trafficCell = view.get('tbody tr td:nth-child(4)')
-    expect(trafficCell.get('strong').text()).toBe('未统计')
-    expect(trafficCell.get('.ops-status').text()).toBe('待同步')
+    const trafficCell = view.get('tbody tr td:nth-child(6)')
+    expect(trafficCell.text()).toBe('本期用量未统计 / 5.00 GB')
     await openDetail(view)
     const traffic = view.get('[aria-labelledby="node-traffic-title"]')
-    expect(traffic.get('dd').text()).toBe('未统计')
+    expect(traffic.text()).toBe('流量统计与配额未统计 / 5.00 GB')
     expect(traffic.find('progress').exists()).toBe(false)
     expect(traffic.text()).not.toContain('累计流量')
 
     api.getNode.mockResolvedValueOnce(response({
-      ...primary, traffic_quota_state: 'active', traffic_quota_used_bytes: 5_000_000, traffic_current_period_used_bytes: 5_000_000
+      ...previousPeriod, traffic_quota_state: 'active', traffic_quota_used_bytes: 5_000_000, traffic_current_period_used_bytes: 5_000_000
     }))
     await vi.advanceTimersByTimeAsync(5000)
-    expect(traffic.get('dd').text()).toBe('<0.01 GB')
-    expect(traffic.get('progress').element.value).toBe(5_000_000)
+    expect(traffic.text()).toBe('流量统计与配额<0.01 GB / 5.00 GB')
+
+    api.getNode.mockResolvedValueOnce(response({ ...previousPeriod, traffic_limit_bytes: 0 }))
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(traffic.text()).toBe('流量统计与配额未统计 / Unlimited')
   })
 
   it('opens the node configuration and renders services, chains and observers after a failed read', async () => {
@@ -576,12 +582,12 @@ describe('node actions', () => {
     expect(messages.success).toHaveBeenCalledTimes(2)
   })
 
-  it('links directly to the inline Gost section and fetches logs when expanded', async () => {
+  it('opens a bookmarked inline Gost section and fetches logs when expanded', async () => {
     api.getGostLogs.mockResolvedValue(response({ entries: [{ message: '启动完成', priority: 6 }] }))
     const view = open()
     await flushPromises()
     expect(api.getGostService).not.toHaveBeenCalled()
-    await view.get('.inventory-service-link').trigger('click')
+    await router.push('/nodes?node=7#node-gost-service')
     await flushPromises()
     expect(router.currentRoute.value.hash).toBe('#node-gost-service')
     expect(document.activeElement).toBe(view.get('#node-gost-title').element)

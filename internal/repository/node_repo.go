@@ -252,6 +252,14 @@ func (r *NodeRepository) UpdateLastCheck(id uint) error {
 	return r.UpdateField(&model.GostNode{}, id, "last_check_at", time.Now())
 }
 
+func (r *NodeRepository) UpdateGostVersion(id uint, version string, checkedAt time.Time) error {
+	fields := map[string]any{"gost_version_checked_at": checkedAt}
+	if version != "" {
+		fields["gost_version"] = version
+	}
+	return r.DB.Model(&model.GostNode{}).Where("id = ?", id).UpdateColumns(fields).Error
+}
+
 // GetAllOnline 获取所有在线节点
 func (r *NodeRepository) GetAllOnline() ([]model.GostNode, error) {
 	var nodes []model.GostNode
