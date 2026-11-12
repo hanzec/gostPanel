@@ -89,7 +89,13 @@
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">Relay</span>
                 <strong class="ops-mono">{{ tunnel.protocol?.toUpperCase() || '—' }}</strong>
-                <span class="inventory-secondary ops-mono ops-muted">{{ tunnel.exit_rule ? listenEndpoint(tunnel.exit_rule) : ':' + (tunnel.relay_port || '—') }}</span>
+                <span class="inventory-secondary ops-muted">
+                  <template v-if="relayConnectEndpoints[tunnel.id]">本机监听 </template>
+                  <span class="ops-mono">{{ tunnel.exit_rule ? listenEndpoint(tunnel.exit_rule) : ':' + (tunnel.relay_port || '—') }}</span>
+                </span>
+                <span v-if="relayConnectEndpoints[tunnel.id]" class="inventory-secondary ops-muted">
+                  源端连接 <span class="ops-mono">{{ relayConnectEndpoints[tunnel.id] }}</span>
+                </span>
               </td>
               <td class="inventory-status" role="cell">
                 <span class="ops-status" :class="'is-' + (tunnelStates[tunnel.status]?.tone || 'muted')">
@@ -189,7 +195,12 @@
                 :disabled="rule.node_id === entryEntrance?.node_id"
               />
             </el-select>
-            <span id="destination-entry-help" class="tunnel-form-hint ops-muted">目的端须在另一节点、目标留空且监听可达。其协议和端口用于 Relay。</span>
+            <span id="destination-entry-help" class="tunnel-form-hint ops-muted">
+              目的端须在另一节点、目标留空且监听可达。其协议和端口用于 Relay。
+              <span v-if="selectedRelayConnectEndpoint" class="tunnel-connect-endpoint">
+                源端连接 <span class="ops-mono">{{ selectedRelayConnectEndpoint }}</span>
+              </span>
+            </span>
           </el-form-item>
           <el-form-item v-if="legacyEdit" label="协议" prop="protocol">
             <el-select v-model="form.protocol">
@@ -262,6 +273,7 @@ import MetricStrip from '@/components/MetricStrip.vue'
 import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
 import { getRoutingNodes } from '@/api/node'
 import { getRuleList } from '@/api/rule'
+import { formatEndpoint, mappedConnectEndpoint } from '@/utils/node-address-mapping'
 import { nodeAddresses } from '@/utils/node-display'
 
 const tunnelStates = {
@@ -316,10 +328,14 @@ const missingAllowlistNodes = computed(() => form.allowlist_node_ids.filter(id =
 const allowlistAddresses = computed(() => [...new Set(nodeList.value
   .filter(node => form.allowlist_node_ids.includes(node.id))
   .flatMap(nodeAddresses))])
-const listenEndpoint = ({ listen_ip: ip, listen_port: port }) => (ip?.includes(':') ? '[' + ip + ']' : ip || '*') + ':' + port
+const listenEndpoint = rule => formatEndpoint(rule.listen_ip, rule.listen_port)
 const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
 const entryEntrance = computed(() => entryList.value.find(rule => rule.id === form.entry_rule_id))
 const exitEntrance = computed(() => entryList.value.find(rule => rule.id === form.exit_rule_id))
+const selectedRelayConnectEndpoint = computed(() => mappedConnectEndpoint(exitEntrance.value?.node, exitEntrance.value?.listen_ip, exitEntrance.value?.listen_port))
+const relayConnectEndpoints = computed(() => Object.fromEntries(tunnelList.value.map(tunnel => [
+  tunnel.id, mappedConnectEndpoint(tunnel.exit_node, tunnel.exit_rule?.listen_ip, tunnel.relay_port)
+])))
 const availableEntrances = computed(() => entryList.value.filter(rule => rule.linked_tunnel_id
   ? rule.linked_tunnel_id === editId.value
   : !rule.tunnel_id && rule.status !== 'running'))
@@ -540,6 +556,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-dialog-hint { margin: 0 0 12px; }
 .tunnel-link { color: var(--ops-accent); }
 .tunnel-form-hint { font-size: var(--ops-text-xs); line-height: 1.5; margin-top: 4px; }
+.tunnel-connect-endpoint { display: block; overflow-wrap: anywhere; }
 .tunnel-allowlist-preview { margin: 0; padding: 12px; background: var(--ops-inset); border-radius: var(--ops-radius-inset); }
 .tunnel-allowlist-preview dd { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
 .tunnel-allowlist-error { color: var(--ops-danger); overflow-wrap: anywhere; }

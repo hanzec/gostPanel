@@ -138,6 +138,36 @@ describe('Relay tunnel inventory', () => {
 })
 
 describe('Relay tunnel configuration', () => {
+  it('shows the selected destination bind and the mapped source connection address', async () => {
+    const mappedNode = { ...egress, address_mappings: [
+      { listen_ip: '10.10.0.7', connect_ip: '198.51.100.77' },
+      { listen_ip: '10.10.0.8', connect_ip: '2001:db8::80' }
+    ] }
+    const mappedDestination = { ...destination, node: mappedNode, listen_ip: '10.10.0.8' }
+    const unmappedDestination = { ...mappedDestination, id: 70, listen_ip: '10.10.0.9' }
+    getRuleList.mockResolvedValueOnce(result([source, mappedDestination, unmappedDestination]))
+    getTunnelList.mockResolvedValueOnce(result([{
+      ...relay, exit_node: mappedNode, exit_rule: { ...relayDestination, listen_ip: mappedDestination.listen_ip }
+    }, udpRelay]))
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    const relayRow = row(wrapper, relay.name)
+    expect(relayRow.text()).toContain('本机监听 10.10.0.8:65535')
+    expect(relayRow.text()).toContain('源端连接 [2001:db8::80]:65535')
+    expect(row(wrapper, udpRelay.name).text()).not.toContain('源端连接')
+
+    await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
+    const editor = dialog(wrapper)
+    const destinationSelect = selectField(editor, 'exit_rule_id')
+    expect(destinationSelect.findAllComponents(ElOption)
+      .find(option => option.props('value') === mappedDestination.id).props('label')).toContain('10.10.0.8:9553')
+    await choose(destinationSelect, mappedDestination.id)
+    expect(editor.get('#destination-entry-help').text()).toContain('源端连接 [2001:db8::80]:9553')
+    await choose(destinationSelect, unmappedDestination.id)
+    expect(editor.get('#destination-entry-help').text()).not.toContain('源端连接')
+  })
+
   it('loads later entrance pages and preserves a tunnel pair found after the first hundred', async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...source, id: index + 1000 }))
     const secondPage = [destination, mediaSource, mediaDestination]

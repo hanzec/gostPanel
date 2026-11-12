@@ -31,6 +31,11 @@ type NodeUpgradePolicy struct {
 	AutoUpgradeDaemon bool `gorm:"not null;default:false" json:"auto_upgrade_daemon"`
 }
 
+type NodeAddressMapping struct {
+	ListenIP  string `json:"listen_ip"`
+	ConnectIP string `json:"connect_ip"`
+}
+
 // GostNode Gost 节点模型
 type GostNode struct {
 	ID        uint       `gorm:"primaryKey" json:"id"`
@@ -49,7 +54,8 @@ type GostNode struct {
 	GostVersionCheckedAt *time.Time `json:"-"`
 
 	// Supplemental addresses do not replace the detected primary address or identify local listeners.
-	ManualAddresses []string `gorm:"serializer:json;type:text" json:"manual_addresses,omitempty"`
+	ManualAddresses []string             `gorm:"serializer:json;type:text" json:"manual_addresses,omitempty"`
+	AddressMappings []NodeAddressMapping `gorm:"serializer:json;type:text" json:"address_mappings,omitempty"`
 
 	RegistrationTokenHash string     `gorm:"size:64" json:"-"`
 	RegistrationExpiresAt *time.Time `json:"-"`

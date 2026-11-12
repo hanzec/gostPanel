@@ -68,7 +68,7 @@ func TestRuleSyncRetargetsRunningTunnel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exitAddresses := map[uint]string{updatedExit.ID: updatedExit.Address}
+	exitNodes := map[uint]*model.GostNode{updatedExit.ID: updatedExit}
 	service := NewRuleSyncService(db)
 	assertChain := func(want string, updates, saves int) {
 		t.Helper()
@@ -88,13 +88,13 @@ func TestRuleSyncRetargetsRunningTunnel(t *testing.T) {
 			t.Errorf("chain = %s; want %s", api.chain, want)
 		}
 	}
-	service.syncNodeRules(entry, exitAddresses)
+	service.syncNodeRules(entry, exitNodes)
 	assertChain(original, 1, 0)
-	service.syncNodeRules(entry, exitAddresses)
+	service.syncNodeRules(entry, exitNodes)
 	assertChain(updated, 2, 1)
-	service.syncNodeRules(entry, exitAddresses)
+	service.syncNodeRules(entry, exitNodes)
 	assertChain(updated, 2, 2)
-	service.syncNodeRules(entry, exitAddresses)
+	service.syncNodeRules(entry, exitNodes)
 	assertChain(updated, 2, 2)
 	for i, want := range []model.TunnelStatus{model.TunnelStatusRunning, model.TunnelStatusStopped} {
 		var stored model.GostTunnel

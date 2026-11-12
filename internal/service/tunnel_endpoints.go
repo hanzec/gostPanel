@@ -115,7 +115,7 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 	if err := endpointNodesOnline(t); err != nil {
 		return err
 	}
-	host := relayHost(t, t.ExitNode.Address)
+	host := relayHost(t.ExitRule, t.ExitNode)
 	if host == "" {
 		return errors.ErrExtractHostFailed
 	}
@@ -329,11 +329,21 @@ func dockerEntranceServiceName(id uint) string {
 	return entranceServiceName(id) + "-docker"
 }
 
-func relayHost(t *model.GostTunnel, detected string) string {
-	if t.ExitRule != nil && t.ExitRule.ListenIP != "" {
-		return t.ExitRule.ListenIP
+func relayHost(exitRule *model.GostRule, exitNode *model.GostNode) string {
+	if exitRule != nil && exitRule.ListenIP != "" {
+		if exitNode != nil {
+			for _, mapping := range exitNode.AddressMappings {
+				if mapping.ListenIP == exitRule.ListenIP {
+					return mapping.ConnectIP
+				}
+			}
+		}
+		return exitRule.ListenIP
 	}
-	return detected
+	if exitNode == nil {
+		return ""
+	}
+	return exitNode.Address
 }
 
 func (s *TunnelService) recordTunnelAction(t *model.GostTunnel, action, label, user, ip, agent string) {

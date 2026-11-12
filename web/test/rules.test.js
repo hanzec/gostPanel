@@ -259,6 +259,35 @@ describe('forwarding rule inventory', () => {
   })
 })
 describe('forwarding rule editor and actions', () => {
+  it('binds a mapped local IP and displays its public endpoint with the same port', async () => {
+    const mapping = { listen_ip: '10.10.0.8', connect_ip: '2001:db8::80' }
+    const mappedNode = { ...entryNode, address_mappings: [mapping] }
+    const mappedRule = { ...direct, node: mappedNode, listen_ip: mapping.listen_ip }
+    getRoutingNodes.mockResolvedValueOnce([mappedNode])
+    getRuleList.mockResolvedValueOnce(result([mappedRule, relayRule]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    expect(row(wrapper, mappedRule.name).text()).toContain('对外连接 [2001:db8::80]:443')
+    expect(row(wrapper, relayRule.name).text()).not.toContain('对外连接')
+
+    await button(wrapper, '新建规则').trigger('click')
+    const dialog = editDialog(wrapper)
+    await choose(selectField(dialog, 'node_id'), mappedNode.id)
+    const listenIP = selectField(dialog, 'listen_ip')
+    const options = listenIP.findAllComponents(ElOption)
+    expect(options.find(option => option.props('value') === mapping.listen_ip).props('label')).toBe('本机 10.10.0.8 · 对外 2001:db8::80')
+    expect(options.map(option => option.props('value'))).not.toContain(mapping.connect_ip)
+    await choose(listenIP, mapping.listen_ip)
+    await field(dialog, 'name').get('input').setValue('Mapped ingress')
+    await field(dialog, 'listen_port').get('input').setValue('9443')
+    const preview = dialog.get('#rule-listen-endpoint')
+    expect(preview.text()).toContain('监听地址 10.10.0.8:9443')
+    expect(preview.text()).toContain('对外连接 [2001:db8::80]:9443')
+    await button(dialog, '创建规则').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ listen_ip: mapping.listen_ip, listen_port: 9443 }))
+  })
+
   it('creates a standalone endpoint after validating the node and port, then checks that listener', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()

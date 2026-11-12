@@ -20,6 +20,7 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	entry, exit := startServiceTestNode(t, entryRemote), startServiceTestNode(t, exitRemote)
 	entry.IPv4 = "192.0.2.13"
 	exit.Name, exit.Address = "exit", "198.51.100.21"
+	exit.AddressMappings = []model.NodeAddressMapping{{ListenIP: "10.0.0.5", ConnectIP: "203.0.113.5"}}
 	saveServiceFixtures(t, db, &entry, &exit)
 	rules, tunnels := NewRuleService(db), NewTunnelService(db)
 	create := func(node uint, name, listenIP string, port int, targets ...string) *model.GostRule {
@@ -113,12 +114,13 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	requireServiceError(t, rules.Stop(source.ID, testAdmin, testIP, testAgent), bizerrors.ErrRuleTunnelLinked)
 	sync := NewRuleSyncService(db)
 	client := utils.GetGostClient(&entry)
-	exitAddresses := map[uint]string{exit.ID: "198.51.100.22"}
+	exit.Address = "198.51.100.22"
+	exitNodes := map[uint]*model.GostNode{exit.ID: &exit}
 	chainPath := "PUT /config/chains/" + chain.Name
 	entryRemote.mu.Lock()
 	entryRemote.reject[chainPath] = http.StatusBadGateway
 	entryRemote.mu.Unlock()
-	sync.syncTunnels(client, entry.ID, []model.GostTunnel{*tunnel}, []gost.ChainConfig{chain}, exitAddresses)
+	sync.syncTunnels(client, entry.ID, []model.GostTunnel{*tunnel}, []gost.ChainConfig{chain}, exitNodes)
 	if addr, _ := entryRemote.chain(chain.Name).TunnelRelayAddress(); addr != "198.51.100.21:9816" {
 		t.Fatalf("failed update did not retain the previous relay address: %q", addr)
 	}
@@ -126,7 +128,7 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	delete(entryRemote.reject, chainPath)
 	entryRemote.reject["POST /config?format=yaml"] = http.StatusBadGateway
 	entryRemote.mu.Unlock()
-	sync.syncTunnels(client, entry.ID, []model.GostTunnel{*tunnel}, []gost.ChainConfig{chain}, exitAddresses)
+	sync.syncTunnels(client, entry.ID, []model.GostTunnel{*tunnel}, []gost.ChainConfig{chain}, exitNodes)
 	if addr, _ := entryRemote.chain(chain.Name).TunnelRelayAddress(); addr != "198.51.100.22:9816" {
 		t.Fatalf("updated relay address = %q", addr)
 	}
@@ -136,7 +138,7 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	entryRemote.mu.Lock()
 	delete(entryRemote.reject, "POST /config?format=yaml")
 	entryRemote.mu.Unlock()
-	sync.syncTunnels(client, entry.ID, []model.GostTunnel{*tunnel}, []gost.ChainConfig{entryRemote.chain(chain.Name)}, exitAddresses)
+	sync.syncTunnels(client, entry.ID, []model.GostTunnel{*tunnel}, []gost.ChainConfig{entryRemote.chain(chain.Name)}, exitNodes)
 	if _, pending := sync.unsavedTunnelConfig.Load(entry.ID); pending {
 		t.Fatal("successful retry did not clear pending save")
 	}
@@ -178,6 +180,9 @@ func TestEndpointTunnelAppliesAndRemovesBothNodeConfigs(t *testing.T) {
 	requireServiceError(t, tunnels.Start(tunnel.ID, testAdmin, testIP, testAgent), nil)
 	if got := exitRemote.service(relay.Name); got.Addr != "10.11.12.13:10789" {
 		t.Fatalf("new exit bind = %q", got.Addr)
+	}
+	if addr, _ := entryRemote.chain(chain.Name).TunnelRelayAddress(); addr != "10.11.12.13:10789" {
+		t.Fatalf("unmapped exit chain address = %q", addr)
 	}
 	requireServiceError(t, tunnels.Delete(tunnel.ID, testAdmin, testIP, testAgent), nil)
 	requireServiceError(t, rules.Delete(source.ID, testAdmin, testIP, testAgent), nil)

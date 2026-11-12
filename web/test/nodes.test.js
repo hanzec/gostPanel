@@ -337,6 +337,62 @@ describe('node inventory', () => {
 })
 
 describe('node registration and quota settings', () => {
+  it('validates both addresses and creates a node with a complete IP mapping', async () => {
+    api.createNode.mockResolvedValue(response(newNode))
+    const view = open()
+    await flushPromises()
+    await click(view, '添加节点')
+    const form = editForm(view, '添加节点')
+    await form.get('[placeholder="例如 华东入口"]').setValue(newNode.name)
+    await click(form, '添加映射')
+    const localIP = form.get('[placeholder="例如 10.0.0.2"]')
+    const connectIP = form.get('[placeholder="例如 203.0.113.20"]')
+    expect(document.activeElement).toBe(localIP.element)
+    await localIP.setValue(' 10.0.0.2 ')
+    await click(dialog(view, '添加节点'), '添加节点')
+    await vi.waitFor(() => {
+      expect(form.text()).toContain('请输入对外连接 IP')
+      expect(document.activeElement).toBe(connectIP.element)
+    })
+    expect(api.createNode).not.toHaveBeenCalled()
+
+    await connectIP.setValue(' 203.0.113.20 ')
+    await click(dialog(view, '添加节点'), '添加节点')
+    expect(api.createNode).toHaveBeenCalledExactlyOnceWith({
+      name: newNode.name, remark: '', traffic_limit_bytes: 0, traffic_reset_period: 'none',
+      address_mappings: [{ listen_ip: '10.0.0.2', connect_ip: '203.0.113.20' }]
+    })
+  })
+
+  it('shows saved IP mappings, omits them when unchanged and sends an empty array when removed', async () => {
+    const address_mappings = [
+      { listen_ip: '10.0.0.2', connect_ip: '203.0.113.20' },
+      { listen_ip: 'fd00::2', connect_ip: '2001:db8::20' }
+    ]
+    const mapped = { ...primary, address_mappings }
+    api.getNodeList.mockResolvedValue(list([mapped]))
+    api.getNode.mockResolvedValue(response(mapped))
+    api.updateNode.mockResolvedValue(response(mapped))
+    const view = open()
+    await flushPromises()
+    await openDetail(view)
+    expect(view.text()).toContain('fd00::2 → 2001:db8::20')
+    await click(view, '配置')
+    const form = editForm(view, settingsTitle)
+    expect(form.findAll('.node-address-mapping')).toHaveLength(2)
+    expect(form.findAll('[placeholder="例如 10.0.0.2"]').map(input => input.element.value)).toEqual(['10.0.0.2', 'fd00::2'])
+    await click(dialog(view, settingsTitle), '保存更改')
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, remark: primary.remark })
+
+    await click(view, '配置')
+    const reopened = editForm(view, settingsTitle)
+    await reopened.get('[aria-label="移除第 1 组映射"]').trigger('click')
+    expect(reopened.get('[placeholder="例如 10.0.0.2"]').element.value).toBe('fd00::2')
+    await reopened.get('[aria-label="移除第 1 组映射"]').trigger('click')
+    await click(dialog(view, settingsTitle), '保存更改')
+    expect(api.updateNode).toHaveBeenLastCalledWith(primary.id, { name: primary.name, remark: primary.remark, address_mappings: [] })
+  })
+
   it('creates a node with supplementary IPs entered on separate lines', async () => {
     api.createNode.mockResolvedValue(response(newNode))
     const view = open()

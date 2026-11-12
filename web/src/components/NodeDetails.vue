@@ -28,6 +28,12 @@
           <dt>补充 IP</dt>
           <dd class="ops-mono">{{ node.manual_addresses.join(' · ') }}</dd>
         </div>
+        <div v-if="node.address_mappings?.length" class="detail-manual-addresses">
+          <dt>本机监听 IP → 对外连接 IP</dt>
+          <dd v-for="mapping in node.address_mappings" :key="mapping.listen_ip" class="ops-mono">
+            {{ mapping.listen_ip }} → {{ mapping.connect_ip }}
+          </dd>
+        </div>
       </dl>
     </section>
     <NodeGostService :key="node.id" :node="node" class="ops-panel ops-panel-body" @upgrade="$emit('action', 'upgrade-gost')" />

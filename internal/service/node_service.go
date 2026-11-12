@@ -57,6 +57,7 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 	node := &model.GostNode{
 		Name:               req.Name,
 		ManualAddresses:    req.ManualAddresses,
+		AddressMappings:    req.AddressMappings,
 		Remark:             req.Remark,
 		Status:             model.NodeStatusOffline,
 		TrafficResetPeriod: model.TrafficResetNone,
@@ -114,7 +115,7 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 	node.Name = req.Name
 	node.Remark = req.Remark
 
-	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod, req.ManualAddresses); err != nil {
+	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod, req.ManualAddresses, req.AddressMappings); err != nil {
 		return nil, err
 	}
 
@@ -253,7 +254,7 @@ func (s *NodeService) List(req *dto.NodeListReq) ([]model.GostNode, int64, error
 	// 关键词搜索
 	if req.Keyword != "" {
 		keyword := "%" + req.Keyword + "%"
-		opt.Conditions["name LIKE ? OR address LIKE ? OR ipv4 LIKE ? OR ipv6 LIKE ? OR addresses LIKE ? OR manual_addresses LIKE ?"] = []any{keyword, keyword, keyword, keyword, keyword, keyword}
+		opt.Conditions["name LIKE ? OR address LIKE ? OR ipv4 LIKE ? OR ipv6 LIKE ? OR addresses LIKE ? OR manual_addresses LIKE ? OR address_mappings LIKE ?"] = []any{keyword, keyword, keyword, keyword, keyword, keyword, keyword}
 	}
 
 	return s.nodeRepo.List(opt)
