@@ -4,31 +4,37 @@
     <el-form-item label="节点名称" prop="name">
       <el-input v-model="form.name" placeholder="例如 华东入口" />
     </el-form-item>
-    <el-form-item label="补充 IP（可选）" prop="manualAddresses" for="node-manual-addresses">
-      <el-input
-        id="node-manual-addresses"
-        v-model="form.manualAddresses"
-        type="textarea"
-        :rows="3"
-        placeholder="每行一个 IPv4 或 IPv6"
-        aria-describedby="node-manual-addresses-help"
-        spellcheck="false"
-      />
-      <p id="node-manual-addresses-help" class="node-settings-help ops-muted">可填写服务商映射的公网 IP，每行一个。补充 IP 可用于 Gost 白名单，不替代自动获取的主要 IP，也不会加入本机监听选项。</p>
-    </el-form-item>
-    <fieldset class="node-address-mappings" aria-describedby="node-address-mappings-help">
-      <legend>监听 IP 映射（可选）</legend>
-      <p id="node-address-mappings-help" class="node-settings-help ops-muted">隧道目的端绑定本机监听 IP，源端 Gost 使用配对的对外连接 IP 和同一个端口。</p>
+    <fieldset v-if="listenAddresses" class="node-address-mappings" aria-describedby="node-address-mappings-help">
+      <legend ref="mappingHeading" tabindex="-1">监听 IP 映射（可选）</legend>
+      <p id="node-address-mappings-help" class="node-settings-help ops-muted">
+        {{ listenAddresses.length
+          ? '从节点上报的 IP 中选择监听地址。源端 Gost 使用配对的对外连接 IP 和同一个端口。'
+          : '暂无可选的监听 IP。请等待节点上报地址。' }}
+      </p>
       <div v-for="(mapping, index) in form.addressMappings" :key="mapping.key" class="node-address-mapping">
         <el-form-item label="本机监听 IP" :prop="`addressMappings.${index}.listen_ip`" :rules="listenIPRules">
-          <el-input v-model.trim="mapping.listen_ip" placeholder="例如 10.0.0.2" spellcheck="false" />
+          <el-select v-model="mapping.listen_ip" placeholder="选择节点 IP" filterable>
+            <el-option
+              v-for="ip in listenAddresses"
+              :key="ip"
+              :label="ip"
+              :value="ip"
+              :disabled="ip !== mapping.listen_ip && selectedAddresses.has(ip)"
+            />
+            <el-option
+              v-if="mapping.listen_ip && !listenAddresses.includes(mapping.listen_ip)"
+              :label="mapping.listen_ip + '（当前未上报）'"
+              :value="mapping.listen_ip"
+              disabled
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="对外连接 IP" :prop="`addressMappings.${index}.connect_ip`" :rules="connectIPRules">
           <el-input v-model.trim="mapping.connect_ip" placeholder="例如 203.0.113.20" spellcheck="false" />
         </el-form-item>
         <el-button :aria-label="`移除第 ${index + 1} 组映射`" @click="removeMapping(index)">移除</el-button>
       </div>
-      <el-button ref="addMappingButton" @click="addMapping">添加映射</el-button>
+      <el-button ref="addMappingButton" :disabled="!canAddMapping" @click="addMapping">添加映射</el-button>
     </fieldset>
     <el-form-item label="流量上限（GiB，可选）" prop="trafficLimitGiB">
       <el-input v-model.trim="form.trafficLimitGiB" inputmode="decimal" placeholder="例如 100.5" aria-describedby="node-traffic-limit-help" clearable />
@@ -48,19 +54,24 @@
 </template>
 
 <script setup>
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { trafficResetPeriods } from '@/utils/node-display'
 
 const props = defineProps({
   form: { type: Object, required: true },
   rules: { type: Object, required: true },
+  listenAddresses: { type: Array, default: undefined },
   hasTrafficLimit: Boolean,
   error: { type: String, default: '' }
 })
 defineEmits(['submit'])
 const formRef = ref(null)
 const addMappingButton = ref(null)
-const listenIPRules = [{ required: true, message: '请输入本机监听 IP', trigger: 'blur' }]
+const mappingHeading = ref(null)
+const selectedAddresses = computed(() => new Set(props.form.addressMappings.map(mapping => mapping.listen_ip)))
+const canAddMapping = computed(() => props.listenAddresses?.some(ip => !selectedAddresses.value.has(ip)) &&
+  props.form.addressMappings.every(mapping => mapping.listen_ip))
+const listenIPRules = [{ required: true, message: '请选择本机监听 IP', trigger: 'change' }]
 const connectIPRules = [{ required: true, message: '请输入对外连接 IP', trigger: 'blur' }]
 
 const addMapping = async () => {
@@ -73,7 +84,8 @@ const addMapping = async () => {
 const removeMapping = async (index) => {
   props.form.addressMappings.splice(index, 1)
   await nextTick()
-  addMappingButton.value?.$el.focus()
+  if (canAddMapping.value) addMappingButton.value?.$el.focus()
+  else mappingHeading.value?.focus()
 }
 
 defineExpose({
@@ -97,6 +109,7 @@ defineExpose({
 .node-address-mappings legend { padding: 0; color: var(--el-text-color-regular); font-size: var(--ops-text-sm); }
 .node-address-mapping { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: 8px; align-items: start; }
 .node-address-mapping > .el-button { margin-top: 30px; }
+.node-address-mapping .el-select { width: 100%; }
 @media (max-width: 700px) {
   .node-settings-form :deep(.el-input__wrapper),
   .node-settings-form :deep(.el-select__wrapper) { min-height: 44px; }

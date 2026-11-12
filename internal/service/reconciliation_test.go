@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"yagp/internal/dto"
 	"yagp/internal/model"
 	"yagp/pkg/gost"
 )
@@ -20,7 +19,11 @@ func TestRuleReconciliationRepairsStatusAndExitAllowlist(t *testing.T) {
 	db := newServiceTestDB(t)
 	remote := &lifecycleNode{t: t}
 	node := startServiceTestNode(t, remote)
-	entry := model.GostNode{Name: "allowed source", Port: 39000, Address: "192.0.2.8", IPv4: "192.0.2.8", Status: model.NodeStatusOffline}
+	const originalIPv4 = "192.0.2.8"
+	entry := model.GostNode{
+		Name: "allowed source", Port: 39000, Address: originalIPv4, IPv4: originalIPv4, Status: model.NodeStatusOffline,
+		ManualAddresses: []string{"203.0.113.8", originalIPv4},
+	}
 	otherSource := model.GostNode{
 		Name: "other source", Port: 39000, Status: model.NodeStatusOffline,
 		Addresses: []string{"192.0.2.10", "2001:db8::7"},
@@ -85,7 +88,7 @@ func TestRuleReconciliationRepairsStatusAndExitAllowlist(t *testing.T) {
 			t.Fatalf("admission = %+v, want %s (whitelist %t) matching %v", admission, name, whitelist, matchers)
 		}
 	}
-	assertAdmission(firstName, true, []string{entry.IPv4})
+	assertAdmission(firstName, true, []string{originalIPv4, "203.0.113.8"})
 	assertAdmission(otherName, true, otherSource.Addresses)
 	if remote.service(tunnel.ServiceID).HasAdmission(gost.LegacyRelayAllowlistName) ||
 		remote.service(other.ServiceID).HasAdmission(gost.LegacyRelayAllowlistName) ||
@@ -104,28 +107,14 @@ func TestRuleReconciliationRepairsStatusAndExitAllowlist(t *testing.T) {
 		t.Fatal("allowlist save retry did not succeed")
 	}
 	refreshConfig()
-	_, err := NewNodeService(db, "").Update(entry.ID, &dto.UpdateNodeReq{
-		Name: entry.Name, ManualAddresses: dto.NodeManualAddresses{"203.0.113.8", entry.IPv4},
-	}, testAdmin, testIP, testAgent)
-	requireServiceError(t, err, nil)
-	syncService.syncNodeRules(node, nil)
-	assertAdmission(firstName, true, []string{entry.IPv4, "203.0.113.8"})
-	refreshConfig()
-	_, err = NewNodeService(db, "").Update(entry.ID, &dto.UpdateNodeReq{
-		Name: entry.Name, ManualAddresses: dto.NodeManualAddresses{},
-	}, testAdmin, testIP, testAgent)
-	requireServiceError(t, err, nil)
-	syncService.syncNodeRules(node, nil)
-	assertAdmission(firstName, true, []string{entry.IPv4})
-	refreshConfig()
 	requireServiceError(t, db.Model(&entry).Update("ipv4", "192.0.2.9").Error, nil)
 	syncService.syncNodeRules(node, nil)
-	assertAdmission(firstName, true, []string{"192.0.2.9"})
+	assertAdmission(firstName, true, []string{originalIPv4, "192.0.2.9", "203.0.113.8"})
 	assertAdmission(otherName, true, otherSource.Addresses)
 	refreshConfig()
 	requireServiceError(t, db.Model(&entry).Update("ipv4", "").Error, nil)
 	syncService.syncNodeRules(node, nil)
-	assertAdmission(firstName, true, nil)
+	assertAdmission(firstName, true, []string{originalIPv4, "203.0.113.8"})
 	refreshConfig()
 	tunnel.AllowlistNodeIDs = []uint{}
 	requireServiceError(t, db.Save(&tunnel).Error, nil)

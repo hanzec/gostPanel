@@ -78,14 +78,18 @@ func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.Nod
 	if err != nil {
 		return nil, err
 	}
-	if ipv4 == "" && ipv6 == "" {
+	if ipv4 == "" && ipv6 == "" && request.GetLocalIpSnapshot() == nil {
 		return nil, status.Error(codes.InvalidArgument, "missing node IP addresses")
 	}
 	addresses, err := reportedAddresses(request.GetAddresses(), ipv4, ipv6)
 	if err != nil {
 		return nil, err
 	}
-	if err := h.nodes.UpdateIPs(ctx, node, ipv4, ipv6, addresses...); err != nil {
+	localAddresses, err := reportedLocalAddresses(request.GetLocalIpSnapshot())
+	if err != nil {
+		return nil, err
+	}
+	if err := h.nodes.UpdateIPs(ctx, node, ipv4, ipv6, addresses, localAddresses); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, status.Error(codes.Unauthenticated, "invalid node credentials")
 		}
@@ -93,6 +97,22 @@ func (h *streamReports) UpdateNodeIPs(ctx context.Context, request *nodegrpc.Nod
 		return nil, status.Error(codes.Internal, "could not update node IP addresses")
 	}
 	return &emptypb.Empty{}, nil
+}
+
+func reportedLocalAddresses(snapshot *nodegrpc.LocalIPSnapshot) ([]string, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	addresses := make([]string, 0, len(snapshot.Addresses))
+	for _, address := range snapshot.Addresses {
+		ip, err := netip.ParseAddr(address)
+		if err != nil || ip.Zone() != "" || !ip.Unmap().IsGlobalUnicast() {
+			return nil, status.Error(codes.InvalidArgument, "invalid node local address")
+		}
+		addresses = append(addresses, ip.Unmap().String())
+	}
+	slices.Sort(addresses)
+	return slices.Compact(addresses), nil
 }
 
 func reportedAddresses(addresses []string, ipv4, ipv6 string) ([]string, error) {

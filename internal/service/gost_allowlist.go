@@ -49,7 +49,7 @@ func (s *GostAllowlistService) resolveAddresses(ctx context.Context, nodeIDs []u
 			continue
 		}
 		if strict && node.IPv4 == "" && node.IPv6 == "" && len(node.ManualAddresses) == 0 {
-			return nil, bizerrors.New(40000, fmt.Sprintf("节点 %q 暂无 IP，请补充手动 IP、注册节点或等待已注册的节点上报", node.Name), http.StatusBadRequest)
+			return nil, bizerrors.New(40000, fmt.Sprintf("节点 %q 暂无来源 IP，请注册节点或等待节点上报", node.Name), http.StatusBadRequest)
 		}
 		if node.IPv4 != "" {
 			addresses = append(addresses, node.IPv4)

@@ -314,9 +314,9 @@ describe('Relay tunnel configuration', () => {
     })
   })
 
-  it('merges supplementary IPs into allowlist previews and allows manually addressed nodes', async () => {
+  it('keeps previously saved source IPs in allowlist previews and excludes local listener IPs', async () => {
     getRoutingNodes.mockResolvedValue([
-      { ...ingress, manual_addresses: ['192.0.2.1', '198.51.100.40'] },
+      { ...ingress, manual_addresses: ['192.0.2.1', '198.51.100.40'], local_addresses: ['10.0.0.5'] },
       { ...egress, manual_addresses: ['198.51.100.90', '2001:db8:1::9'] },
       { ...legacyNode, manual_addresses: ['198.51.100.3', '198.51.100.50'] }
     ])

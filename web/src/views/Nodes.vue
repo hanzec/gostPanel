@@ -171,7 +171,7 @@
       <NodeSettingsForm v-if="!isEdit" ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" :error="submitError" @submit="handleSubmit" />
       <el-tabs v-else v-model="settingsTab" class="node-settings-tabs">
         <el-tab-pane label="基本设置" name="basic">
-          <NodeSettingsForm ref="formRef" :form="form" :rules="rules" :has-traffic-limit="!!trafficLimitBytes" :error="submitError" @submit="handleSubmit" />
+          <NodeSettingsForm ref="formRef" :form="form" :rules="rules" :listen-addresses="listenAddresses" :has-traffic-limit="!!trafficLimitBytes" :error="submitError" @submit="handleSubmit" />
         </el-tab-pane>
         <el-tab-pane label="Gost 配置" name="gost" lazy>
           <div v-if="configLoading" class="inventory-state" role="status">
@@ -280,7 +280,7 @@ import NodeTrafficCalibration from '@/components/NodeTrafficCalibration.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { getNode, getNodeList, createNode, updateNode, issueNodeRegistrationToken, deleteNode, getNodeConfig } from '@/api/node'
 import { getPublicSystemConfig } from '@/api/system'
-import { formatNodeTrafficUsage, formatTime, nodeStates } from '@/utils/node-display'
+import { formatNodeTrafficUsage, formatTime, nodeListenAddresses, nodeStates } from '@/utils/node-display'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 
 const NodeUpgradeDialog = defineAsyncComponent(() => import('@/components/NodeUpgradeDialog.vue'))
@@ -338,16 +338,16 @@ const liveEditingNode = computed(() => {
   if (detailNode.value?.id === row?.id) return detailNode.value
   return nodeList.value.find(node => node.id === row?.id) || row
 })
+const listenAddresses = computed(() => nodeListenAddresses(liveEditingNode.value))
 const settingsTab = ref('basic')
 const submitLoading = ref(false)
 const submitError = ref('')
 const deleting = ref(false)
 const formRef = ref(null)
 const daemonUpgradePanel = ref(null)
-const form = reactive({ name: '', remark: '', manualAddresses: '', addressMappings: [], trafficLimitGiB: '', trafficResetPeriod: 'none' })
+const form = reactive({ name: '', remark: '', addressMappings: [], trafficLimitGiB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
-let originalManualAddresses = []
 let originalAddressMappings = []
 const originalTrafficLimitGiB = computed(() => {
   const bytes = originalTrafficLimitBytes.value
@@ -592,13 +592,11 @@ const openDialog = (row = null) => {
   configError.value = false
   originalTrafficLimitBytes.value = row?.traffic_limit_bytes ?? 0
   originalTrafficResetPeriod = row?.traffic_reset_period || 'none'
-  originalManualAddresses = row?.manual_addresses || []
   originalAddressMappings = row?.address_mappings || []
   submitError.value = ''
   Object.assign(form, {
     name: row?.name ?? '',
     remark: row?.remark || '',
-    manualAddresses: originalManualAddresses.join('\n'),
     addressMappings: originalAddressMappings.map(mapping => ({ ...mapping, key: Symbol() })),
     trafficLimitGiB: originalTrafficLimitGiB.value,
     trafficResetPeriod: originalTrafficResetPeriod
@@ -616,11 +614,6 @@ const handleSubmit = async () => {
     if (!valid) return
 
     const node = { name: form.name, remark: form.remark }
-    const manualAddresses = form.manualAddresses.split(/\r?\n/).map(value => value.trim()).filter(Boolean)
-    if (manualAddresses.length !== originalManualAddresses.length ||
-      manualAddresses.some((value, index) => value !== originalManualAddresses[index])) {
-      node.manual_addresses = manualAddresses
-    }
     const addressMappings = form.addressMappings.map(({ listen_ip, connect_ip }) => ({ listen_ip, connect_ip }))
     if (addressMappings.length !== originalAddressMappings.length || addressMappings.some((mapping, index) =>
       mapping.listen_ip !== originalAddressMappings[index].listen_ip || mapping.connect_ip !== originalAddressMappings[index].connect_ip)) {

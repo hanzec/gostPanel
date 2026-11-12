@@ -15,6 +15,8 @@ const reportedNodeAddresses = (node) => node.addresses?.length ? node.addresses 
 
 export const nodeAddresses = (node) => [...new Set([...reportedNodeAddresses(node), ...(node.manual_addresses || [])])]
 
+export const nodeListenAddresses = (node) => node?.local_addresses ?? (node ? [...new Set(reportedNodeAddresses(node))] : [])
+
 export const nodeIPs = (node, family) => reportedNodeAddresses(node).filter(address => address.includes(':') === (family === 6))
 
 export const formatNodeTrafficUsage = (node) => {

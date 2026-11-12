@@ -239,7 +239,7 @@
             />
             <el-option v-for="id in missingAllowlistNodes" :key="id" :label="`节点 #${id}（未找到）`" :value="id" />
           </el-select>
-          <span id="tunnel-allowlist-help" class="tunnel-form-hint ops-muted">仅允许所选节点自动上报及手动补充的 IP 连接此隧道的出口 Relay。清空选择并保存可解除来源 IP 限制。</span>
+          <span id="tunnel-allowlist-help" class="tunnel-form-hint ops-muted">来源 IP 预览中的地址可连接此隧道的出口 Relay。清空选择并保存可解除来源 IP 限制。</span>
         </el-form-item>
         <div v-if="nodeOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
           <span>无法加载来源节点选项。</span>

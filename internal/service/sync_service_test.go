@@ -61,7 +61,7 @@ func TestRuleSyncRetargetsRunningTunnel(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodes := repository.NewNodeRepository(db)
-	if err := nodes.UpdateIPs(context.Background(), &exit, "", "2001:db8::9"); err != nil {
+	if err := nodes.UpdateIPs(context.Background(), &exit, "", "2001:db8::9", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	updatedExit, err := nodes.FindByID(exit.ID)

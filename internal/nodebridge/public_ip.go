@@ -14,28 +14,46 @@ import (
 	"yagp/pkg/nodegrpc"
 )
 
-func reportPublicIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client,
-	detect func(context.Context) (string, string, []string), ticks <-chan time.Time,
+type nodeIPSnapshot struct {
+	ipv4, ipv6    string
+	public, local []string
+}
+
+func reportIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client,
+	detect func(context.Context) nodeIPSnapshot, ticks <-chan time.Time,
 ) {
 	var lastIPv4, lastIPv6 string
 	var lastAddresses []string
+	var lastLocal []string
 	for ctx.Err() == nil {
-		ipv4, ipv6, addresses := detect(ctx)
-		if (ipv4 != "" && ipv4 != lastIPv4) || (ipv6 != "" && ipv6 != lastIPv6) ||
-			(len(addresses) != 0 && !slices.Equal(addresses, lastAddresses)) {
+		snapshot := detect(ctx)
+		publicChanged := (snapshot.ipv4 != "" && snapshot.ipv4 != lastIPv4) || (snapshot.ipv6 != "" && snapshot.ipv6 != lastIPv6) ||
+			(len(snapshot.public) != 0 && !slices.Equal(snapshot.public, lastAddresses))
+		localChanged := snapshot.local != nil && (lastLocal == nil || !slices.Equal(snapshot.local, lastLocal))
+		if publicChanged || localChanged {
+			request := &nodegrpc.NodeIPsRequest{NodeId: nodeID, Ipv4: snapshot.ipv4, Ipv6: snapshot.ipv6, Addresses: snapshot.public}
+			if localChanged {
+				request.LocalIpSnapshot = &nodegrpc.LocalIPSnapshot{Addresses: snapshot.local}
+			}
 			rpcCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			_, err := panel.UpdateNodeIPs(rpcCtx, &nodegrpc.NodeIPsRequest{NodeId: nodeID, Ipv4: ipv4, Ipv6: ipv6, Addresses: addresses})
+			_, err := panel.UpdateNodeIPs(rpcCtx, request)
 			cancel()
 			if err != nil && ctx.Err() == nil {
-				log.Printf("report public IP changes: %v", err)
+				log.Printf("report node IP changes: %v", err)
 			}
-			lastIPv4 = acknowledgedIP(lastIPv4, ipv4, err == nil)
-			lastIPv6 = acknowledgedIP(lastIPv6, ipv6, err == nil)
+			lastIPv4 = acknowledgedIP(lastIPv4, snapshot.ipv4, err == nil)
+			lastIPv6 = acknowledgedIP(lastIPv6, snapshot.ipv6, err == nil)
 			if err == nil {
-				if len(addresses) != 0 {
-					lastIPv4, lastIPv6 = ipv4, ipv6
+				if len(snapshot.public) != 0 {
+					lastIPv4, lastIPv6 = snapshot.ipv4, snapshot.ipv6
 				}
-				lastAddresses = addresses
+				lastAddresses = snapshot.public
+			}
+			if localChanged {
+				lastLocal = nil
+				if err == nil {
+					lastLocal = snapshot.local
+				}
 			}
 		}
 		select {
@@ -46,14 +64,19 @@ func reportPublicIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1
 	}
 }
 
-func detectPublicAddresses(ctx context.Context) (string, string, []string) {
+func detectNodeIPs(ctx context.Context) nodeIPSnapshot {
 	ipv4, ipv6 := DetectPublicIPs(ctx)
-	interfaces, _ := net.InterfaceAddrs()
-	return publicAddresses(ipv4, ipv6, interfaces)
+	interfaces, err := net.InterfaceAddrs()
+	snapshot := collectNodeIPs(ipv4, ipv6, interfaces)
+	if err != nil {
+		snapshot.local = nil
+	}
+	return snapshot
 }
 
-func publicAddresses(ipv4, ipv6 string, interfaces []net.Addr) (string, string, []string) {
+func collectNodeIPs(ipv4, ipv6 string, interfaces []net.Addr) nodeIPSnapshot {
 	var addresses []string
+	local := make([]string, 0, len(interfaces))
 	for _, address := range []string{ipv4, ipv6} {
 		if address != "" {
 			addresses = append(addresses, address)
@@ -65,11 +88,15 @@ func publicAddresses(ipv4, ipv6 string, interfaces []net.Addr) (string, string, 
 			continue
 		}
 		ip := prefix.Addr().Unmap()
-		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.Zone() != "" {
+		if !ip.IsGlobalUnicast() || ip.Zone() != "" {
 			continue
 		}
-		addresses = append(addresses, ip.String())
+		local = append(local, ip.String())
+		if !ip.IsPrivate() {
+			addresses = append(addresses, ip.String())
+		}
 	}
+	slices.Sort(local)
 	slices.Sort(addresses)
 	addresses = slices.Compact(addresses)
 	for _, address := range addresses {
@@ -81,7 +108,7 @@ func publicAddresses(ipv4, ipv6 string, interfaces []net.Addr) (string, string, 
 			ipv4 = address
 		}
 	}
-	return ipv4, ipv6, addresses
+	return nodeIPSnapshot{ipv4: ipv4, ipv6: ipv6, public: addresses, local: slices.Compact(local)}
 }
 
 func acknowledgedIP(previous, sent string, acknowledged bool) string {

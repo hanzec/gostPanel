@@ -48,7 +48,7 @@ func TestNodeHTTPReturnsRegionFromCurrentIP(t *testing.T) {
 	}
 	assertRegion(f.request(t, http.MethodGet, path, "", http.StatusOK), "JP")
 
-	if err := repository.NewNodeRepository(f.db).UpdateIPs(t.Context(), &node, "81.2.69.142", node.IPv6); err != nil {
+	if err := repository.NewNodeRepository(f.db).UpdateIPs(t.Context(), &node, "81.2.69.142", node.IPv6, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	assertRegion(f.request(t, http.MethodGet, path, "", http.StatusOK), "GB")

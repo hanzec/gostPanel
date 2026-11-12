@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	bizerrors "yagp/internal/errors"
 	"yagp/internal/model"
 	"yagp/internal/repository"
 )
@@ -12,25 +13,38 @@ import (
 func TestNodeHTTPAddressMappings(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
 	f.registerNodes()
-	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{
+	const mappings = `{
 		"name":"mapped",
-		"manual_addresses":["203.0.113.8"],
 		"address_mappings":[
 			{"listen_ip":" ::ffff:10.0.0.8 ", "connect_ip":" 198.51.100.8 "},
 			{"listen_ip":"2001:0db8:0:0::8", "connect_ip":"2001:db8:1::8"}
 		]
-	}`, 200))
+	}`
+	assertUnavailableListenIP := func(method, path, body string) {
+		t.Helper()
+		reply := f.request(t, method, path, body, 400)
+		if reply.Code != bizerrors.ErrNodeMappingListenIP.Code {
+			t.Fatalf("mapping rejected with code %d, want %d", reply.Code, bizerrors.ErrNodeMappingListenIP.Code)
+		}
+	}
+	assertUnavailableListenIP("POST", "/nodes", mappings)
+	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{"name":"mapped"}`, 200))
+	path := fmt.Sprintf("/nodes/%d", node.ID)
+	assertUnavailableListenIP("PUT", path, mappings)
+	repo := repository.NewNodeRepository(f.db)
+	if err := repo.UpdateIPs(t.Context(), &node, "192.0.2.8", "", []string{"192.0.2.8"}, []string{"10.0.0.8", "2001:db8::8"}); err != nil {
+		t.Fatal(err)
+	}
+	assertUnavailableListenIP("PUT", path, `{
+		"name":"mapped","address_mappings":[{"listen_ip":"192.0.2.8","connect_ip":"198.51.100.8"}]
+	}`)
+	mapped := handlerData[model.GostNode](t, f.request(t, "PUT", path, mappings, 200))
 	want := []model.NodeAddressMapping{
 		{ListenIP: "10.0.0.8", ConnectIP: "198.51.100.8"},
 		{ListenIP: "2001:db8::8", ConnectIP: "2001:db8:1::8"},
 	}
-	if !slices.Equal(node.AddressMappings, want) {
-		t.Fatalf("created mappings = %v, want %v", node.AddressMappings, want)
-	}
-	path := fmt.Sprintf("/nodes/%d", node.ID)
-	repo := repository.NewNodeRepository(f.db)
-	if err := repo.UpdateIPs(t.Context(), &node, "192.0.2.8", "", "192.0.2.8"); err != nil {
-		t.Fatal(err)
+	if !slices.Equal(mapped.AddressMappings, want) {
+		t.Fatalf("saved mappings = %v, want %v", mapped.AddressMappings, want)
 	}
 	for _, body := range []string{`{"name":"mapped"}`, `{"name":"mapped","address_mappings":null}`} {
 		updated := handlerData[model.GostNode](t, f.request(t, "PUT", path, body, 200))
@@ -44,6 +58,9 @@ func TestNodeHTTPAddressMappings(t *testing.T) {
 			t.Fatalf("mapped IP %s was not searchable: %+v", ip, found)
 		}
 	}
+	if err := repo.UpdateIPs(t.Context(), &node, "192.0.2.8", "", []string{"192.0.2.8"}, []string{"10.0.0.9"}); err != nil {
+		t.Fatal(err)
+	}
 	replaced := handlerData[model.GostNode](t, f.request(t, "PUT", path, `{
 		"name":"mapped","address_mappings":[{"listen_ip":"10.0.0.8","connect_ip":"198.51.100.9"}]
 	}`, 200))
@@ -52,19 +69,49 @@ func TestNodeHTTPAddressMappings(t *testing.T) {
 	}
 	f.request(t, "PUT", path, `{"name":"mapped","address_mappings":[]}`, 200)
 	cleared := handlerData[model.GostNode](t, f.request(t, "GET", path, "", 200))
-	if len(cleared.AddressMappings) != 0 || cleared.Address != "192.0.2.8" ||
-		!slices.Equal(cleared.ManualAddresses, []string{"203.0.113.8"}) {
+	if len(cleared.AddressMappings) != 0 || cleared.Address != "192.0.2.8" || !slices.Equal(cleared.LocalAddresses, []string{"10.0.0.9"}) {
 		t.Fatalf("clearing mappings changed other node addresses: %+v", cleared)
+	}
+	assertUnavailableListenIP("PUT", path, mappings)
+}
+
+func TestNodeHTTPAddressMappingsUseLegacyReportsUntilLocalSnapshot(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{"name":"legacy"}`, 200))
+	path := fmt.Sprintf("/nodes/%d", node.ID)
+	repo := repository.NewNodeRepository(f.db)
+	const ipv4 = "192.0.2.8"
+	for _, test := range []struct {
+		addresses, localAddresses []string
+		listenIP                  string
+		wantStatus                int
+	}{
+		{nil, nil, ipv4, 200},
+		{[]string{ipv4, "2001:db8::8"}, nil, "2001:db8::8", 200},
+		{nil, []string{}, ipv4, 400},
+	} {
+		if err := repo.UpdateIPs(t.Context(), &node, ipv4, "", test.addresses, test.localAddresses); err != nil {
+			t.Fatal(err)
+		}
+		f.request(t, "PUT", path, fmt.Sprintf(`{
+			"name":"legacy","address_mappings":[{"listen_ip":%q,"connect_ip":"198.51.100.8"}]
+		}`, test.listenIP), test.wantStatus)
+		f.request(t, "PUT", path, `{"name":"legacy","address_mappings":[]}`, 200)
 	}
 }
 
 func TestNodeHTTPRejectsInvalidAddressMappings(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
 	f.registerNodes()
-	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{
+	node := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{"name":"mapped"}`, 200))
+	path := fmt.Sprintf("/nodes/%d", node.ID)
+	if err := repository.NewNodeRepository(f.db).UpdateIPs(t.Context(), &node, "", "", nil, []string{"10.0.0.8"}); err != nil {
+		t.Fatal(err)
+	}
+	node = handlerData[model.GostNode](t, f.request(t, "PUT", path, `{
 		"name":"mapped","address_mappings":[{"listen_ip":"10.0.0.8","connect_ip":"198.51.100.8"}]
 	}`, 200))
-	path := fmt.Sprintf("/nodes/%d", node.ID)
 	for _, test := range []struct {
 		name string
 		raw  string
@@ -87,7 +134,9 @@ func TestNodeHTTPRejectsInvalidAddressMappings(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			body := `{"name":"mapped","address_mappings":` + test.raw + `}`
-			f.request(t, "POST", "/nodes", body, 400)
+			if reply := f.request(t, "POST", "/nodes", body, 400); reply.Code == bizerrors.ErrNodeMappingListenIP.Code {
+				t.Fatalf("invalid mapping passed JSON validation: %+v", reply)
+			}
 			f.request(t, "PUT", path, body, 400)
 		})
 	}
