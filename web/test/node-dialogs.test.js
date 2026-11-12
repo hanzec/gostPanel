@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import NodeGostService from '@/components/NodeGostService.vue'
 import NodeNftPreview from '@/components/NodeNftPreview.vue'
 import NodeUpgradeDialog from '@/components/NodeUpgradeDialog.vue'
+import NodeUpgradePanel from '@/components/NodeUpgradePanel.vue'
 import * as api from '@/api/node'
 import { apiError, button, click, deferred, mockNodeMessages, mountNodeComponent, response } from './node-test-support.js'
 
@@ -165,13 +166,17 @@ describe('nftables preview', () => {
   })
 })
 
-describe('node upgrade dialog', () => {
+describe('node upgrades', () => {
   const available = {
     available: true,
     daemon_version: '1.0', latest_daemon_version: '1.1', daemon_update_available: true,
     auto_upgrade_daemon: true
   }
   const manual = (view) => view.get('button[aria-label="手动升级 yagp-daemon"]')
+  const openDaemonPanel = () => {
+    wrapper = mountNodeComponent(NodeUpgradePanel, { node, component: 'daemon' })
+    return wrapper
+  }
 
   it('queries the latest Gost release only through a confirmed manual upgrade request', async () => {
     const installed = {
@@ -181,9 +186,9 @@ describe('node upgrade dialog', () => {
     api.getNodeUpgradeStatus.mockResolvedValue(response(installed))
     const view = open(NodeUpgradeDialog)
     await flushPromises()
-    expect(view.findAll('.upgrade-versions dd').map(version => version.text())).toEqual(['1.0', '1.1', 'v3.2.7'])
-    expect(view.findAll('[role="switch"]').map(control => control.attributes('aria-label'))).toEqual(['yagp-daemon 自动升级'])
-    expect(manual(view).element.disabled).toBe(false)
+    expect(view.findAll('.upgrade-versions dd').map(version => version.text())).toEqual(['v3.2.7'])
+    expect(view.find('[role="switch"]').exists()).toBe(false)
+    expect(view.find('button[aria-label="手动升级 yagp-daemon"]').exists()).toBe(false)
     const gost = button(view, '升级 Gost 至最新稳定版')
     expect(gost.element.disabled).toBe(false)
     await click(view, '刷新版本状态')
@@ -195,18 +200,19 @@ describe('node upgrade dialog', () => {
     expect(messages.confirm).toHaveBeenCalledWith(expect.stringContaining('最新稳定版'), '升级 Gost', expect.anything())
     expect(api.upgradeNodeComponent).not.toHaveBeenCalled()
 
-    api.upgradeNodeComponent.mockRejectedValueOnce(apiError('没有可用的更高稳定版本')).mockResolvedValueOnce(response({
-      component: 'gost', target_version: 'v3.2.8', state: 'queued'
-    }))
+    const upgrade = deferred()
+    api.upgradeNodeComponent.mockRejectedValueOnce(apiError('没有可用的更高稳定版本')).mockReturnValueOnce(upgrade.promise)
     await gost.trigger('click')
     await flushPromises()
     expect(view.get('[role="alert"]').text()).toBe('没有可用的更高稳定版本')
     await gost.trigger('click')
     await flushPromises()
     expect(api.upgradeNodeComponent).toHaveBeenLastCalledWith(node.id, 'gost')
+    expect(button(view, '关闭').element.disabled).toBe(true)
+    upgrade.resolve(response({ component: 'gost', target_version: 'v3.2.8', state: 'queued' }))
+    await flushPromises()
     expect(view.get('.upgrade-job').text()).toContain('Gost升级v3.2.8等待执行')
     expect(gost.element.disabled).toBe(true)
-    expect(manual(view).element.disabled).toBe(true)
 
     api.getNodeUpgradeStatus.mockResolvedValueOnce(response({
       ...installed, gost_version: 'v3.2.8', component: 'gost', target_version: 'v3.2.8', state: 'succeeded'
@@ -214,6 +220,22 @@ describe('node upgrade dialog', () => {
     await click(view, '刷新版本状态')
     expect(view.get('[aria-labelledby="node-upgrade-gost"] dd').text()).toBe('v3.2.8')
     expect(view.get('.upgrade-job').text()).toContain('升级成功')
+    await click(view, '关闭')
+    expect(view.emitted('update:modelValue')).toEqual([[false]])
+  })
+
+  it('blocks a Gost upgrade while a daemon upgrade is active', async () => {
+    const upgrading = { ...available, gost_version: 'v3.2.7', component: 'daemon', target_version: '1.1', state: 'running' }
+    api.getNodeUpgradeStatus.mockResolvedValueOnce(response(upgrading))
+      .mockResolvedValueOnce(response({ ...upgrading, state: 'succeeded' }))
+    const view = open(NodeUpgradeDialog)
+    await flushPromises()
+    const gost = button(view, '升级 Gost 至最新稳定版')
+    expect(gost.element.disabled).toBe(true)
+    expect(view.get('.upgrade-job').text()).toContain('yagp-daemon升级1.1正在升级')
+    await click(view, '刷新版本状态')
+    expect(gost.element.disabled).toBe(false)
+    expect(view.find('.upgrade-job').exists()).toBe(false)
   })
 
   it('keeps policy editable on an unavailable node and commits changes only on success', async () => {
@@ -221,7 +243,7 @@ describe('node upgrade dialog', () => {
       .mockResolvedValueOnce(response({ available: false, reason: '需要升级守护程序' }))
       .mockResolvedValueOnce(response({ ...available, daemon_version: '', latest_daemon_version: '', daemon_update_available: false }))
       .mockResolvedValueOnce(response({ ...available, latest_daemon_version: '1.0', daemon_update_available: false }))
-    const view = open(NodeUpgradeDialog)
+    const view = openDaemonPanel()
     await nextTick()
     expect(view.text()).toContain('正在读取版本与升级状态')
     await flushPromises()
@@ -246,16 +268,16 @@ describe('node upgrade dialog', () => {
     expect(view.text()).toContain('版本待确认')
     await click(view, '刷新版本状态')
     expect(view.text()).toContain('暂无更新')
-    await click(view, '关闭')
-    expect(view.emitted('update:modelValue')).toEqual([[false]])
   })
 
   it('preserves an upgrade job during restarts, pauses polling and can resume it manually', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     api.getNodeUpgradeStatus.mockResolvedValue(response(available))
-    const view = open(NodeUpgradeDialog)
+    const view = openDaemonPanel()
     await flushPromises()
     expect(view.text()).toContain('有可用更新')
+    expect(view.findAll('.upgrade-versions dd').map(version => version.text())).toEqual(['1.0', '1.1'])
+    expect(view.find('[aria-labelledby="node-upgrade-gost"]').exists()).toBe(false)
     messages.confirm.mockRejectedValueOnce('cancel')
     await manual(view).trigger('click')
     await flushPromises()
@@ -299,7 +321,7 @@ describe('node upgrade dialog', () => {
   it('does not schedule another refresh after unmounting a pending poll', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     api.getNodeUpgradeStatus.mockResolvedValueOnce(response({ ...available, component: 'daemon', state: 'queued' }))
-    const view = open(NodeUpgradeDialog)
+    const view = openDaemonPanel()
     await flushPromises()
     const request = deferred()
     api.getNodeUpgradeStatus.mockReturnValueOnce(request.promise)

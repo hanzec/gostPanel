@@ -1,8 +1,7 @@
 <template>
   <header class="detail-header">
     <div class="detail-identity">
-      <div class="detail-title">
-        <h2>{{ node.name }}</h2>
+      <div class="detail-meta">
         <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">{{ nodeStates[node.status]?.label || '未知' }}</span>
         <span class="detail-chip ops-mono">#{{ node.id }}</span>
         <NodeRegionFlag v-if="node.region" :region="node.region" />
@@ -31,17 +30,12 @@
         </div>
       </dl>
     </section>
-    <NodeGostService :key="node.id" :node="node" class="ops-panel ops-panel-body" />
+    <NodeGostService :key="node.id" :node="node" class="ops-panel ops-panel-body" @upgrade="$emit('action', 'upgrade-gost')" />
   </div>
 
   <section class="ops-panel ops-panel-body detail-traffic" aria-labelledby="node-traffic-title">
     <h2 class="ops-section-title" id="node-traffic-title"><el-icon aria-hidden="true"><PieChart /></el-icon>流量统计与配额</h2>
     <p class="ops-mono">{{ formatNodeTrafficUsage(node) }}</p>
-  </section>
-
-  <section class="ops-panel ops-panel-body detail-upgrade" aria-labelledby="node-upgrade-title">
-    <h2 class="ops-section-title" id="node-upgrade-title"><el-icon aria-hidden="true"><Download /></el-icon>版本与升级</h2>
-    <el-button @click="$emit('action', 'upgrade')">管理升级</el-button>
   </section>
 </template>
 
@@ -63,7 +57,7 @@ const endpoints = computed(() => [
 </script>
 
 <style scoped>
-.detail-header, .detail-title, .detail-buttons {
+.detail-header, .detail-meta, .detail-buttons {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -77,7 +71,7 @@ const endpoints = computed(() => [
 }
 .detail-identity { min-width: 0; }
 .detail-identity p { margin-top: 6px; overflow-wrap: anywhere; }
-.detail-title { gap: 8px 12px; }
+.detail-meta { gap: 8px 12px; }
 .detail-chip {
   display: inline-flex;
   align-items: center;
@@ -98,21 +92,10 @@ const endpoints = computed(() => [
 .detail-cards > .ops-panel { display: grid; align-content: start; gap: var(--ops-section-gap); }
 .detail-manual-addresses { grid-column: 1 / -1; }
 .detail-traffic { display: grid; min-width: 0; gap: var(--ops-section-gap); }
-.detail-traffic h2, .detail-upgrade h2 {
+.detail-traffic h2 {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.detail-traffic h2 .el-icon, .detail-upgrade h2 .el-icon { color: var(--ops-accent); }
-.detail-upgrade {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-@media (max-width: 1100px) {
-  .detail-upgrade .el-button { min-height: 44px; }
-}
+.detail-traffic h2 .el-icon { color: var(--ops-accent); }
 </style>

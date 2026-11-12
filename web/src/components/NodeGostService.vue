@@ -32,18 +32,21 @@
     </div>
 
     <div class="gost-log-section">
-      <button
-        type="button"
-        class="gost-log-toggle"
-        :aria-expanded="logsOpen"
-        aria-controls="node-gost-logs"
-        @click="toggleLogs"
-      >
-        <el-icon aria-hidden="true"><Document /></el-icon>
-        <span>服务日志</span>
-        <small class="ops-muted">最近 100 条</small>
-        <el-icon class="gost-log-chevron" aria-hidden="true"><ArrowDown /></el-icon>
-      </button>
+      <div class="gost-log-actions">
+        <button
+          type="button"
+          class="gost-log-toggle"
+          :aria-expanded="logsOpen"
+          aria-controls="node-gost-logs"
+          @click="toggleLogs"
+        >
+          <el-icon aria-hidden="true"><Document /></el-icon>
+          <span>服务日志</span>
+          <small class="ops-muted">最近 100 条</small>
+          <el-icon class="gost-log-chevron" aria-hidden="true"><ArrowDown /></el-icon>
+        </button>
+        <el-button @click="$emit('upgrade')">升级 Gost</el-button>
+      </div>
       <div v-show="logsOpen" id="node-gost-logs" class="gost-log-content" :aria-busy="logsLoading || restarting">
         <p v-if="logsError" class="gost-error" role="alert">{{ logsError }}</p>
         <p v-else-if="!logs.length" class="ops-muted" role="status">{{ logsLoading || restarting ? '正在读取日志…' : '暂无日志' }}</p>
@@ -66,6 +69,7 @@ import { confirmPanelAction } from '@/utils/panel-dialog'
 import { getGostLogs, getGostService, restartGostService } from '@/api/node'
 
 const props = defineProps({ node: { type: Object, required: true } })
+defineEmits(['upgrade'])
 const service = ref(null)
 const logs = ref([])
 const logsOpen = ref(false)
@@ -159,11 +163,13 @@ watch(() => props.node.status, (status) => {
 .gost-error { color: var(--ops-danger); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .gost-log-section { min-width: 0; border-top: 1px solid var(--ops-border); }
+.gost-log-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding-top: 4px; }
+.gost-log-actions .el-button { min-height: 44px; margin: 0; }
 .gost-log-toggle {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
-  width: 100%;
   min-height: 44px;
   padding: 6px 0;
   border: 0;

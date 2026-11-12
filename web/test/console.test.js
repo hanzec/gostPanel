@@ -133,6 +133,30 @@ describe('console routing and Authentik gate', () => {
     expect(router.currentRoute.value.fullPath).toBe('/dashboard')
   })
 
+  it('places the node detail breadcrumb in the top bar and returns to the node list', async () => {
+    const node = { id: 7, name: '港深IX', status: 'offline' }
+    const defaultResponse = adapter.getMockImplementation()
+    adapter.mockImplementation(config => {
+      if (config.url === '/nodes/7') return Promise.resolve(reply(config, node))
+      if (config.url === '/nodes') return Promise.resolve(reply(config, { list: [node], total: 1 }))
+      return defaultResponse(config)
+    })
+    await router.push('/nodes?node=7')
+    wrapper = mount(App, { attachTo: document.body, global: { plugins: [router, createPinia(), ElementPlus] } })
+    await flushPromises()
+
+    const breadcrumb = wrapper.get('.console-topbar nav[aria-label="节点详情导航"]')
+    expect(breadcrumb.get('h1').text()).toBe('节点管理/港深IX')
+    expect(breadcrumb.get('[aria-current="page"]').text()).toBe('港深IX')
+    expect(wrapper.find('main nav[aria-label="节点详情导航"]').exists()).toBe(false)
+
+    await breadcrumb.get('a').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/nodes')
+    expect(wrapper.get('.console-topbar h1').text()).toBe('节点管理')
+    expect(wrapper.get('#node-link-7').text()).toBe('港深IX')
+  })
+
   it('boots the real entry point with the stored title while identity is pending', async () => {
     window.history.replaceState(null, '', '/#/dashboard')
     document.body.innerHTML = '<div id="app"></div>'
