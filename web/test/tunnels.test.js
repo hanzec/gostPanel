@@ -118,12 +118,17 @@ describe('Relay tunnel inventory', () => {
     expect(wrapper.text()).toContain('尚未建立隧道')
   })
 
-  it('links to entrance management when no endpoint pair is available', async () => {
+  it('adds from the inventory heading and links to entrance management when no endpoint pair is available', async () => {
     getRuleList.mockResolvedValueOnce({ data: {} })
     getTunnelList.mockResolvedValueOnce(result())
     const wrapper = mountInventory(Tunnels)
     await flushPromises()
-    await button(wrapper.get('.inventory-state'), '添加隧道').trigger('click')
+    const heading = wrapper.get('section[aria-labelledby="tunnel-inventory-title"] > header')
+    const actions = wrapper.findAll('button').map(item => item.text().trim())
+    expect(actions.filter(label => label === '添加隧道')).toHaveLength(1)
+    expect(actions).not.toContain('刷新')
+    expect(heading.text()).not.toContain('RELAY')
+    await button(heading, '添加隧道').trigger('click')
     await flushPromises()
     expect(dialog(wrapper).text()).toContain('源端或目的端缺少可用入口')
     await dialog(wrapper).get('.tunnel-link').trigger('click')

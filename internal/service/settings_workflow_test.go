@@ -12,6 +12,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"yagp/internal/buildinfo"
 	"yagp/internal/dto"
 	bizerrors "yagp/internal/errors"
 	"yagp/internal/model"
@@ -50,7 +51,14 @@ func TestSystemSettingsRoundTripAndPublicProjection(t *testing.T) {
 	}
 	public, err := settings.GetPublicConfig()
 	requireServiceError(t, err, nil)
-	if *public != (dto.PublicSystemConfigResp{SiteTitle: want.Config.SiteTitle, LogoURL: want.Config.LogoURL, Copyright: want.Config.Copyright, Host: "panel.test"}) {
+	wantPublic := dto.PublicSystemConfigResp{
+		SiteTitle: want.Config.SiteTitle,
+		LogoURL:   want.Config.LogoURL,
+		Copyright: want.Config.Copyright,
+		Host:      "panel.test",
+		Version:   buildinfo.Version,
+	}
+	if *public != wantPublic {
 		t.Fatalf("public settings = %+v", public)
 	}
 	loadServiceConfig(t, "host: panel.test\n")

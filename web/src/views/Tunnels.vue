@@ -1,20 +1,12 @@
 <template>
   <div class="ops-page">
-    <PageActions>
-      <el-button :icon="Refresh" :loading="loading" @click="fetchData()">刷新</el-button>
-      <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
-    </PageActions>
-
     <MetricStrip label="隧道统计" :items="tunnelMetrics" />
 
     <section class="ops-panel tunnel-panel" aria-labelledby="tunnel-inventory-title">
-      <div class="inventory-heading">
-        <div>
-          <h2 id="tunnel-inventory-title">链路清单</h2>
-          <p class="ops-muted">检查流量路径与出口 Relay 监听配置。</p>
-        </div>
-        <span class="inventory-badge ops-mono">RELAY</span>
-      </div>
+      <header class="inventory-heading">
+        <h2 id="tunnel-inventory-title">链路清单</h2>
+        <el-button type="primary" :icon="Plus" @click="openDialog()">添加隧道</el-button>
+      </header>
 
       <form class="ops-toolbar inventory-filters" aria-label="筛选隧道" @submit.prevent="handleSearch">
         <div class="inventory-field">
@@ -56,7 +48,6 @@
         <p>{{ filtered ? '没有匹配的隧道' : '尚未建立隧道' }}</p>
         <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '先在入口管理创建两个端点，再在这里建立转发路径。' }}</span>
         <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
-        <el-button v-else type="primary" @click="openDialog()">添加隧道</el-button>
       </div>
       <div v-else-if="tunnelList.length" class="ops-table-scroll inventory-scroll" :aria-busy="loading">
         <table class="inventory-table" role="table" aria-labelledby="tunnel-inventory-title">
@@ -262,9 +253,8 @@ import { computed, nextTick, ref, reactive, onMounted, onBeforeUnmount } from 'v
 import { ElMessage } from 'element-plus'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
-import { ArrowDown, Connection, Plus, Refresh, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
+import { ArrowDown, Connection, Plus, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import PageActions from '@/components/PageActions.vue'
 import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
 import { getRoutingNodes } from '@/api/node'
 import { getRuleList } from '@/api/rule'

@@ -65,6 +65,7 @@ func (s *SystemConfigService) GetPublicConfig() (*dto.PublicSystemConfigResp, er
 		SiteTitle: site.SiteTitle,
 		LogoURL:   site.LogoURL,
 		Copyright: site.Copyright,
+		Version:   buildinfo.Version,
 	}
 	if cfg := config.Get(); cfg.Report.Listen != "" {
 		public.Host = cfg.Host

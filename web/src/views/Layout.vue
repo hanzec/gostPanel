@@ -3,7 +3,7 @@
     <a class="console-skip" href="#console-main" @click.prevent="mainContent?.focus()">跳到主要内容</a>
 
     <aside class="console-sidebar" aria-label="侧栏">
-      <ConsoleNav :site-title="system.siteTitle" :logo-url="system.logoUrl" />
+      <ConsoleNav :site-title="system.siteTitle" :logo-url="system.logoUrl" :version="system.version" />
     </aside>
 
     <div class="console-workspace">
@@ -67,7 +67,7 @@
       class="console-drawer panel-drawer"
       modal-class="panel-dialog-overlay"
     >
-      <ConsoleNav :site-title="system.siteTitle" :logo-url="system.logoUrl" @navigate="mobileMenu = false" />
+      <ConsoleNav :site-title="system.siteTitle" :logo-url="system.logoUrl" :version="system.version" @navigate="mobileMenu = false" />
     </el-drawer>
   </div>
 </template>

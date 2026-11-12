@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"yagp/internal/buildinfo"
 	"yagp/internal/config"
 	"yagp/internal/dto"
 	"yagp/internal/model"
@@ -53,7 +54,7 @@ func TestSystemHTTPSettingsAndRulesets(t *testing.T) {
 	}
 	reply := f.request(t, "GET", "/system/public-config", "", 200)
 	public := handlerData[dto.PublicSystemConfigResp](t, reply)
-	if public.SiteTitle != "Forwarding panel" || public.Host != "panel.example" ||
+	if public.SiteTitle != "Forwarding panel" || public.Host != "panel.example" || public.Version != buildinfo.Version ||
 		strings.Contains(string(reply.Data), "mail-password") {
 		t.Fatalf("public config: %s", reply.Data)
 	}
