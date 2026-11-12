@@ -93,6 +93,7 @@ jobs:
             "golang:${toolchain#go}-alpine" sh -ec '
               apk add --no-cache bash curl git nftables
               mkdir -p /run/systemd/system
+              bash scripts/install_node_test.sh
               go test -count=1 -timeout=2m -coverprofile=/coverage/go-coverage.out ./...
             '
           total=$(go tool cover -func "$output/go-coverage.out" | awk '/^total:/ {print $NF}')
