@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +15,6 @@ import (
 	"time"
 
 	"yagp/internal/deployjob"
-	"yagp/pkg/upgrade"
 )
 
 const updatePath = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -128,43 +126,14 @@ func runUpdate(directory, id, mode string, update updateRunner) error {
 }
 
 func runPublishedUpdate(ctx context.Context, request deployjob.Request, output io.Writer) error {
-	if request.Mode == "depoly" {
+	switch request.Mode {
+	case "depoly":
 		return runNativeToolUpdate(ctx, selfUpgradeClient(), deployjob.Executable)
+	case "compose":
+		return runNativeComposeUpdate(ctx, request.Digest, output)
+	default:
+		return errors.New("invalid update mode")
 	}
-	return runReleaseScript(ctx, selfUpgradeClient(), request, output)
-}
-
-func runReleaseScript(ctx context.Context, client *http.Client, request deployjob.Request, output io.Writer) error {
-	if request.Mode != "compose" {
-		return errors.New("published scripts are only used for compose updates")
-	}
-	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	log.Print("checking the release cache for the latest update version")
-	tag, err := upgrade.CachedYAGPReleaseTag(fetchCtx, client)
-	if err != nil {
-		return fmt.Errorf("query latest update release: %w", err)
-	}
-	stage, err := os.MkdirTemp("", "yagp-update-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(stage)
-
-	script := filepath.Join(stage, "setup_deploy.sh")
-	url := "https://raw.githubusercontent.com/hanzec/yagp/refs/tags/" + tag + "/scripts/setup_deploy.sh"
-	log.Printf("downloading update script for %s from GitHub", tag)
-	if err := downloadSelfUpgradeFile(fetchCtx, client, url, script, 256<<10); err != nil {
-		return fmt.Errorf("download update script: %w", err)
-	}
-	cancel()
-
-	log.Printf("running %s update script", request.Mode)
-	command := exec.CommandContext(ctx, "/bin/bash", "-p", script, request.Mode)
-	command.Env = []string{updatePath, "YAGP_UPDATE_RELEASE_TAG=" + tag}
-	command.Stdin = strings.NewReader(request.Digest + "\n")
-	command.Stdout, command.Stderr = output, output
-	return command.Run()
 }
 
 func finishUpdate(directory, id, mode string) error {
