@@ -4,26 +4,32 @@ package dto
 
 // CreateTunnelReq 创建隧道请求
 type CreateTunnelReq struct {
-	Name             string `json:"name" binding:"required,min=1,max=100"` // 隧道名称
-	EntryRuleID      uint   `json:"entry_rule_id" binding:"required_without=EntryNodeID"`
-	ExitRuleID       uint   `json:"exit_rule_id" binding:"required_without=ExitNodeID"`
-	EntryNodeID      uint   `json:"entry_node_id" binding:"required_without=EntryRuleID"`
-	ExitNodeID       uint   `json:"exit_node_id" binding:"required_without=ExitRuleID"`
-	Protocol         string `json:"protocol" binding:"required_without=EntryRuleID,omitempty,oneof=tcp udp tls mtls ws mws quic"`
-	RelayPort        int    `json:"relay_port" binding:"required_without=ExitRuleID,omitempty,min=1,max=65535"`
-	Remark           string `json:"remark"` // 备注
-	AllowlistNodeIDs []uint `json:"allowlist_node_ids" binding:"omitempty,dive,min=1"`
+	Name             string   `json:"name" binding:"required,min=1,max=100"` // 隧道名称
+	EntryRuleID      uint     `json:"entry_rule_id" binding:"required_without=EntryNodeID"`
+	ExitRuleID       uint     `json:"exit_rule_id" binding:"required_without=ExitNodeID"`
+	EntryNodeID      uint     `json:"entry_node_id" binding:"required_without=EntryRuleID"`
+	ExitNodeID       uint     `json:"exit_node_id" binding:"required_without=ExitRuleID"`
+	Protocol         string   `json:"protocol" binding:"required_without=EntryRuleID,omitempty,oneof=tcp udp tls mtls ws mws quic"`
+	RelayPort        int      `json:"relay_port" binding:"required_without=ExitRuleID,omitempty,min=1,max=65535"`
+	Remark           string   `json:"remark"` // 备注
+	AllowlistNodeIDs []uint   `json:"allowlist_node_ids" binding:"omitempty,dive,min=1"`
+	Targets          []string `json:"targets"`
+	UseClashRuleset  bool     `json:"use_clash_ruleset"`
+	Strategy         string   `json:"strategy" binding:"omitempty,oneof=round rand fifo hash"`
 }
 
 // UpdateTunnelReq 更新隧道请求
 type UpdateTunnelReq struct {
-	Name             string `json:"name" binding:"required,min=1,max=100"` // 隧道名称
-	EntryRuleID      uint   `json:"entry_rule_id" binding:"required_with=ExitRuleID"`
-	ExitRuleID       uint   `json:"exit_rule_id" binding:"required_with=EntryRuleID"`
-	Protocol         string `json:"protocol" binding:"required_without=EntryRuleID,omitempty,oneof=tcp udp tls mtls ws mws quic"`
-	RelayPort        int    `json:"relay_port" binding:"required_without=ExitRuleID,omitempty,min=1,max=65535"`
-	Remark           string `json:"remark"` // 备注
-	AllowlistNodeIDs []uint `json:"allowlist_node_ids" binding:"omitempty,dive,min=1"`
+	Name             string   `json:"name" binding:"required,min=1,max=100"` // 隧道名称
+	EntryRuleID      uint     `json:"entry_rule_id" binding:"required_with=ExitRuleID"`
+	ExitRuleID       uint     `json:"exit_rule_id" binding:"required_with=EntryRuleID"`
+	Protocol         string   `json:"protocol" binding:"required_without=EntryRuleID,omitempty,oneof=tcp udp tls mtls ws mws quic"`
+	RelayPort        int      `json:"relay_port" binding:"required_without=ExitRuleID,omitempty,min=1,max=65535"`
+	Remark           string   `json:"remark"` // 备注
+	AllowlistNodeIDs []uint   `json:"allowlist_node_ids" binding:"omitempty,dive,min=1"`
+	Targets          []string `json:"targets"`
+	UseClashRuleset  bool     `json:"use_clash_ruleset"`
+	Strategy         string   `json:"strategy" binding:"omitempty,oneof=round rand fifo hash"`
 }
 
 type UpdateTunnelAllowlistReq struct {

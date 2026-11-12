@@ -29,10 +29,10 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 	exit.Name, exit.Address = "exit", "198.51.100.21"
 	saveServiceFixtures(t, db, &entry, &exit)
 	a := model.GostRule{Name: "Clash source", NodeID: &entry.ID, Type: model.RuleTypeForward, Protocol: model.RuleProtocolTCP,
-		ListenIP: "127.0.0.1", ListenPort: 10951, UseClashRuleset: true}
+		ListenIP: "127.0.0.1", ListenPort: 10951}
 	b := model.GostRule{Name: "relay", NodeID: &exit.ID, Type: model.RuleTypeForward, Protocol: model.RuleProtocolTCP, ListenPort: 10952}
 	saveServiceFixtures(t, db, &a, &b)
-	request := &dto.CreateTunnelReq{Name: "transparent", EntryRuleID: a.ID, ExitRuleID: b.ID}
+	request := &dto.CreateTunnelReq{Name: "transparent", EntryRuleID: a.ID, ExitRuleID: b.ID, UseClashRuleset: true, Strategy: "round"}
 	tunnels := NewTunnelService(db)
 	_, err := tunnels.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, bizerrors.ErrRuleClashUnavailable)
@@ -77,6 +77,9 @@ func TestSelectedClashEntranceGetsSubscriptionWithoutManualNodeSelection(t *test
 	entryRemote.mu.Unlock()
 	tunnel, err := tunnels.Create(request, testAdmin, testIP, testAgent)
 	requireServiceError(t, err, nil)
+	if !tunnel.UseClashRuleset || tunnel.EntryRule.UseClashRuleset {
+		t.Fatal("Clash target configuration must belong to the tunnel, not its source endpoint")
+	}
 	forward := entryRemote.service(tunnel.EntryRule.ServiceID)
 	clash := entryRemote.chain(forward.Handler.Chain)
 	relay := exitRemote.service(tunnel.ServiceID)

@@ -50,7 +50,7 @@ const groups = [
   { label: '监控', items: [{ to: '/dashboard', label: '运行总览', icon: Odometer }] },
   { label: '网络', items: [
     { to: '/nodes', label: '节点管理', icon: Monitor },
-    { to: '/rules', label: '入口管理', icon: Switch },
+    { to: '/rules', label: '端点管理', icon: Switch },
     { to: '/tunnels', label: '隧道管理', icon: Connection }
   ] },
   { label: '管理', items: [

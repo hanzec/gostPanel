@@ -49,7 +49,7 @@
       <div v-else-if="!tunnelList.length && !loadError" class="inventory-state">
         <el-icon class="inventory-state-icon" aria-hidden="true"><Connection /></el-icon>
         <p>{{ filtered ? '没有匹配的隧道' : '尚未建立隧道' }}</p>
-        <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '先在入口管理创建两个端点，再在这里建立转发路径。' }}</span>
+        <span class="ops-muted">{{ filtered ? '调整搜索条件后重试。' : '先在端点管理创建两个端点，再在这里选择方向和转发目标。' }}</span>
         <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
       </div>
       <div v-else-if="tunnelList.length" class="ops-table-scroll inventory-scroll" :aria-busy="loading">
@@ -159,22 +159,22 @@
       <p v-if="allowlistOnly" class="tunnel-dialog-hint ops-muted">正在设置「{{ form.name }}」。运行中的隧道会在下一轮同步时应用变更，首次绑定白名单时会重载出口 Relay。</p>
       <p v-else-if="legacyEdit" class="tunnel-dialog-hint ops-muted">此隧道直接关联节点，可调整协议和 Relay 端口。</p>
       <div v-else-if="entryOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
-        <span>无法加载入口选项。</span>
-        <el-button :loading="entryOptionsLoading" @click="fetchEntrances">重新加载入口</el-button>
+        <span>无法加载端点选项。</span>
+        <el-button :loading="entryOptionsLoading" @click="fetchEntrances">重新加载端点</el-button>
       </div>
       <p v-else class="tunnel-dialog-hint ops-muted">
         <template v-if="isEdit">端点变更将在启动时应用。</template>
-        <template v-else-if="!entryOptionsLoading && (!sourceOptions.length || !destinationOptions.length)">源端或目的端缺少可用入口。</template>
-        <template v-else>选定两端后，面板将配置源端与目的端并启动隧道。</template>
-        <RouterLink to="/rules" class="tunnel-link" @click="dialogVisible = false">前往入口管理</RouterLink>
+        <template v-else-if="!entryOptionsLoading && (!sourceOptions.length || !destinationOptions.length)">源端或目的端缺少可用端点。</template>
+        <template v-else>选择源端、目的端和转发目标后，面板将配置两端并启动隧道。</template>
+        <RouterLink to="/rules" class="tunnel-link" @click="dialogVisible = false">前往端点管理</RouterLink>
       </p>
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" :disabled="submitLoading" @submit.prevent="handleSubmit">
         <div v-if="!allowlistOnly" class="inventory-form-grid">
           <el-form-item label="隧道名称" prop="name" class="inventory-form-wide">
             <el-input v-model="form.name" placeholder="例如 生产环境中继" />
           </el-form-item>
-          <el-form-item v-if="!legacyEdit" label="源端入口" prop="entry_rule_id">
-            <el-select v-model="form.entry_rule_id" placeholder="选择源端入口" :loading="entryOptionsLoading" filterable aria-describedby="source-entry-help">
+          <el-form-item v-if="!legacyEdit" label="源端点" prop="entry_rule_id">
+            <el-select v-model="form.entry_rule_id" placeholder="选择源端点" :loading="entryOptionsLoading" filterable fit-input-width popper-class="tunnel-endpoint-options" aria-describedby="source-entry-help">
               <el-option
                 v-for="rule in sourceOptions"
                 :key="rule.id"
@@ -183,10 +183,10 @@
                 :disabled="rule.node_id === exitEntrance?.node_id"
               />
             </el-select>
-            <span id="source-entry-help" class="tunnel-form-hint ops-muted">源端需要固定目标地址或 Clash 规则集。独立转发中的入口须先停止。</span>
+            <span id="source-entry-help" class="tunnel-form-hint ops-muted">源端接收流量，按下方目标与策略转发。独立转发中的端点须先停止。</span>
           </el-form-item>
-          <el-form-item v-if="!legacyEdit" label="目的端入口" prop="exit_rule_id">
-            <el-select v-model="form.exit_rule_id" placeholder="选择目的端入口" :loading="entryOptionsLoading" filterable aria-describedby="destination-entry-help">
+          <el-form-item v-if="!legacyEdit" label="目的端点" prop="exit_rule_id">
+            <el-select v-model="form.exit_rule_id" placeholder="选择目的端点" :loading="entryOptionsLoading" filterable fit-input-width popper-class="tunnel-endpoint-options" aria-describedby="destination-entry-help">
               <el-option
                 v-for="rule in destinationOptions"
                 :key="rule.id"
@@ -196,7 +196,7 @@
               />
             </el-select>
             <span id="destination-entry-help" class="tunnel-form-hint ops-muted">
-              目的端须在另一节点、目标留空且监听可达。其协议和端口用于 Relay。
+              目的端须在另一节点且监听可达，其协议和端口用于 Relay。
               <span v-if="selectedRelayConnectEndpoint" class="tunnel-connect-endpoint">
                 源端连接 <span class="ops-mono">{{ selectedRelayConnectEndpoint }}</span>
               </span>
@@ -211,6 +211,38 @@
             <el-input-number v-model="form.relay_port" :min="1" :max="65535" controls-position="right" />
             <span class="tunnel-form-hint ops-muted">Relay 服务在出口节点监听。</span>
           </el-form-item>
+          <section v-if="!legacyEdit" class="tunnel-target-section inventory-form-wide" aria-labelledby="tunnel-target-title">
+            <h3 id="tunnel-target-title">目标与策略</h3>
+            <p class="tunnel-dialog-hint ops-muted">设置流量经过隧道后访问的目标，配置随隧道保存。</p>
+            <div class="inventory-form-grid">
+              <el-form-item label="目标类型" prop="use_clash_ruleset" class="inventory-form-wide">
+                <el-select v-model="form.use_clash_ruleset" aria-describedby="tunnel-target-mode-help">
+                  <el-option label="固定目标地址" :value="false" />
+                  <el-option label="Clash 规则集（透明分流）" :value="true" :disabled="!canUseClashRuleset" />
+                </el-select>
+                <p id="tunnel-target-mode-help" class="tunnel-form-hint ops-muted">
+                  {{ canUseClashRuleset ? 'Clash 分流使用系统设置中的规则集，匹配流量经过隧道，其余流量直连。' : 'Clash 分流需要源端点使用 TCP 与 127.0.0.1。' }}
+                </p>
+              </el-form-item>
+              <el-form-item v-if="!form.use_clash_ruleset" label="目标地址" prop="targetList" class="inventory-form-wide">
+                <div class="tunnel-target-list">
+                  <div v-for="(item, index) in form.targetList" :key="index" class="tunnel-target-item">
+                    <el-input v-model.trim="item.address" :aria-label="'目标地址 ' + (index + 1)" placeholder="例如 192.168.1.10:8080" />
+                    <el-button text type="danger" :icon="Remove" :aria-label="'移除目标地址 ' + (index + 1)" @click="removeTarget(index)" />
+                  </div>
+                  <el-button :icon="Plus" @click="form.targetList.push({ address: '' })">添加目标地址</el-button>
+                </div>
+              </el-form-item>
+              <el-form-item v-if="!form.use_clash_ruleset" label="负载均衡" prop="strategy">
+                <el-select v-model="form.strategy">
+                  <el-option label="轮询" value="round" />
+                  <el-option label="随机" value="rand" />
+                  <el-option label="先进先出" value="fifo" />
+                  <el-option label="哈希" value="hash" />
+                </el-select>
+              </el-form-item>
+            </div>
+          </section>
           <el-form-item label="备注" prop="remark" class="inventory-form-wide">
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录链路用途" />
           </el-form-item>
@@ -263,12 +295,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
-import { ArrowDown, Connection, Plus, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
+import { ArrowDown, Connection, Plus, Remove, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
 import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
 import { getRoutingNodes } from '@/api/node'
@@ -322,7 +354,7 @@ const submitDisabled = computed(() => allowlistOnly.value
   : !legacyEdit.value && (entryOptionsLoading.value || entryOptionsError.value))
 const dialogTitle = computed(() => allowlistOnly.value ? 'Gost IP 白名单' : (isEdit.value ? '编辑隧道' : '添加隧道'))
 const formRef = ref(null)
-const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', relay_port: null, remark: '', allowlist_node_ids: [] })
+const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', relay_port: null, remark: '', allowlist_node_ids: [], use_clash_ruleset: false, targetList: [{ address: '' }], strategy: 'round' })
 let savedAllowlistNodeIds = []
 const missingAllowlistNodes = computed(() => form.allowlist_node_ids.filter(id => !nodeList.value.some(node => node.id === id)))
 const allowlistAddresses = computed(() => [...new Set(nodeList.value
@@ -339,17 +371,40 @@ const relayConnectEndpoints = computed(() => Object.fromEntries(tunnelList.value
 const availableEntrances = computed(() => entryList.value.filter(rule => rule.linked_tunnel_id
   ? rule.linked_tunnel_id === editId.value
   : !rule.tunnel_id && rule.status !== 'running'))
-const sourceOptions = computed(() => availableEntrances.value.filter(rule => rule.targets?.length || rule.use_clash_ruleset))
-const destinationOptions = computed(() => availableEntrances.value.filter(rule => !rule.targets?.length && !rule.use_clash_ruleset &&
+const sourceOptions = availableEntrances
+const destinationOptions = computed(() => availableEntrances.value.filter(rule =>
   !['0.0.0.0', '::', '::1'].includes(rule.listen_ip) && !rule.listen_ip?.startsWith('127.')))
+const canUseClashRuleset = computed(() => entryEntrance.value?.protocol === 'tcp' && entryEntrance.value?.listen_ip === '127.0.0.1')
 const validateEndpointNodes = (_rule, _value, callback) => callback(entryEntrance.value?.node_id &&
   entryEntrance.value.node_id === exitEntrance.value?.node_id ? new Error('源端和目的端须位于不同节点') : undefined)
 const formRules = {
   name: [{ required: true, message: '请输入隧道名称', trigger: 'blur' }],
-  entry_rule_id: [{ required: true, message: '请选择源端入口', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
-  exit_rule_id: [{ required: true, message: '请选择目的端入口', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
+  entry_rule_id: [{ required: true, message: '请选择源端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
+  exit_rule_id: [{ required: true, message: '请选择目的端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
+  use_clash_ruleset: [{ validator: (_rule, value, callback) => callback(value && !canUseClashRuleset.value
+    ? new Error('Clash 分流需要源端点使用 TCP 与 127.0.0.1') : undefined), trigger: 'change' }],
+  targetList: [{ required: true, validator: (_rule, value, callback) => callback(!form.use_clash_ruleset && !value.some(item => item.address.trim())
+    ? new Error('请至少填写一个目标地址') : undefined), trigger: 'blur' }],
   protocol: [{ required: true, message: '请选择协议', trigger: 'change' }],
   relay_port: [{ required: true, message: '请输入 Relay 端口', trigger: 'blur' }]
+}
+
+watch(canUseClashRuleset, () => {
+  if (dialogVisible.value && form.use_clash_ruleset) formRef.value?.validateField('use_clash_ruleset').catch(() => {})
+})
+
+const removeTarget = index => {
+  form.targetList.splice(index, 1)
+  if (!form.targetList.length) form.targetList.push({ address: '' })
+}
+
+const targetFields = row => {
+  const config = row?.strategy ? row : row?.entry_rule
+  return {
+    use_clash_ruleset: config?.use_clash_ruleset || false,
+    targetList: config?.targets?.length ? config.targets.map(address => ({ address })) : [{ address: '' }],
+    strategy: config?.strategy || 'round'
+  }
 }
 
 const fetchEntrances = async () => {
@@ -434,7 +489,8 @@ const openDialog = (row = null, onlyAllowlist = false) => {
     protocol: row?.protocol || 'tcp',
     relay_port: row?.relay_port ?? null,
     remark: row?.remark || '',
-    allowlist_node_ids: [...savedAllowlistNodeIds]
+    allowlist_node_ids: [...savedAllowlistNodeIds],
+    ...targetFields(row)
   })
   formRef.value?.clearValidate()
   dialogVisible.value = true
@@ -460,7 +516,8 @@ const handleSubmit = async () => {
       }
       const payload = legacyEdit.value
         ? { name, remark, protocol, relay_port }
-        : { name, remark, entry_rule_id, exit_rule_id }
+        : { name, remark, entry_rule_id, exit_rule_id, use_clash_ruleset: form.use_clash_ruleset,
+          targets: form.use_clash_ruleset ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.strategy }
       if (!isEdit.value || allowlist_node_ids.length !== savedAllowlistNodeIds.length ||
         allowlist_node_ids.some(id => !savedAllowlistNodeIds.includes(id))) {
         payload.allowlist_node_ids = allowlist_node_ids
@@ -494,7 +551,7 @@ const handleSubmit = async () => {
 
 const handleDelete = async (row) => {
   try {
-    await confirmPanelAction('确定要删除隧道「' + row.name + '」吗？关联的入口配置仍可在入口管理中查看。', '删除隧道', {
+    await confirmPanelAction('确定要删除隧道「' + row.name + '」吗？关联的端点配置仍可在端点管理中查看。', '删除隧道', {
       confirmButtonText: '删除隧道',
       confirmButtonClass: 'el-button--danger',
       cancelButtonText: '取消',
@@ -534,6 +591,7 @@ const handleTunnelAction = (action, row) => {
     openDialog()
     form.name = row.name.slice(0, 95) + '-copy'
     form.remark = row.remark || ''
+    Object.assign(form, targetFields(row))
   }
 }
 
@@ -548,6 +606,10 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 
 <style scoped src="../inventory.css"></style>
 
+<style>
+.tunnel-endpoint-options .el-select-dropdown__item { height: auto; padding-block: 8px; white-space: normal; line-height: 1.5; overflow-wrap: anywhere; }
+</style>
+
 <style scoped>
 .tunnel-route { display: flex; align-items: center; gap: 8px; }
 .tunnel-route-label { display: block; color: var(--ops-muted); font-size: var(--ops-text-xs); margin-bottom: 2px; }
@@ -557,6 +619,12 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-link { color: var(--ops-accent); }
 .tunnel-form-hint { font-size: var(--ops-text-xs); line-height: 1.5; margin-top: 4px; }
 .tunnel-connect-endpoint { display: block; overflow-wrap: anywhere; }
+.tunnel-target-section { border-top: 1px solid var(--ops-border); padding-top: 16px; }
+.tunnel-target-section h3 { margin: 0 0 8px; font-size: var(--ops-text-base); }
+.tunnel-target-list { display: grid; gap: 8px; width: 100%; }
+.tunnel-target-item { display: flex; align-items: center; gap: 8px; }
+.tunnel-target-item .el-input { min-width: 0; }
+.tunnel-target-list > .el-button { justify-self: start; }
 .tunnel-allowlist-preview { margin: 0; padding: 12px; background: var(--ops-inset); border-radius: var(--ops-radius-inset); }
 .tunnel-allowlist-preview dd { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
 .tunnel-allowlist-error { color: var(--ops-danger); overflow-wrap: anywhere; }

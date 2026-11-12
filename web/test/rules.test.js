@@ -45,14 +45,14 @@ describe('forwarding rule inventory', () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
     const toolbar = wrapper.get('section[aria-labelledby="rule-list-title"] > header')
-    expect(toolbar.get('h2').text()).toBe('入口规则')
-    const filters = toolbar.get('form[aria-label="规则筛选"]')
+    expect(toolbar.get('h2').text()).toBe('端点')
+    const filters = toolbar.get('form[aria-label="端点筛选"]')
     expect(button(filters, '应用筛选').attributes('type')).toBe('submit')
-    expect(wrapper.findAll('button').filter(item => item.text() === '新建规则')).toHaveLength(1)
+    expect(wrapper.findAll('button').filter(item => item.text() === '新建端点')).toHaveLength(1)
     expect(wrapper.text()).not.toMatch(/导入 JSON|导出 JSON|每 5 秒更新/)
     expect(wrapper.findAll('button').some(item => item.text() === '刷新')).toBe(false)
-    await button(toolbar, '新建规则').trigger('click')
-    expect(editDialog(wrapper).attributes('aria-label')).toBe('新建入口规则')
+    await button(toolbar, '新建端点').trigger('click')
+    expect(editDialog(wrapper).attributes('aria-label')).toBe('新建端点')
   })
 
   it('shows node option loading and lets the filter and editor retry a failed request', async () => {
@@ -70,11 +70,11 @@ describe('forwarding rule inventory', () => {
     await flushPromises()
     expect(getRoutingNodes).toHaveBeenCalledTimes(2)
 
-    await button(wrapper, '新建规则').trigger('click')
+    await button(wrapper, '新建端点').trigger('click')
     const dialog = editDialog(wrapper)
     expect(dialog.get('[role="alert"]').text()).toContain('无法加载节点选项')
     expect(selectField(dialog, 'node_id').props('disabled')).toBe(true)
-    expect(button(dialog, '创建规则').element.disabled).toBe(true)
+    expect(button(dialog, '创建端点').element.disabled).toBe(true)
     await dialog.get('form').trigger('submit')
     expect(createRule).not.toHaveBeenCalled()
 
@@ -87,7 +87,7 @@ describe('forwarding rule inventory', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(select(wrapper, 'rule-node').props('disabled')).toBe(false)
     expect(selectField(dialog, 'node_id').props('disabled')).toBe(false)
-    expect(button(dialog, '创建规则').element.disabled).toBe(false)
+    expect(button(dialog, '创建端点').element.disabled).toBe(false)
   })
 
   it('uses all node pages for filtering and creating an entrance on a later node', async () => {
@@ -109,16 +109,16 @@ describe('forwarding rule inventory', () => {
       ])
       expect(select(wrapper, 'rule-node').findAllComponents(ElOption)).toHaveLength(101)
       await choose(select(wrapper, 'rule-node'), lastNode.id)
-      await wrapper.get('form[aria-label="规则筛选"]').trigger('submit')
+      await wrapper.get('form[aria-label="端点筛选"]').trigger('submit')
       await flushPromises()
       expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', node_id: lastNode.id, status: '' })
 
-      await button(wrapper, '新建规则').trigger('click')
+      await button(wrapper, '新建端点').trigger('click')
       const dialog = editDialog(wrapper)
       await choose(selectField(dialog, 'node_id'), lastNode.id)
       await field(dialog, 'name').get('input').setValue('后续节点入口')
       await field(dialog, 'listen_port').get('input').setValue('8080')
-      await button(dialog, '创建规则').trigger('click')
+      await button(dialog, '创建端点').trigger('click')
       await flushPromises()
       expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ node_id: lastNode.id, name: '后续节点入口', listen_port: 8080 }))
     } finally {
@@ -152,13 +152,13 @@ describe('forwarding rule inventory', () => {
       await field(dialog, 'listen_port').get('input').setValue('5354')
       expect(selectField(dialog, 'node_id').props('modelValue')).toBe(entryNode.id)
       expect(selectField(dialog, 'node_id').findAllComponents(ElOption)).toHaveLength(0)
-      expect(button(dialog, '创建规则').element.disabled).toBe(true)
+      expect(button(dialog, '创建端点').element.disabled).toBe(true)
       secondPage.reject(new Error('second page unavailable'))
       await flushPromises()
       expect(dialog.get('[role="alert"]').text()).toContain('无法加载节点选项')
       expect(selectField(dialog, 'node_id').findAllComponents(ElOption)).toHaveLength(0)
       expect(select(wrapper, 'rule-node').findAllComponents(ElOption)).toHaveLength(0)
-      expect(button(dialog, '创建规则').element.disabled).toBe(true)
+      expect(button(dialog, '创建端点').element.disabled).toBe(true)
       await dialog.get('form').trigger('submit')
       await flushPromises()
       expect(createRule).not.toHaveBeenCalled()
@@ -171,7 +171,7 @@ describe('forwarding rule inventory', () => {
       expect(selectField(dialog, 'node_id').findAllComponents(ElOption).map(option => option.props('value'))).toEqual([
         ...firstPage.map(node => node.id), lastNode.id
       ])
-      expect(button(dialog, '创建规则').element.disabled).toBe(false)
+      expect(button(dialog, '创建端点').element.disabled).toBe(false)
     } finally {
       request.defaults.adapter = originalAdapter
     }
@@ -184,12 +184,14 @@ describe('forwarding rule inventory', () => {
     getRuleList.mockReturnValueOnce(response.promise)
     const wrapper = mountInventory(Rules)
     await flushPromises()
-    expect(wrapper.get('[role="status"]').text()).toContain('正在读取入口规则')
+    expect(wrapper.get('[role="status"]').text()).toContain('正在读取端点')
     expect(wrapper.findAll('.metric-strip-value').map(item => item.text())).toEqual(['—', '—', '—', '—'])
     response.resolve(result(rules, 28))
     await flushPromises()
     expect(wrapper.findAll('.metric-strip-value').map(item => item.text())).toEqual(['28', '1', '1', '1'])
-    expect(row(wrapper, 'HTTPS').get('details li').text()).toBe('fallback.test:443')
+    expect(wrapper.findAll('thead th').map(item => item.text())).toContain('所在节点')
+    expect(row(wrapper, 'HTTPS').text()).not.toContain('primary.test:443')
+    expect(row(wrapper, 'Unlinked port').text()).not.toContain('未配置目标')
     expect(row(wrapper, 'HTTPS').get('.rule-traffic-total').text()).toBe('3.07 KB')
     expect(row(wrapper, 'DNS').text()).toContain('入口 A')
     expect(row(wrapper, 'HTTPS').text()).toContain('192.0.2.10:443')
@@ -212,15 +214,15 @@ describe('forwarding rule inventory', () => {
     await choose(select(wrapper, 'rule-node'), 4)
     await choose(select(wrapper, 'rule-status'), 'running')
     getRuleList.mockResolvedValueOnce({ data: {} })
-    await wrapper.get('form[aria-label="规则筛选"]').trigger('submit')
+    await wrapper.get('form[aria-label="端点筛选"]').trigger('submit')
     await flushPromises()
     expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: 'office', node_id: 4, status: 'running' })
-    expect(wrapper.get('.rule-placeholder').text()).toContain('没有匹配的规则')
+    expect(wrapper.get('.rule-placeholder').text()).toContain('没有匹配的端点')
     getRuleList.mockResolvedValueOnce(result())
     await button(wrapper, '清除筛选').trigger('click')
     await flushPromises()
     expect(getRuleList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', node_id: '', status: '' })
-    expect(wrapper.get('.rule-placeholder').text()).toContain('还没有入口规则')
+    expect(wrapper.get('.rule-placeholder').text()).toContain('还没有端点')
   })
 
   it('pauses automatic polling for background tabs or failures and resumes after a manual retry', async () => {
@@ -270,7 +272,7 @@ describe('forwarding rule editor and actions', () => {
     expect(row(wrapper, mappedRule.name).text()).toContain('对外连接 [2001:db8::80]:443')
     expect(row(wrapper, relayRule.name).text()).not.toContain('对外连接')
 
-    await button(wrapper, '新建规则').trigger('click')
+    await button(wrapper, '新建端点').trigger('click')
     const dialog = editDialog(wrapper)
     await choose(selectField(dialog, 'node_id'), mappedNode.id)
     const listenIP = selectField(dialog, 'listen_ip')
@@ -283,19 +285,23 @@ describe('forwarding rule editor and actions', () => {
     const preview = dialog.get('#rule-listen-endpoint')
     expect(preview.text()).toContain('监听地址 10.10.0.8:9443')
     expect(preview.text()).toContain('对外连接 [2001:db8::80]:9443')
-    await button(dialog, '创建规则').trigger('click')
+    await button(dialog, '创建端点').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ listen_ip: mapping.listen_ip, listen_port: 9443 }))
   })
 
-  it('creates a standalone endpoint after validating the node and port, then checks that listener', async () => {
+  it('creates an endpoint without choosing its direction or target, then checks that listener', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
-    await button(wrapper, '新建规则').trigger('click')
+    await button(wrapper, '新建端点').trigger('click')
     const dialog = editDialog(wrapper)
+    expect(dialog.findAll('.el-form-item__label').map(item => item.text())).toEqual([
+      '端点名称', '所在节点', '协议', '监听 IP', '监听端口', '备注'
+    ])
+    expect(dialog.text()).toContain('选择源端和目的端，再配置目标与策略')
     await field(dialog, 'name').get('input').setValue('  internal API  ')
     expect(field(dialog, 'listen_port').get('input').element.value).toBe('')
-    await button(dialog, '创建规则').trigger('click')
+    await button(dialog, '创建端点').trigger('click')
     await flushPromises()
     expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['node_id', false, '请选择所在节点'])
     expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['listen_port', false, '请输入监听端口'])
@@ -307,30 +313,25 @@ describe('forwarding rule editor and actions', () => {
     const listenIP = selectField(dialog, 'listen_ip')
     expect(listenIP.findAllComponents(ElOption).map(option => option.props('label'))).toEqual([
       '所有接口', 'IPv4 回环 · 127.0.0.1', 'IPv6 回环 · ::1',
-      '入口探测地址 · 192.0.2.10', '入口探测地址 · 2001:db8::8'
+      '节点探测地址 · 192.0.2.10', '节点探测地址 · 2001:db8::8'
     ])
     expect(listenIP.findAllComponents(ElOption).map(option => option.props('value'))).not.toContain(entryNode.manual_addresses[0])
     await choose(listenIP, entryNode.ipv4)
     await field(dialog, 'listen_port').get('input').setValue('5353')
     expect(dialog.get('#rule-listen-endpoint').text()).toContain('192.0.2.10:5353')
-    await dialog.get('[aria-label="目标地址 1"]').setValue(' api.test:53 ')
-    await button(dialog, '添加目标地址').trigger('click')
-    await button(dialog, '添加目标地址').trigger('click')
-    await dialog.get('[aria-label="目标地址 3"]').setValue('dns.test:53')
-    await dialog.get('[aria-label="移除目标地址 3"]').trigger('click')
+    await field(dialog, 'remark').get('textarea').setValue('可用于隧道任一端')
     const created = { ...relayRule, id: 99, name: 'internal API', listen_ip: entryNode.ipv4, listen_port: 5353 }
     createRule.mockResolvedValueOnce({ data: created })
     getRuleList.mockResolvedValueOnce(result([created]))
     checkRuleListener.mockResolvedValueOnce({ data: { available: false, reason: 'occupied' } })
-    await button(dialog, '创建规则').trigger('click')
+    await button(dialog, '创建端点').trigger('click')
     await flushPromises()
 
     expect(createRule).toHaveBeenCalledWith({
       node_id: 4, name: 'internal API', protocol: 'udp',
-      listen_ip: '192.0.2.10', listen_port: 5353, use_clash_ruleset: false,
-      targets: ['api.test:53'], strategy: 'round', remark: ''
+      listen_ip: '192.0.2.10', listen_port: 5353, remark: '可用于隧道任一端'
     })
-    expect(ElMessage.success).toHaveBeenCalledWith('规则已创建')
+    expect(ElMessage.success).toHaveBeenCalledWith('端点已创建')
     expect(checkRuleListener).toHaveBeenCalledWith(99)
     expect(vi.mocked(createRule).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(checkRuleListener).mock.invocationCallOrder[0])
     expect(row(wrapper, 'internal API').text()).toContain('监听地址已被占用')
@@ -339,14 +340,15 @@ describe('forwarding rule editor and actions', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
-  it('configures a local TCP source with Clash before a tunnel is assigned', async () => {
+  it('creates a loopback endpoint without assigning a Clash target or tunnel role', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
-    await button(wrapper, '新建规则').trigger('click')
+    await button(wrapper, '新建端点').trigger('click')
     const dialog = editDialog(wrapper)
     await field(dialog, 'name').get('input').setValue('透明入口')
     await choose(selectField(dialog, 'node_id'), entryNode.id)
-    expect(dialog.get('#rule-target-mode-help').text()).toContain('需要 TCP 与 127.0.0.1')
+    expect(dialog.find('#rule-target-mode-help').exists()).toBe(false)
+    expect(dialog.find('[aria-label="目标地址 1"]').exists()).toBe(false)
     const listenIP = selectField(dialog, 'listen_ip')
     expect(listenIP.findAllComponents(ElOption).map(option => option.props('value'))).toContain(entryNode.ipv6)
     const custom = listenIP.get('input')
@@ -356,21 +358,12 @@ describe('forwarding rule editor and actions', () => {
     expect(dialog.get('#rule-listen-endpoint').text()).toContain('10.0.0.4:443')
     await choose(listenIP, '127.0.0.1')
     expect(dialog.get('#rule-listen-endpoint').text()).toContain('127.0.0.1:443')
-    await dialog.get('[aria-label="目标地址 1"]').setValue('unused.test:443')
-    await choose(selectField(dialog, 'use_clash_ruleset'), true)
-    expect(dialog.find('[aria-label="目标地址 1"]').exists()).toBe(false)
     await choose(selectField(dialog, 'protocol'), 'udp')
-    await button(dialog, '创建规则').trigger('click')
-    await flushPromises()
-    expect(createRule).not.toHaveBeenCalled()
-    expect(field(dialog, 'use_clash_ruleset').text()).toContain('Clash 分流需要 TCP 与 127.0.0.1')
-    await choose(selectField(dialog, 'protocol'), 'tcp')
-    await button(dialog, '创建规则').trigger('click')
+    await button(dialog, '创建端点').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenCalledWith({
-      node_id: entryNode.id, name: '透明入口', protocol: 'tcp',
-      listen_ip: '127.0.0.1', listen_port: 443, use_clash_ruleset: true,
-      targets: [], strategy: 'round', remark: ''
+      node_id: entryNode.id, name: '透明入口', protocol: 'udp',
+      listen_ip: '127.0.0.1', listen_port: 443, remark: ''
     })
   })
 
@@ -381,13 +374,13 @@ describe('forwarding rule editor and actions', () => {
     }]))
     const wrapper = mountInventory(Rules)
     await flushPromises()
-    expect(row(wrapper, 'DNS').text()).toContain('Clash 规则集')
+    expect(row(wrapper, 'DNS').text()).not.toContain('Clash 规则集')
     expect(row(wrapper, 'DNS').text()).toContain('隧道源端')
     expect(row(wrapper, 'DNS').find('[aria-label="停止 DNS"]').exists()).toBe(false)
     expect(row(wrapper, 'DNS').text()).toContain('隧道管理')
   })
 
-  it('keeps edits on a failed save and requires a port when copying', async () => {
+  it('keeps edits on a failed save, leaves existing targets unchanged, and copies only endpoint settings', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
     await wrapper.get('[aria-label="编辑 HTTPS"]').trigger('click')
@@ -395,29 +388,27 @@ describe('forwarding rule editor and actions', () => {
     expect(selectField(dialog, 'node_id').props('disabled')).toBe(true)
     await field(dialog, 'name').get('input').setValue('HTTPS updated')
     updateRule.mockRejectedValueOnce(new Error('port conflict'))
-    await button(dialog, '保存规则').trigger('click')
+    await button(dialog, '保存端点').trigger('click')
     await flushPromises()
     expect(editDialog(wrapper).exists()).toBe(true)
     expect(field(dialog, 'name').get('input').element.value).toBe('HTTPS updated')
-    await button(dialog, '保存规则').trigger('click')
+    await button(dialog, '保存端点').trigger('click')
     await flushPromises()
     expect(updateRule).toHaveBeenLastCalledWith(1, {
       node_id: 4, name: 'HTTPS updated', protocol: 'tcp',
-      listen_ip: '192.0.2.10', listen_port: 443, use_clash_ruleset: false,
-      targets: direct.targets, strategy: 'rand', remark: 'Office'
+      listen_ip: '192.0.2.10', listen_port: 443, remark: 'Office'
     })
-    expect(ElMessage.success).toHaveBeenCalledWith('规则已保存')
+    expect(ElMessage.success).toHaveBeenCalledWith('端点已保存')
 
     await command(row(wrapper, 'DNS'), 'copy')
     expect(field(editDialog(wrapper), 'name').get('input').element.value).toBe('DNS-copy')
     expect(field(editDialog(wrapper), 'listen_port').get('input').element.value).toBe('')
     await field(editDialog(wrapper), 'listen_port').get('input').setValue('5354')
-    await button(editDialog(wrapper), '创建规则').trigger('click')
+    await button(editDialog(wrapper), '创建端点').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenCalledWith({
       node_id: 4, name: 'DNS-copy', protocol: 'udp',
-      listen_ip: '2001:db8::8', listen_port: 5354, use_clash_ruleset: false,
-      targets: ['dns.test:53'], strategy: 'round', remark: ''
+      listen_ip: '2001:db8::8', listen_port: 5354, remark: ''
     })
   })
 
@@ -437,18 +428,18 @@ describe('forwarding rule editor and actions', () => {
     await start.trigger('click')
     await flushPromises()
     expect(startRule).toHaveBeenLastCalledWith(2)
-    expect(ElMessage.success).toHaveBeenCalledWith('规则已启动')
+    expect(ElMessage.success).toHaveBeenCalledWith('端点已启动')
 
     await wrapper.get('[aria-label="停止 HTTPS"]').trigger('click')
     await flushPromises()
     expect(stopRule).toHaveBeenCalledWith(1)
-    expect(ElMessage.success).toHaveBeenCalledWith('规则已停止')
+    expect(ElMessage.success).toHaveBeenCalledWith('端点已停止')
 
     ElMessageBox.confirm.mockRejectedValueOnce('cancel')
     await command(row(wrapper, 'DNS'), 'delete')
     expect(deleteRule).not.toHaveBeenCalled()
     await command(row(wrapper, 'DNS'), 'delete')
     expect(deleteRule).toHaveBeenCalledWith(2)
-    expect(ElMessage.success).toHaveBeenCalledWith('规则已删除')
+    expect(ElMessage.success).toHaveBeenCalledWith('端点已删除')
   })
 })

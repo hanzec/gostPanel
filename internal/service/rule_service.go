@@ -158,8 +158,15 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	if req.UseClashRuleset != nil {
 		useClashRuleset = *req.UseClashRuleset
 	}
-	if err = validateClashTarget(useClashRuleset, model.RuleProtocol(req.Protocol), listenIP, req.Targets); err != nil {
-		return nil, err
+	targets := rule.Targets
+	if req.Targets != nil {
+		targets = req.Targets
+	}
+	// Endpoint-only edits do not change legacy targets or determine a tunnel role.
+	if req.UseClashRuleset != nil || req.Targets != nil || req.Strategy != "" {
+		if err = validateClashTarget(useClashRuleset, model.RuleProtocol(req.Protocol), listenIP, targets); err != nil {
+			return nil, err
+		}
 	}
 	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort, id)
 	if err != nil {
@@ -173,9 +180,11 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 	rule.Protocol = model.RuleProtocol(req.Protocol)
 	rule.ListenIP = listenIP
 	rule.ListenPort = req.ListenPort
-	rule.Targets = req.Targets
+	rule.Targets = targets
 	rule.UseClashRuleset = useClashRuleset
-	rule.Strategy = req.Strategy
+	if req.Strategy != "" {
+		rule.Strategy = req.Strategy
+	}
 	rule.EnableTLS = req.EnableTLS
 	rule.Remark = req.Remark
 

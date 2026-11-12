@@ -70,8 +70,8 @@ var (
 	ErrRuleListenIPInvalid  = New(10110, "监听 IP 必须是 IPv4 或 IPv6 地址", http.StatusBadRequest)
 	ErrRuleClashInvalid     = New(10111, "Clash 透明分流需要 TCP 和 127.0.0.1 监听，且不能填写固定目标", http.StatusBadRequest)
 	ErrRuleClashUnavailable = New(10112, "请先在系统设置中配置可用的 Clash 规则集", http.StatusBadRequest)
-	ErrRuleTunnelLinked     = New(10113, "入口已绑定隧道，请在隧道管理中操作", http.StatusBadRequest)
-	ErrRuleTargetRequired   = New(10114, "独立启动需要固定转发目标，Clash 分流和出口入口由隧道启动", http.StatusBadRequest)
+	ErrRuleTunnelLinked     = New(10113, "端点已绑定隧道，请在隧道管理中操作", http.StatusBadRequest)
+	ErrRuleTargetRequired   = New(10114, "请在隧道管理中配置目标并启动端点", http.StatusBadRequest)
 )
 
 // ==================== 隧道相关错误 (102xx) ====================
@@ -97,12 +97,13 @@ var (
 	ErrTunnelChainCreateFailed = New(10218, "创建隧道Chain失败", http.StatusInternalServerError)
 	// ErrTunnelObserverCreateFailed 创建观察器失败
 	ErrTunnelObserverCreateFailed = New(10213, "创建观察器失败", http.StatusInternalServerError)
-	ErrTunnelEndpointsRequired    = New(10220, "请选择两个入口来建立隧道", http.StatusBadRequest)
-	ErrTunnelEndpointInUse        = New(10221, "入口已启用或已关联其他隧道，请选择空闲入口", http.StatusConflict)
-	ErrTunnelEntryInvalid         = New(10222, "来源入口须配置固定目标或 Clash 规则集", http.StatusBadRequest)
-	ErrTunnelExitInvalid          = New(10223, "出口须选择可达监听地址的空入口（无需填写目标）", http.StatusBadRequest)
+	ErrTunnelEndpointsRequired    = New(10220, "请选择两个端点来建立隧道", http.StatusBadRequest)
+	ErrTunnelEndpointInUse        = New(10221, "端点已启用或已关联其他隧道，请选择空闲端点", http.StatusConflict)
+	ErrTunnelEntryInvalid         = New(10222, "请选择有效的源端点", http.StatusBadRequest)
+	ErrTunnelExitInvalid          = New(10223, "请选择监听地址可达的目的端点", http.StatusBadRequest)
 	ErrTunnelEndpointSave         = New(10224, "保存节点 Gost 配置失败，请检查节点连接后重试", http.StatusBadGateway)
 	ErrTunnelTransparentRedirect  = New(10225, "配置入口节点透明分流失败，请检查节点 nftables、守护程序版本和面板日志", http.StatusBadGateway)
+	ErrTunnelTargetRequired       = New(10226, "请为隧道配置固定目标或选择 Clash 分流", http.StatusBadRequest)
 )
 
 // ==================== 认证相关错误 (103xx) ====================

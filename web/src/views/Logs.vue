@@ -32,7 +32,7 @@
           <label for="audit-resource">资源类型</label>
           <el-select id="audit-resource" v-model="filters.resource_type" aria-label="资源类型" placeholder="所有资源" clearable>
             <el-option label="节点" value="node" />
-            <el-option label="转发规则" value="rule" />
+            <el-option label="端点" value="rule" />
             <el-option label="隧道" value="tunnel" />
           </el-select>
         </div>
@@ -189,7 +189,7 @@ const hasFilters = computed(() => Object.values(activeFilters.value).some(Boolea
 
 const actionLabels = { create: '创建', update: '更新', delete: '删除', start: '启动', stop: '停止', auto_upgrade: '自动升级' }
 const actionClass = { create: 'is-success', update: 'is-warning', delete: 'is-danger', start: 'is-success', stop: 'is-muted', auto_upgrade: 'is-muted' }
-const resourceLabels = { node: '节点', rule: '转发规则', tunnel: '隧道' }
+const resourceLabels = { node: '节点', rule: '端点', tunnel: '隧道' }
 const resourceLabel = type => resourceLabels[type] || type || '—'
 const formatDate = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
 const summary = computed(() => {
