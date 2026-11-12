@@ -21,8 +21,10 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 ```bash
 npm --prefix web ci
 npm --prefix web run build
-go test ./...
+go run ./test/go/_runner
 ```
+
+所有测试及其数据放在仓库根目录的 `test/`。Go 同包测试放在 `test/go/_packages/` 下与原包对应的路径，测试入口使用 Go overlay 将它们映射回所属包。前端测试放在 `test/web/`，用 `npm --prefix web test` 运行。
 
 使用 `make build` 从源码构建完整面板，或用 `docker compose up -d` 启动已发布的镜像。
 

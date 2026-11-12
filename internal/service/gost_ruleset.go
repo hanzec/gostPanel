@@ -187,10 +187,10 @@ func (s *GostRulesetService) requireUnreferenced(ctx context.Context, id uint) e
 	return nil
 }
 
-// NormalizeSelection validates form values; manual domains include their subdomains.
+// NormalizeSelection validates form values while preserving explicit Gost matcher syntax.
 func (s *GostRulesetService) NormalizeSelection(ctx context.Context, ids []uint, domains []string) ([]uint, []string, error) {
 	if len(ids) > 500 || len(domains) > 1000 {
-		return nil, nil, bizerrors.InvalidRulesetSelection("最多选择 500 个规则集和填写 1000 个域名")
+		return nil, nil, bizerrors.InvalidRulesetSelection("最多选择 500 个规则集和填写 1000 条手动规则")
 	}
 	ids = slices.Clone(ids)
 	slices.Sort(ids)
@@ -204,9 +204,9 @@ func (s *GostRulesetService) NormalizeSelection(ctx context.Context, ids []uint,
 	normalized := make([]string, 0, len(domains))
 	seen := make(map[string]struct{}, len(domains))
 	for _, domain := range domains {
-		value, err := clashDomainMatcher(strings.TrimSpace(domain), "")
+		value, err := normalizeManualDomainRule(domain)
 		if err != nil {
-			return nil, nil, bizerrors.InvalidRulesetSelection(fmt.Sprintf("手填域名 %q 无效：请填写裸域名，国际化域名使用 Punycode", domain))
+			return nil, nil, bizerrors.InvalidRulesetSelection(fmt.Sprintf("手填规则 %q 无效：%v", domain, err))
 		}
 		if _, exists := seen[value]; !exists {
 			seen[value] = struct{}{}
@@ -216,7 +216,7 @@ func (s *GostRulesetService) NormalizeSelection(ctx context.Context, ids []uint,
 	return ids, normalized, nil
 }
 
-// SelectedMatchers combines saved, normalized selections without changing their policy.
+// SelectedMatchers combines saved selections; manual rules without a port default to 443.
 func (s *GostRulesetService) SelectedMatchers(ctx context.Context, ids []uint, domains []string) ([]string, error) {
 	rulesets, err := s.selectedRulesets(ctx, ids)
 	if err != nil {
@@ -233,7 +233,14 @@ func (s *GostRulesetService) SelectedMatchers(ctx context.Context, ids []uint, d
 		}
 	}
 	for _, domain := range domains {
-		matcher := "." + domain
+		matcher := domain
+		// Bare domains retain the panel's original suffix semantics; explicit patterns are native Gost rules.
+		if !strings.HasPrefix(domain, ".") && !strings.ContainsAny(domain, "*?:") {
+			matcher = "." + domain
+		}
+		if !strings.Contains(domain, ":") {
+			matcher += ":443"
+		}
 		if _, exists := seen[matcher]; !exists {
 			seen[matcher] = struct{}{}
 			matchers = append(matchers, matcher)

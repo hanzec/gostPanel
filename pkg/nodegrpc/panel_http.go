@@ -22,16 +22,45 @@ const (
 	SessionPath         = "/api/node/v2/session"
 	ProtobufContentType = "application/x-protobuf"
 	webSocketProtocol   = "yagp.node.v2"
-	webSocketHeartbeat  = 30 * time.Second
-	webSocketPongWait   = 10 * time.Second
+	// EdgeOne defaults to a 15-second idle timeout when no override is configured.
+	webSocketHeartbeat = 8 * time.Second
+	webSocketPongWait  = 5 * time.Second
 )
 
 type HTTPStatusError struct {
-	StatusCode int
+	StatusCode       int
+	Method           string
+	Endpoint         string
+	Server           string
+	EdgeOneRequestID string
 }
 
 func (e *HTTPStatusError) Error() string {
-	return fmt.Sprintf("panel returned HTTP %d", e.StatusCode)
+	message := fmt.Sprintf("panel returned HTTP %d", e.StatusCode)
+	if e.Endpoint != "" {
+		message += fmt.Sprintf(" for %s %s", e.Method, e.Endpoint)
+	}
+	if e.Server != "" {
+		message += fmt.Sprintf(" Server=%q", e.Server)
+	}
+	if e.EdgeOneRequestID != "" {
+		message += fmt.Sprintf(" EO-LOG-UUID=%q", e.EdgeOneRequestID)
+	}
+	return message
+}
+
+func panelHTTPStatusError(response *http.Response, method, endpoint string) *HTTPStatusError {
+	var target string
+	if u, err := url.Parse(endpoint); err == nil {
+		// Diagnostic URLs identify the route without including credentials or query values.
+		target = (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
+	}
+	server := response.Header.Get("Server")
+	requestID := response.Header.Get("EO-LOG-UUID")
+	return &HTTPStatusError{
+		StatusCode: response.StatusCode, Method: method, Endpoint: target,
+		Server: server[:min(len(server), 128)], EdgeOneRequestID: requestID[:min(len(requestID), 128)],
+	}
 }
 
 func (h PanelHost) HTTPURL(path string) string {
@@ -55,7 +84,7 @@ func PostProtobuf(ctx context.Context, client *http.Client, endpoint string, req
 	}
 	defer result.Body.Close()
 	if result.StatusCode != http.StatusOK {
-		return &HTTPStatusError{StatusCode: result.StatusCode}
+		return panelHTTPStatusError(result, req.Method, endpoint)
 	}
 	if result.Header.Get("Content-Type") != ProtobufContentType {
 		return errors.New("panel returned an invalid Protobuf content type")
@@ -80,14 +109,15 @@ func panelHTTPClient(client *http.Client) *http.Client {
 func (h PanelHost) DialSession(ctx context.Context, client *http.Client, nodeID uint64, accessToken string) (*WebSocketStream, error) {
 	handshake, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	conn, response, err := websocket.Dial(handshake, h.HTTPURL(SessionPath), &websocket.DialOptions{
+	endpoint := h.HTTPURL(SessionPath)
+	conn, response, err := websocket.Dial(handshake, endpoint, &websocket.DialOptions{
 		HTTPClient:   panelHTTPClient(client),
 		HTTPHeader:   http.Header{"Authorization": {"Bearer " + accessToken}, http.CanonicalHeaderKey(NodeIDMetadata): {strconv.FormatUint(nodeID, 10)}},
 		Subprotocols: []string{webSocketProtocol},
 	})
 	if err != nil {
 		if response != nil && response.StatusCode != http.StatusSwitchingProtocols {
-			return nil, &HTTPStatusError{StatusCode: response.StatusCode}
+			return nil, panelHTTPStatusError(response, http.MethodGet, endpoint)
 		}
 		return nil, err
 	}

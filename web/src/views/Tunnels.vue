@@ -118,7 +118,6 @@
                     <template #dropdown>
                       <el-dropdown-menu>
                         <el-dropdown-item command="edit" :disabled="tunnel.status === 'running'">编辑隧道</el-dropdown-item>
-                        <el-dropdown-item command="allowlist">Gost IP 白名单</el-dropdown-item>
                         <el-dropdown-item command="copy">复制隧道</el-dropdown-item>
                         <el-dropdown-item command="delete" divided class="inventory-danger">删除隧道</el-dropdown-item>
                       </el-dropdown-menu>
@@ -156,8 +155,7 @@
       :close-on-press-escape="!submitLoading"
       :show-close="!submitLoading"
     >
-      <p v-if="allowlistOnly" class="tunnel-dialog-hint ops-muted">正在设置「{{ form.name }}」。运行中的隧道会在下一轮同步时应用变更，首次绑定白名单时会重载出口 Relay。</p>
-      <p v-else-if="legacyEdit" class="tunnel-dialog-hint ops-muted">此隧道直接关联节点，可调整协议和 Relay 端口。</p>
+      <p v-if="legacyEdit" class="tunnel-dialog-hint ops-muted">此隧道直接关联节点，可调整协议和 Relay 端口。</p>
       <div v-else-if="entryOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
         <span>无法加载端点选项。</span>
         <el-button :loading="entryOptionsLoading" @click="fetchEntrances">重新加载端点</el-button>
@@ -169,7 +167,7 @@
         <RouterLink to="/rules" class="tunnel-link" @click="dialogVisible = false">前往端点管理</RouterLink>
       </p>
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" :disabled="submitLoading" @submit.prevent="handleSubmit">
-        <div v-if="!allowlistOnly" class="inventory-form-grid">
+        <div class="inventory-form-grid">
           <el-form-item label="隧道名称" prop="name" class="inventory-form-wide">
             <el-input v-model="form.name" placeholder="例如 生产环境中继" />
           </el-form-item>
@@ -264,44 +262,24 @@
             <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可记录链路用途" />
           </el-form-item>
         </div>
-        <el-form-item class="tunnel-allowlist-field" label="Gost IP 白名单" prop="allowlist_node_ids" for="tunnel-allowlist-nodes">
-          <el-select
-            id="tunnel-allowlist-nodes"
-            v-model="form.allowlist_node_ids"
-            aria-describedby="tunnel-allowlist-help"
-            :loading="nodeOptionsLoading"
-            :disabled="nodeOptionsLoading || nodeOptionsError"
-            multiple
-            filterable
-            clearable
-            collapse-tags
-            collapse-tags-tooltip
-            placeholder="选择有可用 IP 的来源节点"
-            no-data-text="请先在节点管理中添加节点"
-          >
-            <el-option
-              v-for="node in nodeList"
-              :key="node.id"
-              :label="`${node.name}（${nodeAddresses(node).join(' / ') || '未获取 IP'}）`"
-              :value="node.id"
-              :disabled="!nodeAddresses(node).length && !form.allowlist_node_ids.includes(node.id)"
-            />
-            <el-option v-for="id in missingAllowlistNodes" :key="id" :label="`节点 #${id}（未找到）`" :value="id" />
-          </el-select>
-          <span id="tunnel-allowlist-help" class="tunnel-form-hint ops-muted">来源 IP 预览中的地址可连接此隧道的出口 Relay。清空选择并保存可解除来源 IP 限制。</span>
-        </el-form-item>
-        <div v-if="nodeOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
-          <span>无法加载来源节点选项。</span>
-          <el-button :loading="nodeOptionsLoading" @click="fetchNodes">重新加载来源节点</el-button>
-        </div>
-        <dl v-else-if="!nodeOptionsLoading && form.allowlist_node_ids.length" class="tunnel-allowlist-preview" aria-live="polite">
-          <dt>来源 IP 预览</dt>
-          <dd v-if="allowlistAddresses.length">
-            <code v-for="address in allowlistAddresses" :key="address" class="ops-mono">{{ address }}</code>
-          </dd>
-          <dd v-else class="ops-muted">所选节点暂无可用 IP</dd>
-        </dl>
-        <p v-if="allowlistError" ref="allowlistErrorNotice" class="tunnel-allowlist-error" role="alert" tabindex="-1">{{ allowlistError }}</p>
+        <section class="tunnel-target-section" aria-labelledby="tunnel-allowlist-title">
+          <h3 id="tunnel-allowlist-title">Gost IP 白名单</h3>
+          <p v-if="allowlistAuto" class="tunnel-dialog-hint ops-muted">根据入口节点 IP 自动生成，允许入口节点连接出口 Relay。</p>
+          <p v-else class="tunnel-dialog-hint ops-muted">{{ savedAllowlistNodeIds.length ? '沿用此隧道已保存的来源 IP 限制。' : '此隧道未设置来源 IP 限制。' }}</p>
+          <div v-if="nodeOptionsError" class="inventory-error tunnel-dialog-error" role="alert">
+            <span>无法加载入口来源 IP。</span>
+            <el-button :loading="nodeOptionsLoading" @click="fetchNodes">重新加载来源节点</el-button>
+          </div>
+          <p v-else-if="nodeOptionsLoading" class="ops-muted" role="status">正在读取入口来源 IP…</p>
+          <dl v-else-if="allowlistAuto ? allowlistSourceNode : savedAllowlistNodeIds.length" class="tunnel-allowlist-preview" aria-live="polite">
+            <dt>来源 IP 预览</dt>
+            <dd v-if="allowlistAddresses.length">
+              <code v-for="address in allowlistAddresses" :key="address" class="ops-mono">{{ address }}</code>
+            </dd>
+            <dd v-else class="ops-muted">{{ allowlistAuto ? '入口节点暂无来源 IP，等待入口上报后白名单自动生效。' : '已保存的来源节点暂无可用 IP。' }}</dd>
+          </dl>
+          <p v-else-if="allowlistAuto" class="tunnel-form-hint ops-muted">选择源端点后预览来源 IP。</p>
+        </section>
       </el-form>
       <template #footer>
         <el-button :disabled="submitLoading" @click="dialogVisible = false">取消</el-button>
@@ -323,7 +301,7 @@ import { supportedProtocolOptions, tunnelProtocols } from '@/utils/gost-protocol
 import { isLegacyClashSelection, targetRoutingFields, targetRoutingPayload, usesOriginalTarget } from '@/utils/target-policy'
 import { ArrowDown, Connection, Plus, Remove, Right, Search, VideoPause, VideoPlay, Warning } from '@element-plus/icons-vue'
 import MetricStrip from '@/components/MetricStrip.vue'
-import { getTunnelList, createTunnel, updateTunnel, updateTunnelAllowlist, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
+import { getTunnelList, createTunnel, updateTunnel, deleteTunnel, startTunnel, stopTunnel } from '@/api/tunnel'
 import { getRoutingNodes } from '@/api/node'
 import { getRuleList } from '@/api/rule'
 import { formatEndpoint, mappedConnectEndpoint } from '@/utils/node-address-mapping'
@@ -366,32 +344,37 @@ const dialogVisible = ref(false)
 const editId = ref(null)
 const isEdit = computed(() => editId.value !== null)
 const legacyEdit = ref(false)
-const allowlistOnly = ref(false)
-const allowlistError = ref('')
-const allowlistErrorNotice = ref(null)
 const submitLoading = ref(false)
-const submitDisabled = computed(() => allowlistOnly.value
-  ? nodeOptionsLoading.value || nodeOptionsError.value
-  : !legacyEdit.value && (entryOptionsLoading.value || entryOptionsError.value))
-const dialogTitle = computed(() => allowlistOnly.value ? 'Gost IP 白名单' : (isEdit.value ? '编辑隧道' : '添加隧道'))
+const submitDisabled = computed(() => !legacyEdit.value && (entryOptionsLoading.value || entryOptionsError.value))
+const dialogTitle = computed(() => isEdit.value ? '编辑隧道' : '添加隧道')
 const formRef = ref(null)
-const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', protocol_options: {}, relay_port: null, remark: '', allowlist_node_ids: [], ...targetRoutingFields(), targetList: [{ address: '' }], strategy: 'round' })
-let savedAllowlistNodeIds = []
+const form = reactive({ name: '', entry_rule_id: null, exit_rule_id: null, protocol: 'tcp', protocol_options: {}, relay_port: null, remark: '', ...targetRoutingFields(), targetList: [{ address: '' }], strategy: 'round' })
 let savedProtocolOptions = false
 let savedRelayConfig = null
 let savedOriginalTarget = false
 let savedLegacyClash = false
 let savedRuleSelection = false
 let savedEntryRuleId = null
-const missingAllowlistNodes = computed(() => form.allowlist_node_ids.filter(id => !nodeList.value.some(node => node.id === id)))
-const allowlistAddresses = computed(() => [...new Set(nodeList.value
-  .filter(node => form.allowlist_node_ids.includes(node.id))
-  .flatMap(nodeAddresses))])
 const listenEndpoint = rule => formatEndpoint(rule.listen_ip, rule.listen_port)
 const entranceLabel = rule => `${rule.name} · ${rule.node?.name || '节点 #' + rule.node_id} · ${rule.protocol === 'red' ? '透明转发（HTTP/HTTPS）' : rule.protocol.toUpperCase()} ${listenEndpoint(rule)}`
 const entryEntrance = computed(() => entryList.value.find(rule => rule.id === form.entry_rule_id))
 const exitEntrance = computed(() => entryList.value.find(rule => rule.id === form.exit_rule_id))
+const legacyEntryNode = ref(null)
 const legacyExitNode = ref(null)
+const allowlistAuto = ref(true)
+const savedAllowlistNodeIds = ref([])
+const allowlistSourceNode = computed(() => {
+  const reportedNode = legacyEdit.value ? legacyEntryNode.value : entryEntrance.value?.node
+  const nodeId = legacyEdit.value ? reportedNode?.id : entryEntrance.value?.node_id
+  return nodeList.value.find(node => node.id === nodeId) || reportedNode || (nodeId ? { id: nodeId } : null)
+})
+const allowlistAddresses = computed(() => {
+  if (allowlistAuto.value) {
+    const node = allowlistSourceNode.value
+    return node ? [...new Set([...nodeAddresses(node), ...(node.local_addresses || [])])] : []
+  }
+  return [...new Set(nodeList.value.filter(node => savedAllowlistNodeIds.value.includes(node.id)).flatMap(nodeAddresses))]
+})
 const mptcpSupported = computed(() => {
   const reportedExitNode = legacyEdit.value ? legacyExitNode.value : exitEntrance.value?.node
   const exitNodeId = legacyEdit.value ? reportedExitNode?.id : exitEntrance.value?.node_id
@@ -522,13 +505,13 @@ const clearFilters = () => {
   handleSearch()
 }
 
-const openDialog = (row = null, onlyAllowlist = false) => {
+const openDialog = (row = null) => {
   editId.value = row?.id ?? null
   legacyEdit.value = !!row && !row.entry_rule_id
+  legacyEntryNode.value = row?.entry_node || (row?.entry_node_id ? { id: row.entry_node_id } : null)
   legacyExitNode.value = row?.exit_node || (row?.exit_node_id ? { id: row.exit_node_id } : null)
-  allowlistOnly.value = onlyAllowlist
-  allowlistError.value = ''
-  savedAllowlistNodeIds = row?.allowlist_node_ids || []
+  allowlistAuto.value = !row || row.auto_allowlist === true
+  savedAllowlistNodeIds.value = row?.allowlist_node_ids || []
   savedProtocolOptions = !!row && row.exit_rule?.role !== 'exit' && !!Object.keys(row.protocol_options || {}).length
   savedRelayConfig = row ? { exitRuleId: row.exit_rule_id, protocol: row.protocol, mptcp: row.protocol_options?.mptcp } : null
   const config = row?.exit_rule?.role === 'exit' ? row.exit_rule : row?.strategy ? row : row?.entry_rule
@@ -544,68 +527,51 @@ const openDialog = (row = null, onlyAllowlist = false) => {
     protocol_options: row?.exit_rule?.role === 'exit' ? {} : { ...row?.protocol_options },
     relay_port: row?.relay_port ?? null,
     remark: row?.remark || '',
-    allowlist_node_ids: [...savedAllowlistNodeIds],
     ...targetFields(row)
   })
   formRef.value?.clearValidate()
   dialogVisible.value = true
-  if (!legacyEdit.value && !onlyAllowlist) fetchEntrances()
+  if (!legacyEdit.value) fetchEntrances()
   if (!nodeOptionsError.value) fetchNodes()
 }
 
 const handleSubmit = async () => {
   if (!formRef.value || submitLoading.value || submitDisabled.value) return
   submitLoading.value = true
-  allowlistError.value = ''
   try {
-    const { name, remark, entry_rule_id, exit_rule_id, protocol, relay_port, allowlist_node_ids } = form
-    if (allowlistOnly.value) {
-      await updateTunnelAllowlist(editId.value, allowlist_node_ids)
-      ElMessage.success('Gost IP 白名单已保存')
+    const { name, remark, entry_rule_id, exit_rule_id, protocol, relay_port } = form
+    if (!await formRef.value.validate().catch(() => false)) {
+      submitLoading.value = false
+      await nextTick()
+      formRef.value.$el.querySelector('.el-form-item.is-error input, .el-form-item.is-error textarea')?.focus()
+      return
+    }
+    const payload = legacyEdit.value
+      ? { name, remark, protocol, relay_port }
+      : exitOwnsTargets.value
+        ? { name, remark, entry_rule_id, exit_rule_id }
+        : { name, remark, entry_rule_id, exit_rule_id, protocol,
+          targets: form.use_original_target ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.use_original_target ? 'round' : form.strategy }
+    if (legacyTargetEdit.value) {
+      Object.assign(payload, targetRoutingPayload(form, {
+        legacyClash: savedLegacyClash, originalTarget: savedOriginalTarget, ruleSelection: savedRuleSelection
+      }))
+    }
+    if (!exitOwnsTargets.value && (savedProtocolOptions || Object.keys(form.protocol_options).length)) {
+      payload.protocol_options = supportedProtocolOptions(form.protocol_options, mptcpSupported.value,
+        savedRelayConfig?.protocol === protocol && (legacyEdit.value || savedRelayConfig?.exitRuleId === exit_rule_id)
+          ? savedRelayConfig.mptcp : undefined)
+    }
+    if (isEdit.value) {
+      await updateTunnel(editId.value, payload)
+      ElMessage.success('隧道已更新')
     } else {
-      if (!await formRef.value.validate().catch(() => false)) {
-        submitLoading.value = false
-        await nextTick()
-        formRef.value.$el.querySelector('.el-form-item.is-error input, .el-form-item.is-error textarea')?.focus()
-        return
-      }
-      const payload = legacyEdit.value
-        ? { name, remark, protocol, relay_port }
-        : exitOwnsTargets.value
-          ? { name, remark, entry_rule_id, exit_rule_id }
-          : { name, remark, entry_rule_id, exit_rule_id, protocol,
-            targets: form.use_original_target ? [] : form.targetList.map(item => item.address.trim()).filter(Boolean), strategy: form.use_original_target ? 'round' : form.strategy }
-      if (legacyTargetEdit.value) {
-        Object.assign(payload, targetRoutingPayload(form, {
-          legacyClash: savedLegacyClash, originalTarget: savedOriginalTarget, ruleSelection: savedRuleSelection
-        }))
-      }
-      if (!exitOwnsTargets.value && (savedProtocolOptions || Object.keys(form.protocol_options).length)) {
-        payload.protocol_options = supportedProtocolOptions(form.protocol_options, mptcpSupported.value,
-          savedRelayConfig?.protocol === protocol && (legacyEdit.value || savedRelayConfig?.exitRuleId === exit_rule_id)
-            ? savedRelayConfig.mptcp : undefined)
-      }
-      if (!isEdit.value || allowlist_node_ids.length !== savedAllowlistNodeIds.length ||
-        allowlist_node_ids.some(id => !savedAllowlistNodeIds.includes(id))) {
-        payload.allowlist_node_ids = allowlist_node_ids
-      }
-      if (isEdit.value) {
-        await updateTunnel(editId.value, payload)
-        ElMessage.success('隧道已更新')
-      } else {
-        await createTunnel(payload)
-        ElMessage.success('隧道已添加并启动')
-      }
+      await createTunnel(payload)
+      ElMessage.success('隧道已添加并启动')
     }
     dialogVisible.value = false
     fetchData()
   } catch (error) {
-    if (allowlistOnly.value) {
-      allowlistError.value = error.response?.data?.message || '无法保存 Gost IP 白名单，请重试。'
-      await nextTick()
-      allowlistErrorNotice.value?.focus()
-      return
-    }
     console.error('保存隧道失败:', error)
     if (!isEdit.value) {
       fetchData()
@@ -652,7 +618,6 @@ const toggleTunnel = async (row) => {
 
 const handleTunnelAction = (action, row) => {
   if (action === 'edit' && row.status !== 'running') openDialog(row)
-  if (action === 'allowlist') openDialog(row, true)
   if (action === 'delete') handleDelete(row)
   if (action === 'copy') {
     openDialog()
@@ -702,12 +667,10 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-target-list > .el-button { justify-self: start; }
 .tunnel-allowlist-preview { margin: 0; padding: 12px; background: var(--ops-inset); border-radius: var(--ops-radius-inset); }
 .tunnel-allowlist-preview dd { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 0; overflow-wrap: anywhere; }
-.tunnel-allowlist-error { color: var(--ops-danger); overflow-wrap: anywhere; }
 
 @media (max-width: 700px) {
   .tunnel-route-cell { grid-column: 1 / -1; }
   .tunnel-route > span { flex: 1; min-width: 0; }
   .tunnel-route { gap: 6px; }
-  .tunnel-allowlist-field :deep(.el-select__wrapper) { min-height: 44px; }
 }
 </style>

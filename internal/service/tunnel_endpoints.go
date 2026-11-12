@@ -27,6 +27,7 @@ func (s *TunnelService) createEndpointTunnel(req *dto.CreateTunnelReq, nodeIDs [
 	tunnel := &model.GostTunnel{
 		Name: req.Name, Remark: req.Remark, Status: model.TunnelStatusStopped,
 		RelaySecret: rand.Text(), AllowlistNodeIDs: nodeIDs, Protocol: req.Protocol,
+		AutoAllowlist: req.AllowlistNodeIDs == nil,
 	}
 	if err := s.setTunnelEndpoints(tunnel, req.EntryRuleID, req.ExitRuleID); err != nil {
 		return nil, err
@@ -258,7 +259,7 @@ func prepareEndpointRedirect(t *model.GostTunnel, entryClient *gost.Client, host
 	prepared, err := entryClient.ConfigureTransparentRedirect(context.Background(), redirect)
 	if err != nil {
 		logger.Warnf("准备隧道 %d 的入口透明分流失败: %v", t.ID, err)
-		return nil, errors.ErrTunnelTransparentRedirect
+		return nil, transparentRedirectError(err)
 	}
 	redirect.Mark, redirect.DockerAddress = prepared.GetMark(), prepared.GetDockerAddress()
 	return redirect, nil
@@ -350,7 +351,7 @@ func (s *TunnelService) commitEndpointTunnel(t *model.GostTunnel, entryClient, e
 		redirect.Action = nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY
 		if _, err := entryClient.ConfigureTransparentRedirect(context.Background(), redirect); err != nil {
 			logger.Warnf("应用隧道 %d 的入口透明分流失败: %v", t.ID, err)
-			return errors.ErrTunnelTransparentRedirect
+			return transparentRedirectError(err)
 		}
 	}
 	if err := s.tunnelRepo.DB.Transaction(func(tx *gorm.DB) error {

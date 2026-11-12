@@ -2,6 +2,7 @@ config/*
 !config/config.yaml
 internal/router/dist/
 web/node_modules/
+test/
 .yagp-webhook-secret
 .yagp-webhook-token
 yagp-webhook.secret

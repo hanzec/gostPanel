@@ -115,6 +115,9 @@ var (
 	ErrTunnelEndpointSave         = New(10224, "保存节点 Gost 配置失败，请检查节点连接后重试", http.StatusBadGateway)
 	ErrTunnelTransparentRedirect  = New(10225, "配置入口节点透明分流失败，请检查节点 nftables、守护程序版本和面板日志", http.StatusBadGateway)
 	ErrTunnelTargetRequired       = New(10226, "请为隧道配置固定目标或选择 Clash 分流", http.StatusBadRequest)
+	ErrTunnelTransparentDaemon    = New(10227, "入口节点的 yagp-daemon 不支持透明分流。请在节点管理中升级入口节点的 yagp-daemon，重启并确认升级后的进程已重新连接面板，再重试创建或启动隧道", http.StatusNotImplemented)
+	ErrTunnelTransparentPlatform  = New(10228, "入口节点的透明分流需要 Linux；请确认 yagp-daemon 在 Linux 上使用节点配置文件启动", http.StatusNotImplemented)
+	ErrTunnelTransparentNft       = New(10229, "入口节点未找到 nftables；请在入口节点安装 nftables，并确认 yagp-daemon 可以执行 nft 后重试", http.StatusNotImplemented)
 )
 
 // ==================== 认证相关错误 (103xx) ====================

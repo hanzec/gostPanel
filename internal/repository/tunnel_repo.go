@@ -29,13 +29,13 @@ func (r *TunnelRepository) Create(tunnel *model.GostTunnel) error {
 func (r *TunnelRepository) Update(tunnel *model.GostTunnel, updateAllowlist bool) error {
 	fields := []string{"name", "entry_node_id", "exit_node_id", "entry_rule_id", "exit_rule_id", "protocol", "protocol_options", "relay_port", "targets", "use_clash_ruleset", "use_original_target", "ruleset_ids", "manual_domains", "strategy", "remark", "updated_at"}
 	if updateAllowlist {
-		fields = append(fields, "allowlist_node_ids")
+		fields = append(fields, "allowlist_node_ids", "auto_allowlist")
 	}
 	return r.DB.Model(tunnel).Select(fields).Updates(tunnel).Error
 }
 
 func (r *TunnelRepository) UpdateAllowlist(ctx context.Context, tunnel *model.GostTunnel) error {
-	return r.DB.WithContext(ctx).Model(tunnel).Select("allowlist_node_ids", "updated_at").Updates(tunnel).Error
+	return r.DB.WithContext(ctx).Model(tunnel).Select("allowlist_node_ids", "auto_allowlist", "updated_at").Updates(tunnel).Error
 }
 
 // Delete 删除隧道
