@@ -17,7 +17,7 @@ import (
 	"yagp/pkg/logger"
 )
 
-const countryDatabaseFixture = "../../pkg/geoip/testdata/GeoIP2-Country-Test.mmdb"
+const countryDatabaseFixture = "../../test/go/fixtures/geoip/GeoIP2-Country-Test.mmdb"
 
 func TestStartGeoIPRefreshesEveryStartupWithoutWaiting(t *testing.T) {
 	data, err := os.ReadFile(countryDatabaseFixture)

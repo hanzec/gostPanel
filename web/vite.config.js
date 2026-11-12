@@ -22,18 +22,5 @@ export default defineConfig({
   build: {
     outDir: '../internal/router/dist',
     emptyOutDir: true
-  },
-  test: {
-    environment: 'jsdom',
-    // Vite must resolve the validator's ESM entry for real Element Plus form validation.
-    server: {
-      deps: { inline: ['element-plus', 'async-validator'] }
-    },
-    coverage: {
-      provider: 'v8',
-      include: ['src/**/*.{js,vue}'],
-      reporter: ['text', 'json-summary', 'html'],
-      thresholds: { statements: 90 }
-    }
   }
 })

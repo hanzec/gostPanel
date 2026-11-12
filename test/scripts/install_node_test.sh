@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Run in the disposable Linux CI container with /run/systemd/system present.
+installer="${BASH_SOURCE[0]%/*}/../../scripts/install_node.sh"
 test_dir=$(mktemp -d)
 trap 'command rm -rf -- "$test_dir"' EXIT
 export requests="$test_dir/requests"
@@ -19,7 +20,7 @@ check_download() {
     shift
     : > "$requests"
     if output=$(env -u YAGP_DAEMON_BIN "$@" bash -s -- --host panel.example.test --token test-token \
-        < "${BASH_SOURCE[0]%/*}/install_node.sh" 2>&1); then
+        < "$installer" 2>&1); then
         printf 'Expected download failure\n' >&2
         exit 1
     fi
@@ -45,7 +46,7 @@ nft() {
 rm() { :; }
 rmdir() { :; }
 export -f nft rm rmdir
-bash "${BASH_SOURCE[0]%/*}/install_node.sh" uninstall --node-id "$test_node"
+bash "$installer" uninstall --node-id "$test_node"
 expected="list table inet yagp_quota_$test_node
 list table inet yagp_redirect_$test_node
 delete table inet yagp_redirect_$test_node"

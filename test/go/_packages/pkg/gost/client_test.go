@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"yagp/internal/streamtest"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
+	"yagp/test/go/streamtest"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

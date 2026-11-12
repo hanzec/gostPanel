@@ -6,9 +6,9 @@ import (
 
 	bizerrors "yagp/internal/errors"
 	"yagp/internal/model"
-	"yagp/internal/streamtest"
 	"yagp/pkg/gost"
 	"yagp/pkg/nodegrpc"
+	"yagp/test/go/streamtest"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

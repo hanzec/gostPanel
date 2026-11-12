@@ -14,10 +14,10 @@ import (
 
 	"yagp/internal/model"
 	"yagp/internal/repository"
-	"yagp/internal/streamtest"
 	"yagp/pkg/gost"
 	"yagp/pkg/logger"
 	"yagp/pkg/nodegrpc"
+	"yagp/test/go/streamtest"
 
 	"github.com/glebarez/sqlite"
 	"google.golang.org/grpc/codes"

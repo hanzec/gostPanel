@@ -207,7 +207,7 @@ sudo journalctl --namespace=+yagp-depoly -u yagp-depoly.service -u 'yagp-update-
 ```bash
 npm --prefix web ci
 npm --prefix web run build
-go test ./...
+go run ./test/go/_runner
 ```
 
 端点列表 API（`GET /api/v1/rules`）的 `pageSize` 上限为 100。

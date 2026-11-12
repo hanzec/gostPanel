@@ -27,7 +27,7 @@ func (call regionLookupTransport) RoundTrip(req *http.Request) (*http.Response, 
 
 func TestNodeHTTPReturnsRegionFromCurrentIP(t *testing.T) {
 	f := newHandlerHTTPFixture(t)
-	f.geoIP = geoip.NewDatabase("../../pkg/geoip/testdata/GeoIP2-Country-Test.mmdb", "")
+	f.geoIP = geoip.NewDatabase("../../test/go/fixtures/geoip/GeoIP2-Country-Test.mmdb", "")
 	if err := f.geoIP.Load(); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestNodeListDoesNotWaitForGeoIPDownload(t *testing.T) {
 	download := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
 		<-release
-		http.ServeFile(w, r, "../../pkg/geoip/testdata/GeoIP2-Country-Test.mmdb")
+		http.ServeFile(w, r, "../../test/go/fixtures/geoip/GeoIP2-Country-Test.mmdb")
 	}))
 	defer download.Close()
 	defer finishDownload()

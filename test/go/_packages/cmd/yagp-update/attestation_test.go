@@ -23,7 +23,7 @@ func TestToolReleaseAttestationVerifiesRealReleaseOffline(t *testing.T) {
 	http.DefaultTransport = offlineAttestationTransport{t}
 	t.Cleanup(func() { http.DefaultTransport = previous })
 
-	attestations, err := os.ReadFile("testdata/yagp-depoly-0.1.147-attestations.jsonl")
+	attestations, err := os.ReadFile("../../test/go/fixtures/attestations/yagp-depoly-0.1.147-attestations.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestToolReleaseAttestationReadsArchive(t *testing.T) {
 	if err := os.WriteFile(archive, []byte("untrusted replacement archive"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyToolAttestation(archive, "testdata/yagp-depoly-0.1.147-attestations.jsonl"); err == nil {
+	if err := verifyToolAttestation(archive, "../../test/go/fixtures/attestations/yagp-depoly-0.1.147-attestations.jsonl"); err == nil {
 		t.Fatal("accepted a file whose SHA-256 differs from the release attestation")
 	}
 	if err := verifyToolAttestation(filepath.Join(dir, "missing"), "unused"); !errors.Is(err, os.ErrNotExist) {

@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const testDatabasePath = "testdata/GeoIP2-Country-Test.mmdb"
+const testDatabasePath = "../../test/go/fixtures/geoip/GeoIP2-Country-Test.mmdb"
 
 func TestDatabaseCountryUsesLoadedLocalFile(t *testing.T) {
 	db := NewDatabase(testDatabasePath, ":invalid-url")
