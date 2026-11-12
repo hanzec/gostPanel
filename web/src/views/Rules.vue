@@ -3,35 +3,36 @@
     <MetricStrip label="入口规则摘要" :items="summary" />
 
     <section class="ops-panel rule-panel" aria-labelledby="rule-list-title" :aria-busy="loading">
-      <header class="rule-section-head">
-        <h2 id="rule-list-title">入口规则</h2>
-        <el-button type="primary" :icon="Plus" @click="openDialog()">新建规则</el-button>
-      </header>
-
-      <form class="ops-toolbar rule-filters" aria-label="规则筛选" @submit.prevent="applyFilters">
-        <div class="rule-filter">
-          <label for="rule-keyword">规则名称</label>
-          <el-input id="rule-keyword" v-model="filters.keyword" :prefix-icon="Search" placeholder="输入名称" clearable />
-        </div>
-        <div class="rule-filter">
-          <label for="rule-node">入口节点</label>
-          <el-select id="rule-node" v-model="filters.node_id" aria-label="入口节点" placeholder="所有节点" :loading="nodeOptionsLoading" :disabled="nodeOptionsLoading || nodeOptionsError" clearable>
-            <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
-          </el-select>
-        </div>
-        <div class="rule-filter">
-          <label for="rule-status">运行状态</label>
-          <el-select id="rule-status" v-model="filters.status" aria-label="运行状态" placeholder="所有状态" clearable>
-            <el-option label="运行中" value="running" />
-            <el-option label="已停止" value="stopped" />
-            <el-option label="异常" value="error" />
-          </el-select>
-        </div>
-        <div class="rule-filter-actions">
+      <InventoryToolbar filter-label="规则筛选" @submit="applyFilters">
+        <template #title>
+          <h2 id="rule-list-title">入口规则</h2>
+        </template>
+        <template #filters>
+          <div class="inventory-toolbar-field">
+            <label for="rule-keyword">规则名称</label>
+            <el-input id="rule-keyword" v-model="filters.keyword" :prefix-icon="Search" placeholder="输入名称" clearable />
+          </div>
+          <div class="inventory-toolbar-field">
+            <label for="rule-node">入口节点</label>
+            <el-select id="rule-node" v-model="filters.node_id" aria-label="入口节点" placeholder="所有节点" :loading="nodeOptionsLoading" :disabled="nodeOptionsLoading || nodeOptionsError" clearable>
+              <el-option v-for="node in nodeList" :key="node.id" :label="node.name" :value="node.id" />
+            </el-select>
+          </div>
+          <div class="inventory-toolbar-field">
+            <label for="rule-status">运行状态</label>
+            <el-select id="rule-status" v-model="filters.status" aria-label="运行状态" placeholder="所有状态" clearable>
+              <el-option label="运行中" value="running" />
+              <el-option label="已停止" value="stopped" />
+              <el-option label="异常" value="error" />
+            </el-select>
+          </div>
           <el-button text @click="clearFilters">重置</el-button>
           <el-button native-type="submit" :icon="Search">应用筛选</el-button>
-        </div>
-      </form>
+        </template>
+        <template #actions>
+          <el-button type="primary" :icon="Plus" @click="openDialog()">新建规则</el-button>
+        </template>
+      </InventoryToolbar>
 
       <p v-if="nodeOptionsLoading && !dialogVisible" class="rule-node-status ops-muted" role="status">正在加载节点选项…</p>
       <div v-else-if="nodeOptionsError && !dialogVisible" class="rule-error" role="alert">
@@ -291,6 +292,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
 import { ArrowDown, CircleCheck, Plus, Remove, Right, Search, Switch, VideoPause, Warning } from '@element-plus/icons-vue'
@@ -571,58 +573,11 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   min-width: 0;
 }
 
-.rule-section-head,
-.rule-filter-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.rule-section-head {
-  justify-content: space-between;
-  flex-wrap: wrap;
-  padding: var(--ops-card-padding);
-}
-
-.rule-section-head h2 {
-  margin: 0;
-  color: var(--ops-text);
-  font-size: var(--ops-text-title);
-  font-weight: var(--ops-weight-semibold);
-}
-
 .rule-form-section header p {
   margin: 4px 0 0;
   font-size: var(--ops-text-body);
 }
 
-.rule-filters {
-  display: grid;
-  grid-template-columns: minmax(140px, 1.5fr) repeat(2, minmax(110px, 1fr)) auto;
-  gap: 12px;
-  align-items: end;
-  padding: var(--ops-inset-padding) var(--ops-card-padding);
-  border-top: 1px solid var(--ops-border);
-  border-bottom: 0;
-}
-
-.rule-filter {
-  display: grid;
-  min-width: 0;
-  gap: 6px;
-}
-
-.rule-filter label {
-  color: var(--ops-muted);
-  font-size: var(--ops-text-sm);
-  font-weight: var(--ops-weight-medium);
-}
-
-.rule-filter-actions {
-  gap: 8px;
-}
-
-.rule-filter-actions .el-button + .el-button,
 .rule-row-actions .el-button + .el-button {
   margin-left: 0;
 }
@@ -875,20 +830,7 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   justify-self: start;
 }
 
-@media (max-width: 1160px) {
-  .rule-filters {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .rule-filter-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-end;
-  }
-}
-
 @media (max-width: 700px) {
-  .rule-section-head,
-  .rule-filters,
   .rule-pagination,
   .rule-node-status,
   .rule-error {
@@ -954,10 +896,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
   }
 
   .rule-row-actions .el-button,
-  .rule-filter-actions .el-button,
-  .rule-filters :deep(.el-input__wrapper),
-  .rule-filters :deep(.el-select__wrapper),
-  .rule-section-head .el-button,
   .rule-editor :deep(.el-input__wrapper),
   .rule-editor :deep(.el-select__wrapper),
   .rule-target-item .el-button,
