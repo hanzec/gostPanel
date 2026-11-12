@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +14,65 @@ import (
 
 	"gorm.io/gorm"
 )
+
+func TestServerMigratesLegacyRelayOptionsToExit(t *testing.T) {
+	db := legacyEndpointDatabase(t)
+	stamp := time.Now().UTC()
+	insertLegacyEndpoint(t, db, 11, "source", "tcp", []string{"origin.test:443"}, false, "round", stamp)
+	insertLegacyEndpoint(t, db, 12, "destination", "udp", nil, false, "round", stamp)
+	entryID, exitID := uint(11), uint(12)
+	options := map[string]string{"path": "/migrated", "tls_server_name": "migrated.example"}
+	tunnel := model.GostTunnel{Name: "existing options", EntryNodeID: 1, ExitNodeID: 2, EntryRuleID: &entryID, ExitRuleID: &exitID,
+		Protocol: "wss", ProtocolOptions: options, RelayPort: 8443}
+	if err := db.Create(&tunnel).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := autoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var exit model.GostRule
+	if err := db.First(&exit, exitID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if exit.Role != model.EndpointRoleExit || exit.Protocol != "wss" || !maps.Equal(exit.ProtocolOptions, options) {
+		t.Fatalf("migration lost relay options: %+v", exit)
+	}
+	exit.ProtocolOptions = map[string]string{"path": "/edited"}
+	if err := db.Model(&exit).Select("ProtocolOptions").Updates(&exit).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := autoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var reloaded model.GostRule
+	if err := db.First(&reloaded, exitID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(reloaded.ProtocolOptions, exit.ProtocolOptions) {
+		t.Fatalf("restart restored stale tunnel options: %v", reloaded.ProtocolOptions)
+	}
+}
+
+func TestServerAddsRelayOptionsColumnsWithoutChangingOldEndpoints(t *testing.T) {
+	db := legacyEndpointDatabase(t)
+	stamp := time.Now().UTC()
+	insertLegacyEndpoint(t, db, 11, "standalone", "tcp", []string{"origin.test:443"}, false, "round", stamp)
+	for _, record := range []any{&model.GostRule{}, &model.GostTunnel{}} {
+		if err := db.Migrator().DropColumn(record, "ProtocolOptions"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := autoMigrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var rule model.GostRule
+	if err := db.First(&rule, 11).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rule.ProtocolOptions) != 0 || rule.Protocol != "tcp" || rule.Role != "" || !rule.UpdatedAt.Equal(stamp) {
+		t.Fatalf("new options column changed legacy endpoint: %+v", rule)
+	}
+}
 
 func TestServerMigratesTunnelTargetsToExitEndpoints(t *testing.T) {
 	for _, test := range []struct {

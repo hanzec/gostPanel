@@ -55,7 +55,7 @@ func TestEndpointTunnelUsesExitOwnedPolicyAndTransport(t *testing.T) {
 	}
 	assertPolicy(&destination)
 	requireServiceError(t, tunnels.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
-	destination.Protocol, destination.ListenPort, destination.Strategy = "quic", 18004, "hash"
+	destination.Protocol, destination.ListenPort, destination.Strategy = "h3", 18004, "hash"
 	destination.Targets = []string{"updated-one.test:8443", "updated-two.test:8443"}
 	requireServiceError(t, db.Model(&destination).Select("Protocol", "ListenPort", "Targets", "Strategy").Updates(&destination).Error, nil)
 	tunnels = NewTunnelService(db)

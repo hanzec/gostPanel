@@ -261,6 +261,45 @@ describe('forwarding rule inventory', () => {
   })
 })
 describe('forwarding rule editor and actions', () => {
+  it('saves explicit WebSocket and TLS options while leaving unrelated protocol fields hidden', async () => {
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await button(wrapper, '新建端点').trigger('click')
+    const dialog = editDialog(wrapper)
+    await field(dialog, 'name').get('input').setValue('WSS exit')
+    await choose(selectField(dialog, 'role'), 'exit')
+    await choose(selectField(dialog, 'node_id'), entryNode.id)
+    await choose(selectField(dialog, 'protocol'), 'wss')
+    await field(dialog, 'listen_port').get('input').setValue('9443')
+    await dialog.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
+    await dialog.get('.gost-transport-options [role="button"]').trigger('click')
+    await dialog.get('[data-protocol-option="path"] input').setValue('/relay')
+    await dialog.get('[data-protocol-option="tls_server_name"] input').setValue('relay.example')
+    expect(dialog.find('[data-protocol-option="max_idle_timeout"]').exists()).toBe(false)
+    await button(dialog, '创建端点').trigger('click')
+    await flushPromises()
+    expect(createRule).toHaveBeenCalledExactlyOnceWith({
+      node_id: entryNode.id, name: 'WSS exit', role: 'exit', protocol: 'wss', listen_ip: '', listen_port: 9443, remark: '',
+      use_clash_ruleset: false, targets: ['app.example:443'], strategy: 'round',
+      protocol_options: { path: '/relay', tls_server_name: 'relay.example' }
+    })
+  })
+
+  it('submits an empty options object after clearing every saved advanced field', async () => {
+    const exit = { ...relayRule, name: 'WSS exit', role: 'exit', protocol: 'wss', protocol_options: { path: '/saved' } }
+    getRuleList.mockResolvedValue(result([exit]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+    await wrapper.get('[aria-label="编辑 WSS exit"]').trigger('click')
+    const dialog = editDialog(wrapper)
+    expect(dialog.get('[data-protocol-option="path"] input').element.value).toBe('/saved')
+    await dialog.get('[data-protocol-option="path"] input').setValue('')
+    await button(dialog, '保存端点').trigger('click')
+    await flushPromises()
+    expect(updateRule).toHaveBeenCalledWith(exit.id, expect.objectContaining({ protocol: 'wss', protocol_options: {} }))
+    expect(exit.protocol_options).toEqual({ path: '/saved' })
+  })
+
   it('creates an exit with its own Gost transport, targets and strategy', async () => {
     const wrapper = mountInventory(Rules)
     await flushPromises()
@@ -272,8 +311,12 @@ describe('forwarding rule editor and actions', () => {
     await field(dialog, 'listen_port').get('input').setValue('8443')
     expect(dialog.get('#rule-target-title').text()).toBe('目标与策略')
     const protocol = selectField(dialog, 'protocol')
-    expect(protocol.findAllComponents(ElOption).map(option => option.props('value'))).toEqual(['tcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'quic'])
-    await choose(protocol, 'tls')
+    expect(protocol.findAllComponents(ElOption).map(option => option.props('value'))).toEqual([
+      'tcp', 'mtcp', 'udp', 'tls', 'mtls', 'ws', 'mws', 'wss', 'mwss',
+      'h2', 'h2c', 'grpc', 'pht', 'phts', 'kcp', 'quic', 'h3', 'ohttp', 'otls'
+    ])
+    expect(protocol.props('filterable')).toBe(true)
+    await choose(protocol, 'h2')
     await choose(selectField(dialog, 'listen_ip'), '127.0.0.1')
     await button(dialog, '创建端点').trigger('click')
     await flushPromises()
@@ -294,7 +337,7 @@ describe('forwarding rule editor and actions', () => {
     await button(dialog, '创建端点').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenCalledExactlyOnceWith({
-      node_id: entryNode.id, name: 'Web exit', role: 'exit', protocol: 'tls', listen_ip: '', listen_port: 8443, remark: '',
+      node_id: entryNode.id, name: 'Web exit', role: 'exit', protocol: 'h2', listen_ip: '', listen_port: 8443, remark: '',
       use_clash_ruleset: false, targets: ['app.example:443', '[2001:db8::10]:443'], strategy: 'hash'
     })
   })
@@ -328,6 +371,8 @@ describe('forwarding rule editor and actions', () => {
     await choose(selectField(dialog, 'node_id'), entryNode.id)
     await field(dialog, 'listen_port').get('input').setValue('9443')
     await choose(selectField(dialog, 'protocol'), 'quic')
+    await dialog.get('.gost-transport-options [role="button"]').trigger('click')
+    await dialog.get('[data-protocol-option="max_idle_timeout"] input').setValue('45s')
     await choose(selectField(dialog, 'use_clash_ruleset'), true)
     expect(dialog.find('input[aria-label="目标地址 1"]').exists()).toBe(false)
     expect(dialog.get('#rule-target-mode-help').text()).toContain('入口须使用 TCP 与 127.0.0.1')
@@ -335,7 +380,7 @@ describe('forwarding rule editor and actions', () => {
     await flushPromises()
     expect(createRule).toHaveBeenCalledExactlyOnceWith({
       node_id: entryNode.id, name: 'Clash exit', role: 'exit', protocol: 'quic', listen_ip: '', listen_port: 9443, remark: '',
-      use_clash_ruleset: true, targets: [], strategy: 'round'
+      use_clash_ruleset: true, targets: [], strategy: 'round', protocol_options: { max_idle_timeout: '45s' }
     })
     await button(wrapper, '新建端点').trigger('click')
     dialog = editDialog(wrapper)
@@ -344,12 +389,15 @@ describe('forwarding rule editor and actions', () => {
     await field(dialog, 'listen_port').get('input').setValue('9444')
     await choose(selectField(dialog, 'role'), 'exit')
     await choose(selectField(dialog, 'protocol'), 'mtls')
+    await dialog.get('.gost-transport-options [role="button"]').trigger('click')
+    await dialog.get('[data-protocol-option="tls_server_name"] input').setValue('unused.example')
     await dialog.get('input[aria-label="目标地址 1"]').setValue('app.example:443')
     await choose(selectField(dialog, 'strategy'), 'rand')
     await choose(selectField(dialog, 'use_clash_ruleset'), true)
     await choose(selectField(dialog, 'role'), 'entry')
     expect(selectField(dialog, 'protocol').props('modelValue')).toBe('tcp')
     expect(dialog.find('#rule-target-title').exists()).toBe(false)
+    expect(dialog.find('.gost-transport-options').exists()).toBe(false)
     await button(dialog, '创建端点').trigger('click')
     await flushPromises()
     expect(createRule).toHaveBeenLastCalledWith({
@@ -359,7 +407,8 @@ describe('forwarding rule editor and actions', () => {
   })
 
   it('edits a stopped tunnel exit policy while locking its role and listener, and copies the exit policy', async () => {
-    const exit = { ...relayRule, name: 'Saved exit', role: 'exit', protocol: 'quic', linked_tunnel_id: 8, linked_tunnel_status: 'stopped', targets: ['saved.example:443'], strategy: 'rand' }
+    const exit = { ...relayRule, name: 'Saved exit', role: 'exit', protocol: 'wss', linked_tunnel_id: 8, linked_tunnel_status: 'stopped', targets: ['saved.example:443'], strategy: 'rand',
+      protocol_options: { path: '/saved', tls_server_name: 'relay.example' } }
     getRuleList.mockResolvedValue(result([exit, { ...exit, id: 20, name: 'Running exit', status: 'running', linked_tunnel_status: 'running' }, direct]))
     const wrapper = mountInventory(Rules)
     await flushPromises()
@@ -373,21 +422,25 @@ describe('forwarding rule editor and actions', () => {
     expect(selectField(dialog, 'role').props('disabled')).toBe(true)
     expect(selectField(dialog, 'listen_ip').props('disabled')).toBe(true)
     expect(field(dialog, 'listen_port').get('input').element.disabled).toBe(true)
-    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('quic')
+    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('wss')
+    expect(dialog.get('[data-protocol-option="path"] input').element.value).toBe('/saved')
+    expect(dialog.get('[data-protocol-option="tls_server_name"] input').element.value).toBe('relay.example')
     expect(dialog.get('input[aria-label="目标地址 1"]').element.value).toBe('saved.example:443')
-    await choose(selectField(dialog, 'protocol'), 'ws')
+    await choose(selectField(dialog, 'protocol'), 'kcp')
     await dialog.get('input[aria-label="目标地址 1"]').setValue('updated.example:8443')
     await button(dialog, '保存端点').trigger('click')
     await flushPromises()
     expect(updateRule).toHaveBeenCalledExactlyOnceWith(exit.id, {
-      node_id: entryNode.id, name: exit.name, role: 'exit', protocol: 'ws', listen_ip: exit.listen_ip, listen_port: exit.listen_port, remark: '',
-      use_clash_ruleset: false, targets: ['updated.example:8443'], strategy: 'rand'
+      node_id: entryNode.id, name: exit.name, role: 'exit', protocol: 'kcp', listen_ip: exit.listen_ip, listen_port: exit.listen_port, remark: '',
+      use_clash_ruleset: false, targets: ['updated.example:8443'], strategy: 'rand', protocol_options: {}
     })
     await command(row(wrapper, 'Saved exit'), 'copy')
     dialog = editDialog(wrapper)
     expect(selectField(dialog, 'role').props('modelValue')).toBe('exit')
     expect(selectField(dialog, 'role').props('disabled')).toBe(false)
-    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('quic')
+    expect(selectField(dialog, 'protocol').props('modelValue')).toBe('wss')
+    expect(dialog.get('[data-protocol-option="path"] input').element.value).toBe('/saved')
+    expect(dialog.get('[data-protocol-option="tls_server_name"] input').element.value).toBe('relay.example')
     expect(dialog.get('input[aria-label="目标地址 1"]').element.value).toBe('saved.example:443')
     expect(field(dialog, 'listen_port').get('input').element.value).toBe('')
   })
@@ -431,6 +484,7 @@ describe('forwarding rule editor and actions', () => {
     ])
     expect(dialog.text()).toContain('入口接收流量，出口配置目标与策略')
     expect(selectField(dialog, 'role').props('modelValue')).toBe('entry')
+    expect(selectField(dialog, 'protocol').findAllComponents(ElOption).map(option => option.props('value'))).toEqual(['tcp', 'udp'])
     expect(dialog.find('#rule-target-title').exists()).toBe(false)
     await field(dialog, 'name').get('input').setValue('  internal API  ')
     expect(field(dialog, 'listen_port').get('input').element.value).toBe('')

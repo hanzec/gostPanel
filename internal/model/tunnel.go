@@ -33,9 +33,11 @@ type GostTunnel struct {
 	ExitNodeID  uint         `gorm:"not null;index" json:"exit_node_id"`  // 出口节点 ID
 	EntryRuleID *uint        `gorm:"index" json:"entry_rule_id,omitempty"`
 	ExitRuleID  *uint        `gorm:"index" json:"exit_rule_id,omitempty"`
-	Protocol    string       `gorm:"size:10;default:tcp" json:"protocol"` // 协议 (tcp/udp/tls/mtls/ws/mws/quic)
+	Protocol    string       `gorm:"size:10;default:tcp" json:"protocol"` // Gost Relay 数据通道
 	RelayPort   int          `gorm:"default:8443" json:"relay_port"`      // 出口节点 Relay 服务端口
 	Status      TunnelStatus `gorm:"size:20;default:stopped" json:"status"`
+
+	ProtocolOptions map[string]string `gorm:"type:text;serializer:json" json:"protocol_options"`
 
 	AllowlistNodeIDs []uint   `gorm:"type:text;serializer:json" json:"allowlist_node_ids"`
 	Targets          []string `gorm:"type:text;serializer:json" json:"targets"`

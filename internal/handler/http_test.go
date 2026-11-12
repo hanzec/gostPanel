@@ -223,17 +223,20 @@ func TestForwardingHTTPInventoryAndOfflineNodes(t *testing.T) {
 	entry := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{"name":"entry","port":39110}`, 200))
 	exit := handlerData[model.GostNode](t, f.request(t, "POST", "/nodes", `{"name":"exit","port":39111}`, 200))
 
-	tunnelBody := fmt.Sprintf(`{"name":"Tokyo","entry_node_id":%d,"exit_node_id":%d,"protocol":"tcp","relay_port":8081}`, entry.ID, exit.ID)
+	tunnelBody := fmt.Sprintf(`{"name":"Tokyo","entry_node_id":%d,"exit_node_id":%d,"protocol":"h2","relay_port":8081}`, entry.ID, exit.ID)
 	tunnel := handlerData[model.GostTunnel](t, f.request(t, "POST", "/tunnels", tunnelBody, 200))
+	if tunnel.Protocol != "h2" {
+		t.Fatalf("created tunnel protocol = %q, want h2", tunnel.Protocol)
+	}
 	tunnelPath := fmt.Sprintf("/tunnels/%d", tunnel.ID)
-	updateTunnel := `{"name":"Tokyo UDP","protocol":"udp","relay_port":8082}`
+	updateTunnel := `{"name":"Tokyo KCP","protocol":"kcp","relay_port":8082}`
 	changed := handlerData[model.GostTunnel](t, f.request(t, "PUT", tunnelPath, updateTunnel, 200))
-	if changed.Protocol != "udp" || changed.RelayPort != 8082 || changed.EntryNodeID != entry.ID || changed.ExitNodeID != exit.ID {
+	if changed.Protocol != "kcp" || changed.RelayPort != 8082 || changed.EntryNodeID != entry.ID || changed.ExitNodeID != exit.ID {
 		t.Fatalf("updated tunnel: %+v", changed)
 	}
 	invalidTunnel := fmt.Sprintf(`{"name":"loop","entry_node_id":%d,"exit_node_id":%d,"protocol":"tcp","relay_port":8081}`, entry.ID, entry.ID)
 	f.request(t, "POST", "/tunnels", invalidTunnel, 400)
-	if detail := handlerData[model.GostTunnel](t, f.request(t, "GET", tunnelPath, "", 200)); detail.Name != "Tokyo UDP" {
+	if detail := handlerData[model.GostTunnel](t, f.request(t, "GET", tunnelPath, "", 200)); detail.Name != "Tokyo KCP" {
 		t.Fatalf("tunnel detail: %+v", detail)
 	}
 	tunnels := handlerData[handlerPage[model.GostTunnel]](t, f.request(t, "GET", fmt.Sprintf("/tunnels?node_id=%d&keyword=Tokyo&status=stopped", entry.ID), "", 200))

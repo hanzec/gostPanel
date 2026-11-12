@@ -26,9 +26,10 @@ func migrateTunnelEndpointRoles(db *gorm.DB) error {
 				}
 				if tunnel.Protocol != "" {
 					exit.Protocol = model.RuleProtocol(tunnel.Protocol)
+					exit.ProtocolOptions = tunnel.ProtocolOptions
 				}
 				exit.Role = model.EndpointRoleExit
-				if err := tx.Model(exit).Select("Role", "Protocol", "Targets", "UseClashRuleset", "Strategy").UpdateColumns(exit).Error; err != nil {
+				if err := tx.Model(exit).Select("Role", "Protocol", "ProtocolOptions", "Targets", "UseClashRuleset", "Strategy").UpdateColumns(exit).Error; err != nil {
 					return err
 				}
 			}

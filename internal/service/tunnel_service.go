@@ -52,6 +52,9 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 		}
 		return s.createEndpointTunnel(req, nodeIDs, username, ip, userAgent)
 	}
+	if err := validateRelayProtocolOptions(req.Protocol, req.ProtocolOptions); err != nil {
+		return nil, err
+	}
 	// 检查入口和出口是否相同
 	if req.EntryNodeID == req.ExitNodeID {
 		return nil, errors.ErrTunnelNodeSame
@@ -81,6 +84,7 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 		EntryNodeID:      req.EntryNodeID,
 		ExitNodeID:       req.ExitNodeID,
 		Protocol:         req.Protocol,
+		ProtocolOptions:  req.ProtocolOptions,
 		RelayPort:        req.RelayPort,
 		Remark:           req.Remark,
 		Status:           model.TunnelStatusStopped,
@@ -126,6 +130,7 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 		}
 		tunnel.AllowlistNodeIDs = nodeIDs
 	}
+	previousProtocol := tunnel.Protocol
 	if tunnel.EntryRuleID != nil || req.EntryRuleID != 0 || req.ExitRuleID != 0 {
 		if tunnel.EntryRuleID == nil || req.RelayPort != 0 {
 			return nil, errors.ErrTunnelEndpointsRequired
@@ -147,6 +152,13 @@ func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, 
 	} else {
 		tunnel.Protocol = req.Protocol
 		tunnel.RelayPort = req.RelayPort
+	}
+	if (tunnel.ExitRule == nil || tunnel.ExitRule.Role != model.EndpointRoleExit) &&
+		(req.ProtocolOptions != nil || tunnel.Protocol != previousProtocol) {
+		if err := validateRelayProtocolOptions(tunnel.Protocol, req.ProtocolOptions); err != nil {
+			return nil, err
+		}
+		tunnel.ProtocolOptions = req.ProtocolOptions
 	}
 
 	// 更新隧道（不能修改入口/出口节点）
@@ -324,9 +336,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 		Handler: &gost.HandlerConfig{
 			Type: "relay", // relay 协议支持接收客户端传来的目标地址
 		},
-		Listener: &gost.ListenerConfig{
-			Type: tunnel.Protocol, // 使用隧道配置的协议
-		},
+		Listener: gost.RelayListener(tunnel.Protocol, tunnel.ProtocolOptions),
 	}
 
 	if err = s.allowlist.prepareRelay(exitClient, relaySvc, tunnel); err != nil {
@@ -365,7 +375,7 @@ func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
 	chainName := tunnelChainName(tunnel.ID)
 	relayAddr := net.JoinHostPort(strings.Trim(exitHost, "[]"), strconv.Itoa(tunnel.RelayPort))
 
-	chain := newTunnelChain(chainName, relayAddr, tunnel.Protocol, nil)
+	chain := newTunnelChain(chainName, relayAddr, tunnel.Protocol, tunnel.ProtocolOptions, nil)
 
 	if err = entryClient.CreateChain(chain); err != nil {
 		// 回滚：删除出口节点的 Relay 服务
@@ -399,11 +409,11 @@ func tunnelChainName(id uint) string {
 	return fmt.Sprintf("tunnel-%d-chain", id)
 }
 
-func newTunnelChain(name, address, protocol string, auth *gost.AuthConfig) *gost.ChainConfig {
+func newTunnelChain(name, address, protocol string, options map[string]string, auth *gost.AuthConfig) *gost.ChainConfig {
 	return &gost.ChainConfig{Name: name, Hops: []*gost.HopConfig{{Name: "hop-0", Nodes: []*gost.NodeConfig{{
 		Name: "exit-relay", Addr: address,
 		Connector: &gost.ConnectorConfig{Type: "relay", Auth: auth},
-		Dialer:    &gost.DialerConfig{Type: protocol},
+		Dialer:    gost.RelayDialer(protocol, options),
 	}}}}}
 }
 

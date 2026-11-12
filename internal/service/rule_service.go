@@ -79,6 +79,9 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 	if err = validateEndpointConfig(model.EndpointRole(req.Role), kind, model.RuleProtocol(req.Protocol), listenIP, req.Targets, req.UseClashRuleset); err != nil {
 		return nil, err
 	}
+	if err := validateEndpointProtocolOptions(model.EndpointRole(req.Role), req.Protocol, req.ProtocolOptions); err != nil {
+		return nil, err
+	}
 	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort)
 	if err != nil {
 		return nil, err
@@ -95,6 +98,7 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 		Type:            kind,
 		Role:            model.EndpointRole(req.Role),
 		Protocol:        model.RuleProtocol(req.Protocol),
+		ProtocolOptions: req.ProtocolOptions,
 		ListenIP:        listenIP,
 		ListenPort:      req.ListenPort,
 		Targets:         req.Targets,
@@ -185,6 +189,12 @@ func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, user
 		}
 	} else if req.Protocol != "" && req.Protocol != "tcp" && req.Protocol != "udp" {
 		return nil, errors.ErrEndpointProtocol
+	}
+	if req.ProtocolOptions != nil || req.Protocol != string(rule.Protocol) || role != rule.Role {
+		if err := validateEndpointProtocolOptions(role, req.Protocol, req.ProtocolOptions); err != nil {
+			return nil, err
+		}
+		rule.ProtocolOptions = req.ProtocolOptions
 	}
 	exists, err := s.ruleRepo.ListenerConflicts(entryNodeID, model.RuleProtocol(req.Protocol), listenIP, req.ListenPort, id)
 	if err != nil {
