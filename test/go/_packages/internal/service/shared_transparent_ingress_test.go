@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"yagp/internal/model"
-	"yagp/pkg/gost"
 )
 
 func TestSharedTransparentIngressUsesRulesBeforeFallback(t *testing.T) {
@@ -54,21 +53,19 @@ func TestSharedTransparentIngressUsesRulesBeforeFallback(t *testing.T) {
 	}
 }
 
-func TestSharedTransparentIngressFallsBackAcrossRuleExits(t *testing.T) {
+func TestSharedTransparentIngressOnlyRoutesMatchingTargetsToFilteredExits(t *testing.T) {
 	var tunnels []*model.GostTunnel
 	for i := uint(1); i <= 2; i++ {
 		tunnels = append(tunnels, &model.GostTunnel{ID: i, EntryRule: &model.GostRule{Protocol: model.RuleProtocolTransparent},
 			ExitRule: &model.GostRule{Role: model.EndpointRoleExit, UseOriginalTarget: true, ManualDomains: []string{"example.test"}}})
 	}
 	group, sniff := sharedTransparentGroup(tunnels)
-	if !sniff || group.Selector.Strategy != "round" || len(group.Chains) != 4 {
+	if !sniff || group.Selector.Strategy != "round" || len(group.Chains) != 2 {
 		t.Fatalf("invalid shared routing group: %+v", group)
 	}
-	first, second := group.Chains[0], group.Chains[1]
-	fallback := "!(" + first.Matcher.Rule + " || " + second.Matcher.Rule + ")"
-	for _, route := range []gost.ChainGroupEntry{group.Chains[2], group.Chains[3]} {
-		if route.Matcher.Rule != fallback || (route.Chain != first.Chain && route.Chain != second.Chain) {
-			t.Errorf("invalid fallback %+v", route)
+	for i, route := range group.Chains {
+		if route.Matcher == nil || !strings.Contains(route.Matcher.Rule, transparentPolicyName(tunnels[i].ID)) {
+			t.Errorf("route is missing its whitelist: %+v", route)
 		}
 	}
 }

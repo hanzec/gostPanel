@@ -153,6 +153,111 @@ func TestAutomaticNodeUpgradeRecordsFailuresAndPendingConfirmation(t *testing.T)
 	}
 }
 
+func TestAutomaticNodeUpgradeFinishesRuntimeMigrationInSamePass(t *testing.T) {
+	const target = "0.1.73-abcdef0"
+	for _, test := range []struct {
+		name      string
+		collision bool
+		failed    bool
+	}{
+		{name: "old worker still exiting", collision: true},
+		{name: "migration failed", failed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := newServiceTestDB(t)
+			remote := &runtimeMigrationUpgradeNode{
+				collision: test.collision, failed: test.failed,
+				state: &nodegrpc.NodeUpgradeStatus{Supported: true, DaemonVersion: "0.1.72-abcdef0"},
+			}
+			node := startServiceTestNode(t, remote)
+			node.UpgradePolicy.AutoUpgradeDaemon = true
+			saveServiceFixtures(t, db, &node)
+			remote.mu.Lock()
+			remote.nodeID = node.ID
+			remote.mu.Unlock()
+			s := NewNodeUpgradeService(db)
+			s.panelVersion = target
+			ctx, cancel := context.WithTimeout(t.Context(), 4*nodeUpgradePoll+3*time.Second)
+			defer cancel()
+			s.runAutomatic(ctx)
+			if err := ctx.Err(); err != nil {
+				t.Fatal(err)
+			}
+			remote.mu.Lock()
+			starts := append([]string(nil), remote.starts...)
+			remote.mu.Unlock()
+			wantStarts := 2
+			if test.collision {
+				wantStarts++
+			}
+			if len(starts) != wantStarts {
+				t.Fatalf("started upgrades = %v, want %d attempts", starts, wantStarts)
+			}
+			for _, start := range starts {
+				if start != "daemon/"+target {
+					t.Fatalf("unexpected upgrade %s", start)
+				}
+			}
+			logs, total, err := NewLogService(db).List(&dto.LogListReq{Action: model.ActionAutoUpgrade})
+			requireServiceError(t, err, nil)
+			wantResult := "自动升级成功"
+			if test.failed {
+				wantResult = "自动升级失败：file conflict"
+			}
+			if total != 4 || !strings.Contains(logs[0].Details, wantResult) {
+				t.Fatalf("migration audit events = %+v", logs)
+			}
+		})
+	}
+}
+
+type runtimeMigrationUpgradeNode struct {
+	nodegrpc.UnimplementedV1Server
+	mu        sync.Mutex
+	state     *nodegrpc.NodeUpgradeStatus
+	starts    []string
+	finish    bool
+	failed    bool
+	collision bool
+	nodeID    uint
+}
+
+func (n *runtimeMigrationUpgradeNode) GetUpgradeStatus(context.Context, *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	current := n.state
+	if n.finish {
+		n.finish = false
+		result := &nodegrpc.NodeUpgradeStatus{Supported: true, Component: current.GetComponent(), TargetVersion: current.GetTargetVersion(),
+			DaemonVersion: current.GetDaemonVersion(), State: "succeeded"}
+		if n.failed {
+			result.State, result.Error, result.RuntimeUpdateRequired = "failed", "file conflict", true
+		}
+		n.state = result
+		// On success, the first poll can still see the previous worker's result.
+		if n.failed {
+			return result, nil
+		}
+	}
+	return current, nil
+}
+
+func (n *runtimeMigrationUpgradeNode) StartUpgrade(_ context.Context, req *nodegrpc.NodeUpgradeRequest) (*nodegrpc.NodeUpgradeStatus, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.starts = append(n.starts, req.GetComponent()+"/"+req.GetVersion())
+	if len(n.starts) == 2 && n.collision {
+		return nil, status.Errorf(codes.FailedPrecondition, "Unit yagp-upgrade-%d.service was already loaded", n.nodeID)
+	}
+	if len(n.starts) == 1 {
+		n.state = &nodegrpc.NodeUpgradeStatus{Supported: true, Component: req.GetComponent(), TargetVersion: req.GetVersion(),
+			DaemonVersion: req.GetVersion(), State: "succeeded", RuntimeUpdateRequired: true}
+	} else {
+		n.finish = true
+	}
+	return &nodegrpc.NodeUpgradeStatus{Supported: true, Component: req.GetComponent(), TargetVersion: req.GetVersion(), State: "queued"}, nil
+}
+
 type automaticUpgradeAuditNode struct {
 	nodeUpgradeFixture
 	start      *nodegrpc.NodeUpgradeStatus

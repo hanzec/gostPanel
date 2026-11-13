@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 )
 
 const upgradeStatusFile = ".upgrade-status.json"
+const legacyUpgradeStatusFile = ".upgrade-legacy-status.json"
 
 type UpgradeStatus struct {
 	Supported             bool   `json:"-"`
@@ -42,9 +44,34 @@ func StartUpgrade(ctx context.Context, cfg Config, configPath, component, tag st
 		return err
 	}
 	dir := filepath.Dir(configPath)
-	return upgradeCommand(ctx, "systemd-run", "--unit="+upgradeUnit(cfg.NodeID), "--collect",
-		"--property=Type=exec", "--working-directory="+dir, "--", filepath.Join(dir, "yagp-daemon"),
-		"upgrade-component", "-c", configPath, "--component", component, "--tag", tag)
+	version, err := systemdRunVersion(ctx)
+	if err != nil {
+		return err
+	}
+	args := []string{"--unit=" + upgradeUnit(cfg.NodeID), "--collect", "--property=WorkingDirectory=" + dir}
+	// systemd 239 accepts the WorkingDirectory property, but Type=exec arrived in 240.
+	if version >= 240 {
+		args = append(args, "--property=Type=exec")
+	}
+	args = append(args, "--", filepath.Join(dir, "yagp-daemon"), "upgrade-component", "-c", configPath,
+		"--component", component, "--tag", tag)
+	return upgradeCommand(ctx, "systemd-run", args...)
+}
+
+func systemdRunVersion(ctx context.Context) (int, error) {
+	out, err := exec.CommandContext(ctx, "systemd-run", "--version").Output()
+	if err != nil {
+		return 0, fmt.Errorf("read systemd-run version: %w", err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) >= 2 && fields[0] == "systemd" {
+		// Development builds can report a version such as 259~rc1.
+		value, _, _ := strings.Cut(fields[1], "~")
+		if version, err := strconv.Atoi(value); err == nil {
+			return version, nil
+		}
+	}
+	return 0, errors.New("unexpected systemd-run version output")
 }
 
 // ReadUpgradeStatus returns installed versions and the latest upgrade operation.
@@ -53,13 +80,17 @@ func ReadUpgradeStatus(ctx context.Context, cfg Config, configPath string) (Upgr
 	supported := supportsUpgrade(configPath)
 	if configPath != "" {
 		dir := filepath.Dir(configPath)
+		legacyDir := ""
+		if configPath == filepath.Join(DefaultNodeStateDir, "node.yaml") && cfg.RuntimeLayout >= RuntimeLayoutVersion {
+			legacyDir = filepath.Join(dir, strconv.FormatUint(cfg.NodeID, 10))
+		}
 		var err error
-		if status, err = readUpgradeOperation(dir); err != nil {
+		if status, err = readCurrentUpgradeOperation(dir, legacyDir); err != nil {
 			return UpgradeStatus{}, err
 		}
 		if supported && status.State == "running" && upgradeWorkerStopped(ctx, cfg.NodeID) {
 			// The worker writes the result before exiting, so check once more after it stops.
-			if status, err = readUpgradeOperation(dir); err != nil {
+			if status, err = readCurrentUpgradeOperation(dir, legacyDir); err != nil {
 				return UpgradeStatus{}, err
 			}
 			if status.State == "running" {
@@ -74,9 +105,48 @@ func ReadUpgradeStatus(ctx context.Context, cfg Config, configPath string) (Upgr
 	return status, nil
 }
 
+func readCurrentUpgradeOperation(dir, legacyDir string) (UpgradeStatus, error) {
+	current := filepath.Join(dir, upgradeStatusFile)
+	if legacyDir != "" {
+		legacy := filepath.Join(dir, legacyUpgradeStatusFile)
+		if err := collectLegacyUpgradeStatus(legacyDir, legacy); err != nil {
+			return UpgradeStatus{}, err
+		}
+		if previous, err := os.Stat(legacy); err == nil {
+			latest, err := os.Stat(current)
+			if errors.Is(err, os.ErrNotExist) || (err == nil && previous.ModTime().After(latest.ModTime())) {
+				current = legacy
+			} else if err != nil {
+				return UpgradeStatus{}, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return UpgradeStatus{}, err
+		}
+	}
+	return readUpgradeStatusFile(current)
+}
+
+func collectLegacyUpgradeStatus(dir, destination string) error {
+	oldStatus := filepath.Join(dir, upgradeStatusFile)
+	operation, err := readUpgradeStatusFile(oldStatus)
+	if err != nil || (operation.State != "succeeded" && operation.State != "failed") {
+		return err
+	}
+	// Keep the completed result without replacing the file used by new workers.
+	if err := os.Rename(oldStatus, destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	_ = os.Remove(dir)
+	return nil
+}
+
 func readUpgradeOperation(dir string) (UpgradeStatus, error) {
+	return readUpgradeStatusFile(filepath.Join(dir, upgradeStatusFile))
+}
+
+func readUpgradeStatusFile(path string) (UpgradeStatus, error) {
 	var status UpgradeStatus
-	data, err := os.ReadFile(filepath.Join(dir, upgradeStatusFile))
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return status, nil
 	}

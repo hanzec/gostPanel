@@ -139,6 +139,7 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		{name: "relay failed", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "refused"}), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "failed", wantStage: "exit_relay", wantChecks: map[string]string{"relay_connection": "failed", "exit_relay": "failed"}},
 		{name: "exit Gost stopped", probe: status.Error(codes.Unavailable, "probe closed"), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "api unavailable", wantStage: "exit_relay", wantChecks: map[string]string{"exit_relay": "failed"}},
 		{name: "relay authentication", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_authentication"}), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake", wantChecks: map[string]string{"relay_connection": "passed", "relay_policy": "warning"}},
+		{name: "relay target forbidden", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_target_forbidden"}), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake", wantChecks: map[string]string{"relay_connection": "passed"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			startResult <- tt.prepare

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"yagp/internal/buildinfo"
@@ -189,27 +190,78 @@ func (s *NodeUpgradeService) upgradeAutomatically(ctx context.Context, id uint, 
 		return nil
 	}
 	current := state.GetDaemonVersion()
-	state, err = client.StartUpgrade(ctx, "daemon", target)
+	state, err = s.runAutomaticUpgrade(ctx, node, client, current, target, false)
+	if err != nil || current == target || state.GetState() != "succeeded" ||
+		state.GetDaemonVersion() != target || !state.GetRuntimeUpdateRequired() {
+		return err
+	}
+	// An older worker can install the new binary without migrating the runtime layout.
+	node, err = s.findNode(ctx, id)
+	if err != nil || node.Status != model.NodeStatusOnline || !node.UpgradePolicy.AutoUpgradeDaemon {
+		return nil
+	}
+	state, err = client.GetUpgradeStatus(ctx)
+	if err != nil || !runtimeMigrationPending(state, target) {
+		return nil
+	}
+	_, err = s.runAutomaticUpgrade(ctx, node, client, target, target, true)
+	return err
+}
+
+func (s *NodeUpgradeService) runAutomaticUpgrade(ctx context.Context, node *model.GostNode, client *gost.Client, current, target string, followup bool) (*nodegrpc.NodeUpgradeStatus, error) {
+	state, err := client.StartUpgrade(ctx, "daemon", target)
+	if followup && upgradeWorkerUnitBusy(err, node.ID) {
+		// A worker can publish its result just before systemd releases its transient unit name.
+		timer := time.NewTimer(nodeUpgradePoll)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+		node, statusErr := s.findNode(ctx, node.ID)
+		if statusErr != nil || node.Status != model.NodeStatusOnline || !node.UpgradePolicy.AutoUpgradeDaemon {
+			return nil, nil
+		}
+		latest, statusErr := client.GetUpgradeStatus(ctx)
+		if statusErr != nil || !runtimeMigrationPending(latest, target) {
+			return latest, nil
+		}
+		state, err = client.StartUpgrade(ctx, "daemon", target)
+	}
 	if err != nil {
 		s.recordAutomaticUpgrade(node, current, target, "启动失败："+err.Error())
-		logger.Warnf("启动节点 %d 的 yagp-daemon 自动升级失败: %v", id, err)
-		return nil
+		logger.Warnf("启动节点 %d 的 yagp-daemon 自动升级失败: %v", node.ID, err)
+		return nil, nil
 	}
 	s.recordAutomaticUpgrade(node, current, target, "已启动")
 	if nodeUpgradeBusy(state) {
-		state, err = waitForNodeUpgrade(ctx, client, state.GetComponent(), state.GetTargetVersion())
+		state, err = waitForNodeUpgrade(ctx, client, state.GetComponent(), state.GetTargetVersion(), followup)
 		if err != nil {
 			s.recordAutomaticUpgrade(node, current, target, "结果待确认："+err.Error())
-			return err
+			return nil, err
 		}
 	}
 	if state.GetState() == "succeeded" {
 		s.recordAutomaticUpgrade(node, current, target, "成功")
 	} else if state.GetState() == "failed" {
 		s.recordAutomaticUpgrade(node, current, target, "失败："+state.GetError())
-		logger.Warnf("节点 %d 的 yagp-daemon 自动升级失败: %s", id, state.GetError())
+		logger.Warnf("节点 %d 的 yagp-daemon 自动升级失败: %s", node.ID, state.GetError())
 	}
-	return nil
+	return state, nil
+}
+
+func runtimeMigrationPending(state *nodegrpc.NodeUpgradeStatus, target string) bool {
+	return state.GetSupported() && state.GetDaemonVersion() == target && state.GetRuntimeUpdateRequired() && !nodeUpgradeBusy(state)
+}
+
+func upgradeWorkerUnitBusy(err error, nodeID uint) bool {
+	if status.Code(err) != codes.FailedPrecondition {
+		return false
+	}
+	message := status.Convert(err).Message()
+	return strings.Contains(message, fmt.Sprintf("yagp-upgrade-%d.service", nodeID)) &&
+		(strings.Contains(message, "already loaded") || strings.Contains(message, "already exists"))
 }
 
 func (s *NodeUpgradeService) recordAutomaticUpgrade(node *model.GostNode, current, target, result string) {
@@ -250,7 +302,7 @@ func nodeUpgradeBusy(state *nodegrpc.NodeUpgradeStatus) bool {
 	return state.GetState() == "queued" || state.GetState() == "running"
 }
 
-func waitForNodeUpgrade(ctx context.Context, client *gost.Client, component, target string) (*nodegrpc.NodeUpgradeStatus, error) {
+func waitForNodeUpgrade(ctx context.Context, client *gost.Client, component, target string, requireMigratedRuntime bool) (*nodegrpc.NodeUpgradeStatus, error) {
 	ctx, cancel := context.WithTimeout(ctx, nodeUpgradeWait)
 	defer cancel()
 	timer := time.NewTicker(nodeUpgradePoll)
@@ -262,7 +314,7 @@ func waitForNodeUpgrade(ctx context.Context, client *gost.Client, component, tar
 		case <-timer.C:
 			state, err := client.GetUpgradeStatus(ctx)
 			if err == nil && state.GetComponent() == component && state.GetTargetVersion() == target &&
-				(state.GetState() == "succeeded" || state.GetState() == "failed") {
+				(state.GetState() == "failed" || (state.GetState() == "succeeded" && (!requireMigratedRuntime || !state.GetRuntimeUpdateRequired()))) {
 				return state, nil
 			}
 		}

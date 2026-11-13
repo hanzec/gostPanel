@@ -48,7 +48,7 @@ type EndpointExitTraffic struct {
 	Measured bool `json:"measured"`
 }
 
-func (r *TunnelRepository) EndpointExitTraffic() ([]EndpointExitTraffic, error) {
+func (r *TunnelRepository) EndpointExitTraffic(ids ...uint) ([]EndpointExitTraffic, error) {
 	traffic := make([]EndpointExitTraffic, 0)
 	// Existing tunnel counters remain historical, including after the tunnel is removed.
 	history := r.DB.Table("tunnels").
@@ -56,7 +56,10 @@ func (r *TunnelRepository) EndpointExitTraffic() ([]EndpointExitTraffic, error) 
 			MAX(relay_service_created_at) AS measured_at,
 			MAX(CASE WHEN deleted_at IS NULL AND status = ? THEN 1 ELSE 0 END) AS running`, model.TunnelStatusRunning).
 		Where("exit_rule_id IS NOT NULL").Group("exit_rule_id")
-	err := r.DB.Model(&model.GostRule{}).
+	if len(ids) != 0 {
+		history = history.Where("exit_rule_id IN ?", ids)
+	}
+	query := r.DB.Model(&model.GostRule{}).
 		Select(`rules.id, rules.name, rules.node_id AS exit_node_id, nodes.name AS exit_node_name, nodes.status AS exit_node_status,
 			rules.relay_input_bytes + COALESCE(history.input_bytes, 0) AS input_bytes,
 			rules.relay_output_bytes + COALESCE(history.output_bytes, 0) AS output_bytes,
@@ -64,8 +67,11 @@ func (r *TunnelRepository) EndpointExitTraffic() ([]EndpointExitTraffic, error) 
 			(rules.relay_service_created_at > 0 OR COALESCE(history.measured_at, 0) > 0) AS measured`).
 		Joins("JOIN nodes ON nodes.id = rules.node_id AND nodes.deleted_at IS NULL").
 		Joins("LEFT JOIN (?) AS history ON history.exit_rule_id = rules.id", history).
-		Where("rules.role = ?", model.EndpointRoleExit).
-		Order("rules.id").Scan(&traffic).Error
+		Where("rules.role = ?", model.EndpointRoleExit)
+	if len(ids) != 0 {
+		query = query.Where("rules.id IN ?", ids)
+	}
+	err := query.Order("rules.id").Scan(&traffic).Error
 	return traffic, err
 }
 

@@ -44,14 +44,22 @@ func runUpgrade(ctx context.Context, cfg Config, configPath, component, tag stri
 	if !supportsUpgrade(configPath) {
 		return errors.New("upgrades require a systemd-managed Linux node")
 	}
+	configPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
 	dir := filepath.Dir(configPath)
 	status := UpgradeStatus{Component: component, Tag: tag, State: "running"}
 	if err := writeUpgradeStatus(dir, status); err != nil {
 		return fmt.Errorf("record upgrade start: %w", err)
 	}
-	err := installUpgrade(ctx, cfg, dir, component, tag, writeBinary)
+	err = installUpgrade(ctx, cfg, dir, component, tag, writeBinary)
 	if err == nil && component == "daemon" && runtimeUpdateRequired(cfg, configPath, systemdUnitDir) {
 		err = upgradeCommand(ctx, filepath.Join(dir, "yagp-daemon"), "update-runtime", "-c", configPath)
+		if destination := runtimeConfigPath(cfg, configPath); err == nil && destination != configPath && ReadRuntimeLayout(destination) >= RuntimeLayoutVersion {
+			_ = os.Remove(dir)
+			dir = filepath.Dir(destination)
+		}
 	}
 	status.State = "succeeded"
 	if err != nil {
