@@ -169,6 +169,7 @@ func TestNativeUFWDelegationAndDrift(t *testing.T) {
 	assertSync(manager, desired)
 	assertConnection(allow, false)
 	run("iptables", append([]string{"-D"}, hostDeny...)...)
+	assertSync(manager, desired)
 	assertConnection(allow, true)
 
 	run("ufw", "reload")
