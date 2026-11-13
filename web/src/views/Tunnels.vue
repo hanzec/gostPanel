@@ -149,38 +149,13 @@
       </div>
     </section>
 
-    <PanelDialog
+    <TunnelTestDialog
       v-model="testDialogVisible"
-      title="隧道转发测试"
-      size="compact"
-      :close-on-click-modal="false"
-      :close-on-press-escape="!testLoading"
-      :show-close="!testLoading"
-    >
-      <template v-if="testTunnelRow">
-        <dl class="tunnel-policy-summary">
-          <dt>隧道</dt><dd>{{ testTunnelRow.name }}</dd>
-          <dt>源端</dt><dd>{{ testTunnelRow.entry_node?.name || '节点 #' + testTunnelRow.entry_node_id }}</dd>
-          <dt>目的端</dt><dd>{{ testTunnelRow.exit_node?.name || '节点 #' + testTunnelRow.exit_node_id }}</dd>
-        </dl>
-        <p class="ops-muted">验证测试数据能否通过 Gost Relay 在两端之间往返。应用目标需单独验证。</p>
-        <p v-if="testTunnelRow.status !== 'running'" class="tunnel-test-message">请先启动隧道，再测试转发。</p>
-        <div role="status" aria-atomic="true" class="tunnel-test-feedback">
-          <p v-if="testLoading" class="tunnel-test-message">正在测试隧道转发…</p>
-          <template v-else-if="testResult">
-            <span class="ops-status" :class="testResult.success ? 'is-success' : 'is-danger'">
-              {{ testResult.success ? '隧道转发正常' : '测试失败' }}
-            </span>
-            <p v-if="testResult.success" class="tunnel-test-message">往返耗时 {{ testResult.latency_ms }} ms</p>
-            <p v-else-if="testResult.message" class="tunnel-test-message">{{ testResult.message }}</p>
-          </template>
-        </div>
-      </template>
-      <template #footer>
-        <el-button :disabled="testLoading" @click="testDialogVisible = false">关闭</el-button>
-        <el-button type="primary" :loading="testLoading" :disabled="testTunnelRow?.status !== 'running'" @click="runTunnelTest">开始测试</el-button>
-      </template>
-    </PanelDialog>
+      :tunnel="testTunnelRow"
+      :result="testResult"
+      :loading="testLoading"
+      @run="runTunnelTest"
+    />
 
     <PanelDialog
       v-model="dialogVisible"
@@ -328,6 +303,7 @@ import { computed, nextTick, ref, reactive, watch, onMounted, onBeforeUnmount } 
 import { ElMessage } from 'element-plus'
 import InventoryToolbar from '@/components/InventoryToolbar.vue'
 import PanelDialog from '@/components/PanelDialog.vue'
+import TunnelTestDialog from '@/components/TunnelTestDialog.vue'
 import GostTransportOptions from '@/components/GostTransportOptions.vue'
 import TargetRoutingFields from '@/components/TargetRoutingFields.vue'
 import { confirmPanelAction } from '@/utils/panel-dialog'
@@ -347,7 +323,6 @@ const tunnelStates = {
   error: { label: '异常', icon: Warning, tone: 'danger' }
 }
 const strategies = { round: '轮询', rand: '随机', fifo: '先进先出', hash: '哈希' }
-
 const nodeList = ref([])
 const nodeOptionsLoading = ref(false)
 const nodeOptionsError = ref(false)
@@ -668,8 +643,11 @@ const runTunnelTest = async () => {
     const { data } = await testTunnel(testTunnelRow.value.id)
     testResult.value = data
   } catch (error) {
-    const message = error.response?.data?.message || (!error.isAxiosError && error.message) || '暂时无法测试隧道，请重试。'
-    testResult.value = { success: false, message }
+    const response = error.response?.data
+    const diagnosis = response?.data
+    const failedCheck = diagnosis?.diagnostics?.find(check => check.stage === diagnosis.failure_stage && check.status === 'failed')
+    const message = failedCheck?.message || response?.message || (!error.isAxiosError && error.message) || '暂时无法测试隧道，请重试。'
+    testResult.value = { ...diagnosis, success: false, message }
   } finally {
     testLoading.value = false
   }
@@ -720,8 +698,6 @@ onBeforeUnmount(() => clearInterval(refreshTimer))
 .tunnel-policy-summary dt { color: var(--ops-muted); }
 .tunnel-policy-summary dd { margin: 0; overflow-wrap: anywhere; }
 .tunnel-policy-summary dd span { display: block; }
-.tunnel-test-message { margin: 0; overflow-wrap: anywhere; }
-.tunnel-test-feedback .ops-status + .tunnel-test-message { margin-top: 8px; }
 .tunnel-target-list { display: grid; gap: 8px; width: 100%; }
 .tunnel-target-item { display: flex; align-items: center; gap: 8px; }
 .tunnel-target-item .el-input { min-width: 0; }
