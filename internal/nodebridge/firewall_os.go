@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	firewallNFT = "nftables"
-	firewallUFW = "ufw"
+	firewallNFT       = "nftables"
+	firewallUFW       = "ufw"
+	firewallFirewalld = "firewalld"
 )
 
 func hostFirewallBackend() string {
@@ -43,11 +44,24 @@ func readFirewallBackend(readFile func(string) ([]byte, error)) string {
 			related = value
 		}
 	}
-	if distro == "ubuntu" || slices.Contains(strings.Fields(related), "ubuntu") {
+	families := strings.Fields(related)
+	if distro == "ubuntu" || slices.Contains(families, "ubuntu") {
 		return firewallUFW
+	}
+	if isRHELFamily(distro) || slices.ContainsFunc(families, isRHELFamily) {
+		return firewallFirewalld
 	}
 	if distro == "" {
 		return ""
 	}
 	return firewallNFT
+}
+
+func isRHELFamily(distro string) bool {
+	switch distro {
+	case "rhel", "centos", "rocky", "almalinux", "ol", "opencloudos", "opencloudos-stream":
+		return true
+	default:
+		return false
+	}
 }

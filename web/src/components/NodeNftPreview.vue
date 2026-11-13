@@ -13,8 +13,7 @@
         <span class="ops-status" :class="firewallState.tone">{{ firewallState.label }}</span>
       </div>
       <p v-if="firewallBackend" class="ops-muted">放行后端 {{ firewallBackend }}</p>
-      <p v-if="firewall?.managed && firewall.backend === 'ufw'" class="ops-muted">自动放行需要主机上的 UFW 已启用并运行。</p>
-      <p v-if="firewall?.managed && firewall.backend === 'nftables'" class="ops-muted">管理员在主机 inet input 链中接入 YAGP 放行链。</p>
+      <p v-if="firewall?.managed && firewallHelp" class="ops-muted">{{ firewallHelp }}</p>
       <p v-if="firewall?.last_sync" class="ops-muted">最近成功同步 <time :datetime="firewall.last_sync">{{ formatTime(firewall.last_sync) }}</time></p>
       <p v-if="firewallError || firewall?.last_error" class="nft-firewall-error">{{ firewallError || firewall.last_error }}</p>
     </section>
@@ -49,6 +48,14 @@ const legacyFirewall = ref(false)
 const firewallBackend = computed(() => {
   const backend = firewall.value?.backend
   return backend === 'ufw' ? 'UFW' : backend
+})
+const firewallHelp = computed(() => {
+  switch (firewall.value?.backend) {
+    case 'ufw': return '自动放行需要主机上的 UFW 已启用并运行。'
+    case 'firewalld': return '自动放行需要 firewalld 已启用并运行，以及管理员配置的入站 policy。'
+    case 'nftables': return '管理员在主机 inet input 链中接入 YAGP 放行链。'
+    default: return ''
+  }
 })
 
 const firewallState = computed(() => {

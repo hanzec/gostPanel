@@ -208,6 +208,25 @@ describe('nftables preview', () => {
     expect(health.text()).toContain('UFW is inactive')
     expect(health.text()).not.toContain('inet input 链')
   })
+
+  it('shows the firewalld policy requirement and refreshes after delegation is ready', async () => {
+    const state = { backend: 'firewalld', supported: true, managed: true }
+    api.getNodeNftConfig.mockResolvedValue(response({ config: activeRules, live: true }))
+    api.getNodeFirewallStatus
+      .mockResolvedValueOnce(response({ ...state, synchronized: false, last_error: 'firewalld policy is not active' }))
+      .mockResolvedValueOnce(response({ ...state, synchronized: true, last_error: null }))
+    wrapper = mountNodeComponent(NodeNftPreview, { node })
+    await flushPromises()
+    const health = wrapper.get('.nft-firewall')
+    expect(health.text()).toContain('放行后端 firewalld')
+    expect(health.text()).toContain('管理员配置的入站 policy')
+    expect(health.text()).toContain('firewalld policy is not active')
+    expect(health.text()).not.toContain('inet input 链')
+
+    await click(wrapper, '刷新')
+    expect(health.text()).toContain('已同步')
+    expect(health.text()).not.toContain('firewalld policy is not active')
+  })
 })
 
 describe('node upgrades', () => {

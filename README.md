@@ -169,6 +169,36 @@ UFW 缺失、停用或未运行时，自动放行不可用，面板会显示错�
 
 停用时，将 `node.yaml` 中 `firewall` 下的 `enabled` 改为 `false` 并重启 `yagp-daemon`。管理员确认 SSH 和管理端口已由主机的持久规则放行后，可在维护窗口执行 `ufw reload`，清除守护进程添加的运行时放行规则。卸载或回退前同样清理这些规则。
 
+#### RHEL 系发行版
+
+RHEL、CentOS、Rocky Linux、AlmaLinux、Oracle Linux 和 OpenCloudOS 使用 firewalld。自动放行要求 firewalld 已启用并运行，且支持 policy。CentOS 7 等缺少 policy 接口的系统会报告后端不可用。
+
+由管理员创建专用的入站 policy。以下以节点 `42` 和入站区域 `public` 为例，按实际节点 ID 修改描述中的编号，并用 `firewall-cmd --get-active-zones` 确定实际承载 Gost 流量的区域。需要覆盖多个区域时，分别添加这些区域。此 policy 专用于 `yagp-daemon` 的运行时放行，主机自己的访问控制继续保留在原有区域或 policy 中。
+
+```bash
+firewall-cmd --permanent --new-policy=yagp-42
+firewall-cmd --permanent --policy=yagp-42 --set-description='yagp daemon firewall 42'
+firewall-cmd --permanent --policy=yagp-42 --set-priority=32767
+firewall-cmd --permanent --policy=yagp-42 --set-target=CONTINUE
+firewall-cmd --permanent --policy=yagp-42 --add-ingress-zone=public
+firewall-cmd --permanent --policy=yagp-42 --add-egress-zone=HOST
+firewall-cmd --check-config
+```
+
+确认 SSH 和管理端口已由主机的持久规则放行后，由管理员在维护窗口执行 `firewall-cmd --reload`。然后在节点的 `node.yaml` 中加入以下配置并重启 `yagp-daemon`。
+
+```yaml
+firewall:
+  enabled: true
+  policy: yagp-42
+```
+
+正优先级让区域中的显式规则先处理。firewalld 1.0 起，正优先级 policy 在区域的兜底动作之前执行。更早且支持 policy 的版本需要匹配区域使用 `default` 目标。可用 `firewall-cmd --info-policy=yagp-42` 查看当前规则。[firewalld policy 手册](https://firewalld.org/documentation/man-pages/firewalld.policies.html) · [firewalld 1.0 优先级行为](https://firewalld.org/2021/06/the-upcoming-1-0-0)
+
+守护进程根据 Gost 监听更新该 policy 的运行时放行规则。端口变更时先添加新规则，再移除旧规则，更新失败时尝试恢复原有放行。管理员重载 firewalld 后，下一次同步会重建这些规则。
+
+停用时，将 `firewall` 下的 `enabled` 改为 `false` 并重启 `yagp-daemon`。管理员按启用时的维护流程重载 firewalld，即可清除运行时放行。卸载、回退或更换 policy 前同样清理旧规则。
+
 #### 其他 Linux 发行版
 
 守护进程使用 nftables。将 `filter` 和 `input` 换成主机现有的 `inet` 表名和 `filter` 类型的 `input` 基链名，然后写入节点的 `node.yaml`。

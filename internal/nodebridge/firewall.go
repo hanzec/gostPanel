@@ -17,11 +17,12 @@ import (
 	"time"
 )
 
-// FirewallConfig enables automatic allowances and identifies the delegated chain on nftables hosts.
+// FirewallConfig enables automatic allowances and identifies the delegated firewall objects.
 type FirewallConfig struct {
 	Enabled    *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Table      string `json:"table" yaml:"table"`
-	InputChain string `json:"input_chain" yaml:"input_chain"`
+	Table      string `json:"table,omitempty" yaml:"table,omitempty"`
+	InputChain string `json:"input_chain,omitempty" yaml:"input_chain,omitempty"`
+	Policy     string `json:"policy,omitempty" yaml:"policy,omitempty"`
 }
 
 type FirewallEndpoint struct {
@@ -54,7 +55,10 @@ type FirewallManager struct {
 	status   FirewallStatus
 }
 
-var firewallIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,254}$`)
+var (
+	firewallIdentifier  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,254}$`)
+	firewalldPolicyName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,17}$`)
+)
 
 func NewFirewallManager(nodeID uint64, config FirewallConfig) (*FirewallManager, error) {
 	return newFirewallManager(nodeID, config, hostFirewallBackend())
@@ -70,16 +74,26 @@ func newFirewallManager(nodeID uint64, config FirewallConfig, backend string) (*
 	manager.status.Backend = backend
 	_, supportErr := firewallExecutable(backend)
 	manager.status.Supported = supportErr == nil
-	manager.status.Managed = config.Table != "" || config.InputChain != ""
+	manager.status.Managed = config.Table != "" || config.InputChain != "" || config.Policy != ""
 	if config.Enabled != nil {
 		manager.status.Managed = *config.Enabled
 	}
-	if manager.status.Managed && backend == firewallNFT && (!firewallIdentifier.MatchString(config.Table) ||
-		!firewallIdentifier.MatchString(config.InputChain) || config.InputChain == manager.prefix+"input") {
-		manager.configErr = errors.New("firewall requires an existing nftables inet table and input base chain with valid names")
-		manager.recordSyncError(manager.configErr)
-	} else if manager.status.Managed && supportErr != nil {
-		manager.recordSyncError(supportErr)
+	if manager.status.Managed {
+		switch backend {
+		case firewallNFT:
+			if !firewallIdentifier.MatchString(config.Table) || !firewallIdentifier.MatchString(config.InputChain) || config.InputChain == manager.prefix+"input" {
+				manager.configErr = errors.New("firewall requires an existing nftables inet table and input base chain with valid names")
+			}
+		case firewallFirewalld:
+			if !firewalldPolicyName.MatchString(config.Policy) {
+				manager.configErr = errors.New("firewall requires an existing dedicated firewalld policy with a valid name")
+			}
+		}
+		if manager.configErr != nil {
+			manager.recordSyncError(manager.configErr)
+		} else if supportErr != nil {
+			manager.recordSyncError(supportErr)
+		}
 	}
 	return manager, manager.configErr
 }
@@ -94,6 +108,8 @@ func firewallExecutable(backend string) (string, error) {
 		command = "nft"
 	case firewallUFW:
 		command = "ufw"
+	case firewallFirewalld:
+		return "", nil
 	default:
 		return "", errors.New("cannot select a firewall backend without Linux OS release information")
 	}
@@ -145,13 +161,15 @@ func (m *FirewallManager) Reconcile(ctx context.Context, ports FirewallPorts) er
 			err = supportErr
 		case m.backend == firewallUFW:
 			err = m.reconcileUFW(ctx, executable, ports)
+		case m.backend == firewallFirewalld:
+			err = m.reconcileFirewalld(ctx, ports)
 		default:
 			err = m.reconcile(ctx, executable, ports)
 		}
 	}
 
 	m.statusMu.Lock()
-	m.status.Supported = supportErr == nil && !errors.Is(err, errUFWInactive)
+	m.status.Supported = supportErr == nil && !errors.Is(err, errUFWInactive) && !errors.Is(err, errFirewalldInactive)
 	m.status.Synchronized = err == nil
 	if err == nil {
 		now := time.Now().UTC()

@@ -183,7 +183,7 @@ func TestReenrollPreservesExistingGostFilesAndAddresses(t *testing.T) {
 	}
 	config := "node_id: 42\nusername: registered\npassword: test-secret\nadmin_address: 127.0.0.1:12345\n" +
 		"observer_listen: 127.0.0.1:12346\nhost: 127.0.0.1\nreport_ca_file: " + ca + "\n" +
-		"firewall:\n  table: filter\n  input_chain: input\n"
+		"firewall:\n  enabled: true\n  policy: yagp-42\n"
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestReenrollPreservesExistingGostFilesAndAddresses(t *testing.T) {
 	if err != nil || stored.AdminAddress != "127.0.0.1:12345" || stored.ObserverListen != "127.0.0.1:12346" || stored.ReportCAFile != ca {
 		t.Fatalf("re-enrollment did not preserve local settings: %v", err)
 	}
-	if stored.Firewall != (nodebridge.FirewallConfig{Table: "filter", InputChain: "input"}) {
+	if stored.Firewall.Enabled == nil || !*stored.Firewall.Enabled || stored.Firewall.Policy != "yagp-42" {
 		t.Fatalf("re-enrollment did not preserve firewall delegation: %+v", stored.Firewall)
 	}
 	for name, contents := range files {
