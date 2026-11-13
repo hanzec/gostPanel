@@ -190,7 +190,7 @@
                 :disabled="rule.node_id === exitEntrance?.node_id"
               />
             </el-select>
-            <span id="source-entry-help" class="tunnel-form-hint ops-muted">入口接收流量，按出口的目标与策略转发。独立转发中的旧端点须先停止。</span>
+            <span id="source-entry-help" class="tunnel-form-hint ops-muted">已指定方向的入口可用于多条隧道。独立转发中的旧端点须先停止。</span>
           </el-form-item>
           <el-form-item v-if="!legacyEdit" label="目的端点" prop="exit_rule_id">
             <el-select v-model="form.exit_rule_id" placeholder="选择目的端点" :loading="entryOptionsLoading" filterable fit-input-width popper-class="tunnel-endpoint-options" aria-describedby="destination-entry-help">
@@ -203,7 +203,7 @@
               />
             </el-select>
             <span id="destination-entry-help" class="tunnel-form-hint ops-muted">
-              出口须在另一节点且监听可达，其隧道协议、目标与策略在端点管理中配置。
+              出口须在另一节点且监听可达，多条隧道可共用出口的协议、目标与策略。
               <span v-if="selectedRelayConnectEndpoint" class="tunnel-connect-endpoint">
                 源端连接 <span class="ops-mono">{{ selectedRelayConnectEndpoint }}</span>
               </span>
@@ -401,9 +401,13 @@ const selectedRelayConnectEndpoint = computed(() => mappedConnectEndpoint(exitEn
 const relayConnectEndpoints = computed(() => Object.fromEntries(tunnelList.value.map(tunnel => [
   tunnel.id, mappedConnectEndpoint(tunnel.exit_node, tunnel.exit_rule?.listen_ip, tunnel.relay_port)
 ])))
-const availableEntrances = computed(() => entryList.value.filter(rule => rule.linked_tunnel_id
-  ? rule.linked_tunnel_id === editId.value
-  : !rule.tunnel_id && rule.status !== 'running'))
+const availableEntrances = computed(() => entryList.value.filter(rule => {
+  const linked = rule.linked_tunnels
+  if (linked?.length || rule.linked_tunnel_id) {
+    return !!rule.role || rule.linked_tunnel_id === editId.value || linked?.some(tunnel => tunnel.id === editId.value)
+  }
+  return !rule.tunnel_id && rule.status !== 'running'
+}))
 const sourceOptions = computed(() => availableEntrances.value.filter(rule => !rule.role || rule.role === 'entry'))
 const destinationOptions = computed(() => availableEntrances.value.filter(rule =>
   (!rule.role || rule.role === 'exit') && !['0.0.0.0', '::', '::1'].includes(rule.listen_ip) && !rule.listen_ip?.startsWith('127.')))
@@ -418,10 +422,20 @@ const targetModeError = () => {
 }
 const validateEndpointNodes = (_rule, _value, callback) => callback(entryEntrance.value?.node_id &&
   entryEntrance.value.node_id === exitEntrance.value?.node_id ? new Error('源端和目的端须位于不同节点') : undefined)
+const validateEndpointPair = (_rule, _value, callback) => {
+  const entry = entryEntrance.value
+  const exit = exitEntrance.value
+  if (!entry || !exit) return callback()
+  const entryBindings = entry.linked_tunnels?.map(tunnel => tunnel.id) ?? [entry.linked_tunnel_id]
+  const exitBindings = exit.linked_tunnels?.map(tunnel => tunnel.id) ?? [exit.linked_tunnel_id]
+  const duplicate = entryBindings.some(id => id && id !== editId.value && exitBindings.includes(id))
+  callback(duplicate ? new Error('这组源端点和目的端点已建立隧道') : undefined)
+}
 const formRules = {
   name: [{ required: true, message: '请输入隧道名称', trigger: 'blur' }],
   entry_rule_id: [{ required: true, message: '请选择源端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' }],
   exit_rule_id: [{ required: true, message: '请选择目的端点', trigger: 'change' }, { validator: validateEndpointNodes, trigger: 'change' },
+    { validator: validateEndpointPair, trigger: 'change' },
     { validator: (_rule, _value, callback) => callback(exitOwnsTargets.value ? targetModeError() : undefined), trigger: 'change' }],
   use_original_target: [{ validator: (_rule, _value, callback) => callback(targetModeError()), trigger: 'change' }],
   targetList: [{ required: true, validator: (_rule, value, callback) => callback(!form.use_original_target && !value.some(item => item.address.trim())

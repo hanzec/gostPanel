@@ -1490,6 +1490,7 @@ type TransparentRedirectRequest struct {
 	Mark          uint32                    `protobuf:"varint,5,opt,name=mark,proto3" json:"mark,omitempty"`
 	DockerAddress string                    `protobuf:"bytes,6,opt,name=docker_address,json=dockerAddress,proto3" json:"docker_address,omitempty"`
 	RequireActive bool                      `protobuf:"varint,7,opt,name=require_active,json=requireActive,proto3" json:"require_active,omitempty"`
+	RelayHosts    []string                  `protobuf:"bytes,8,rep,name=relay_hosts,json=relayHosts,proto3" json:"relay_hosts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1573,13 +1574,21 @@ func (x *TransparentRedirectRequest) GetRequireActive() bool {
 	return false
 }
 
+func (x *TransparentRedirectRequest) GetRelayHosts() []string {
+	if x != nil {
+		return x.RelayHosts
+	}
+	return nil
+}
+
 type TransparentRedirectReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Mark          uint32                 `protobuf:"varint,1,opt,name=mark,proto3" json:"mark,omitempty"`
-	DockerAddress string                 `protobuf:"bytes,2,opt,name=docker_address,json=dockerAddress,proto3" json:"docker_address,omitempty"`
-	Active        bool                   `protobuf:"varint,3,opt,name=active,proto3" json:"active,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Mark                uint32                 `protobuf:"varint,1,opt,name=mark,proto3" json:"mark,omitempty"`
+	DockerAddress       string                 `protobuf:"bytes,2,opt,name=docker_address,json=dockerAddress,proto3" json:"docker_address,omitempty"`
+	Active              bool                   `protobuf:"varint,3,opt,name=active,proto3" json:"active,omitempty"`
+	MultiRelaySupported bool                   `protobuf:"varint,4,opt,name=multi_relay_supported,json=multiRelaySupported,proto3" json:"multi_relay_supported,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TransparentRedirectReply) Reset() {
@@ -1629,6 +1638,13 @@ func (x *TransparentRedirectReply) GetDockerAddress() string {
 func (x *TransparentRedirectReply) GetActive() bool {
 	if x != nil {
 		return x.Active
+	}
+	return false
+}
+
+func (x *TransparentRedirectReply) GetMultiRelaySupported() bool {
+	if x != nil {
+		return x.MultiRelaySupported
 	}
 	return false
 }
@@ -1902,7 +1918,7 @@ const file_node_proto_rawDesc = "" +
 	"\apayload\x18\x03 \x01(\fR\apayload\x12\x12\n" +
 	"\x04code\x18\x04 \x01(\x05R\x04code\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12%\n" +
-	"\x0etimeout_millis\x18\x06 \x01(\x03R\rtimeoutMillis\"\x88\x02\n" +
+	"\x0etimeout_millis\x18\x06 \x01(\x03R\rtimeoutMillis\"\xa9\x02\n" +
 	"\x1aTransparentRedirectRequest\x12?\n" +
 	"\x06action\x18\x01 \x01(\x0e2'.yagp.node.v1.TransparentRedirectActionR\x06action\x12\x14\n" +
 	"\x05owner\x18\x02 \x01(\tR\x05owner\x12\x12\n" +
@@ -1911,11 +1927,14 @@ const file_node_proto_rawDesc = "" +
 	"relay_host\x18\x04 \x01(\tR\trelayHost\x12\x12\n" +
 	"\x04mark\x18\x05 \x01(\rR\x04mark\x12%\n" +
 	"\x0edocker_address\x18\x06 \x01(\tR\rdockerAddress\x12%\n" +
-	"\x0erequire_active\x18\a \x01(\bR\rrequireActive\"m\n" +
+	"\x0erequire_active\x18\a \x01(\bR\rrequireActive\x12\x1f\n" +
+	"\vrelay_hosts\x18\b \x03(\tR\n" +
+	"relayHosts\"\xa1\x01\n" +
 	"\x18TransparentRedirectReply\x12\x12\n" +
 	"\x04mark\x18\x01 \x01(\rR\x04mark\x12%\n" +
 	"\x0edocker_address\x18\x02 \x01(\tR\rdockerAddress\x12\x16\n" +
-	"\x06active\x18\x03 \x01(\bR\x06active\"E\n" +
+	"\x06active\x18\x03 \x01(\bR\x06active\x122\n" +
+	"\x15multi_relay_supported\x18\x04 \x01(\bR\x13multiRelaySupported\"E\n" +
 	"\x13TunnelProbeEndpoint\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\fR\x05token\"c\n" +

@@ -82,6 +82,7 @@
                   <span class="ops-mono">#{{ row.id }}</span>
                   <span>{{ endpointRoles[row.role] || '未指定' }}</span>
                   <span v-if="row.tunnel_role">{{ row.tunnel_role === 'entry' ? '隧道源端' : '隧道目的端' }}</span>
+                  <span v-if="row.linked_tunnels?.length > 1">关联 {{ row.linked_tunnels.length }} 条隧道</span>
                 </span>
               </th>
               <td class="rule-path" role="cell" data-label="所在节点">
@@ -114,7 +115,7 @@
               <td class="rule-actions-cell" role="cell" data-label="操作">
                 <div class="rule-row-actions">
                   <el-button
-                    v-if="!row.role && !row.linked_tunnel_id && !row.use_clash_ruleset && row.targets?.length"
+                    v-if="!row.role && !hasTunnelBindings(row) && !row.use_clash_ruleset && row.targets?.length"
                     text
                     :type="row.status === 'running' ? 'warning' : 'success'"
                     :loading="pendingRuleIds.has(row.id)"
@@ -123,7 +124,7 @@
                   >
                     {{ row.status === 'running' ? '停止' : '启动' }}
                   </el-button>
-                  <el-button v-if="!row.linked_tunnel_id || row.role === 'exit' && row.linked_tunnel_status === 'stopped'" text :aria-label="'编辑 ' + row.name" @click="openDialog(row)">编辑</el-button>
+                  <el-button v-if="canEditEndpoint(row)" text :aria-label="'编辑 ' + row.name" @click="openDialog(row)">编辑</el-button>
                   <RouterLink v-else class="rule-form-link" to="/tunnels">隧道管理</RouterLink>
                   <el-dropdown trigger="click" @command="handleRowCommand(row, $event)">
                     <el-button text :aria-label="row.name + '的更多操作'">
@@ -137,7 +138,7 @@
                           command="listener-check"
                           :disabled="listenerChecks.get(row.id)?.pending"
                         >检查监听</el-dropdown-item>
-                        <el-dropdown-item command="delete" divided :disabled="pendingRuleIds.has(row.id) || !!row.linked_tunnel_id">删除端点</el-dropdown-item>
+                        <el-dropdown-item command="delete" divided :disabled="pendingRuleIds.has(row.id) || hasTunnelBindings(row)">删除端点</el-dropdown-item>
                       </el-dropdown-menu>
                     </template>
                   </el-dropdown>
@@ -339,6 +340,10 @@ const dialogVisible = ref(false)
 const isEdit = ref(false)
 const boundExitEdit = ref(false)
 const endpointRoles = { entry: '入口', exit: '出口' }
+const hasTunnelBindings = rule => !!(rule.linked_tunnels?.length || rule.linked_tunnel_id)
+const canEditEndpoint = rule => !hasTunnelBindings(rule) || (rule.role === 'exit' && (rule.linked_tunnels?.length
+  ? rule.linked_tunnels.every(tunnel => tunnel.status === 'stopped')
+  : rule.linked_tunnel_status === 'stopped'))
 const strategies = { round: '轮询', rand: '随机', fifo: '先进先出', hash: '哈希' }
 const editId = ref(null)
 const submitLoading = ref(false)
@@ -473,7 +478,7 @@ const clearFilters = () => {
 const openDialog = (row = null, copy = false) => {
   isEdit.value = !!row && !copy
   editId.value = isEdit.value ? row.id : null
-  boundExitEdit.value = isEdit.value && row.role === 'exit' && !!row.linked_tunnel_id
+  boundExitEdit.value = isEdit.value && row.role === 'exit' && hasTunnelBindings(row)
   savedProtocolOptions = isEdit.value && !!Object.keys(row.protocol_options || {}).length
   savedRelayConfig = isEdit.value ? { nodeId: row.node_id, protocol: row.protocol, mptcp: row.protocol_options?.mptcp } : null
   editingNode.value = row?.node || null

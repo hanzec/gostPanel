@@ -79,10 +79,26 @@ type GostResponse struct {
 
 // HandlerConfig 处理器配置
 type HandlerConfig struct {
-	Type     string         `json:"type"`
-	Chain    string         `json:"chain,omitempty"` // 链名称
-	Auth     *AuthConfig    `json:"auth,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Type       string            `json:"type"`
+	Chain      string            `json:"chain,omitempty"` // 链名称
+	ChainGroup *ChainGroupConfig `json:"chainGroup,omitempty"`
+	Auther     string            `json:"auther,omitempty"`
+	Auth       *AuthConfig       `json:"auth,omitempty"`
+	Metadata   map[string]any    `json:"metadata,omitempty"`
+}
+
+type ChainGroupConfig struct {
+	Chains   []ChainGroupEntry `json:"chains"`
+	Selector *SelectorConfig   `json:"selector,omitempty"`
+}
+
+type ChainGroupEntry struct {
+	Chain   string        `json:"chain"`
+	Matcher *ChainMatcher `json:"matcher,omitempty"`
+}
+
+type ChainMatcher struct {
+	Rule string `json:"rule"`
 }
 
 // ListenerConfig 监听器配置

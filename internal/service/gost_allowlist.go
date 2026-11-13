@@ -114,14 +114,26 @@ func (s *GostAllowlistService) relayAdmission(tunnel *model.GostTunnel) (*gost.A
 
 func (s *GostAllowlistService) syncRelays(client *gost.Client, current *gost.GostConfig, nodeID uint, tunnels []model.GostTunnel) (bool, error) {
 	managed := make(map[string]model.GostTunnel)
-	for _, tunnel := range tunnels {
-		if tunnel.ExitNodeID == nodeID && tunnel.ServiceID == relayServiceName(tunnel.ID) {
-			managed[tunnel.ServiceID] = tunnel
+	shared := make(map[string][]*model.GostTunnel)
+	for i := range tunnels {
+		tunnel := &tunnels[i]
+		if tunnel.ExitNodeID == nodeID && tunnel.ServiceID == relayServiceName(tunnel.ID) &&
+			(tunnel.ExitRuleID == nil || tunnel.Status == model.TunnelStatusRunning) {
+			managed[tunnel.ServiceID] = *tunnel
+		}
+		if tunnel.ExitNodeID == nodeID && tunnel.ExitRuleID != nil && tunnel.Status == model.TunnelStatusRunning {
+			shared[tunnel.ServiceID] = append(shared[tunnel.ServiceID], tunnel)
 		}
 	}
 	var changed bool
 	var syncError error
 	for _, relay := range current.Services {
+		if relay.Handler != nil && relay.Handler.Auther == relay.Name {
+			if users := shared[relay.Name]; len(users) != 0 {
+				syncError = errors.Join(syncError, s.writeSharedRelayPolicy(client, relay.Name, users))
+			}
+			continue
+		}
 		tunnel, managedRelay := managed[relay.Name]
 		if !managedRelay || relay.Handler == nil || relay.Handler.Type != "relay" {
 			continue

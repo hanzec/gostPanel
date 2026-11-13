@@ -393,23 +393,27 @@ func (s *RuleService) GetByID(id uint) (*model.GostRule, error) {
 }
 
 func (s *RuleService) loadEntranceBinding(rule *model.GostRule) error {
-	tunnel, err := s.tunnelRepo.FindByEntranceID(rule.ID)
-	if stderrors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
+	tunnels, err := s.ruleRepo.EntranceBindings([]uint{rule.ID})
 	if err != nil {
 		return err
 	}
-	if tunnel.EntryRuleID != nil && *tunnel.EntryRuleID == rule.ID {
-		setEntranceBinding(rule, tunnel.ID, "entry", tunnel.Status)
-	} else {
-		setEntranceBinding(rule, tunnel.ID, "exit", tunnel.Status)
+	for _, tunnel := range tunnels {
+		if tunnel.EntryRuleID != nil && *tunnel.EntryRuleID == rule.ID {
+			setEntranceBinding(rule, tunnel.ID, "entry", tunnel.Status)
+		} else {
+			setEntranceBinding(rule, tunnel.ID, "exit", tunnel.Status)
+		}
 	}
 	return nil
 }
 
 func setEntranceBinding(rule *model.GostRule, tunnelID uint, role string, status model.TunnelStatus) {
-	if rule != nil {
+	if rule == nil {
+		return
+	}
+	rule.LinkedTunnels = append(rule.LinkedTunnels, model.TunnelBinding{ID: tunnelID, Status: status})
+	if rule.LinkedTunnelID == nil || status == model.TunnelStatusRunning ||
+		(status == model.TunnelStatusError && rule.LinkedTunnelStatus == model.TunnelStatusStopped) {
 		rule.LinkedTunnelID, rule.TunnelRole, rule.LinkedTunnelStatus = &tunnelID, role, status
 	}
 }

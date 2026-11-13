@@ -51,6 +51,8 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 		if req.EntryNodeID != 0 || req.ExitNodeID != 0 || req.RelayPort != 0 {
 			return nil, errors.ErrTunnelEndpointsRequired
 		}
+		endpointTunnelRuntime.Lock()
+		defer endpointTunnelRuntime.Unlock()
 		return s.createEndpointTunnel(req, nodeIDs, username, ip, userAgent)
 	}
 	if req.UseOriginalTarget || len(req.RulesetIDs) != 0 || len(req.ManualDomains) != 0 {
@@ -119,6 +121,8 @@ func (s *TunnelService) Create(req *dto.CreateTunnelReq, username, ip, userAgent
 
 // Update 更新隧道（仅支持更新非运行中的隧道，且不能修改入口/出口节点）
 func (s *TunnelService) Update(id uint, req *dto.UpdateTunnelReq, username, ip, userAgent string) (*model.GostTunnel, error) {
+	endpointTunnelRuntime.Lock()
+	defer endpointTunnelRuntime.Unlock()
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -216,6 +220,8 @@ func (s *TunnelService) UpdateAllowlist(ctx context.Context, id uint, nodeIDs []
 // Delete 删除隧道
 // 如果有规则正在使用此隧道，不允许删除
 func (s *TunnelService) Delete(id uint, username, ip, userAgent string) error {
+	endpointTunnelRuntime.Lock()
+	defer endpointTunnelRuntime.Unlock()
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -235,7 +241,7 @@ func (s *TunnelService) Delete(id uint, username, ip, userAgent string) error {
 
 	// 如果隧道正在运行，先停止
 	if tunnel.Status == model.TunnelStatusRunning || (tunnel.EntryRuleID != nil && tunnel.Status == model.TunnelStatusError) {
-		if err = s.Stop(id, username, ip, userAgent); err != nil {
+		if err = s.stop(id, username, ip, userAgent); err != nil {
 			if tunnel.EntryRuleID != nil {
 				return err
 			}
@@ -303,6 +309,8 @@ func (s *TunnelService) List(req *dto.TunnelListReq) ([]model.GostTunnel, int64,
 // Start 启动隧道
 // 在出口节点创建 Relay 服务，在入口节点创建 Chain 连接到出口节点
 func (s *TunnelService) Start(id uint, username, ip, userAgent string) error {
+	endpointTunnelRuntime.Lock()
+	defer endpointTunnelRuntime.Unlock()
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		return err
@@ -438,6 +446,12 @@ func newTunnelChain(name, address, protocol string, options map[string]string, a
 // Stop 停止隧道
 // 删除入口节点的 Chain 和出口节点的 Relay 服务
 func (s *TunnelService) Stop(id uint, username, ip, userAgent string) error {
+	endpointTunnelRuntime.Lock()
+	defer endpointTunnelRuntime.Unlock()
+	return s.stop(id, username, ip, userAgent)
+}
+
+func (s *TunnelService) stop(id uint, username, ip, userAgent string) error {
 	tunnel, err := s.tunnelRepo.FindByID(id)
 	if err != nil {
 		return err

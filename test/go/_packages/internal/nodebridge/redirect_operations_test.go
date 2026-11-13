@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -35,7 +36,7 @@ func TestRestoreTransparentRedirectChecksAndUpgradesVersion(t *testing.T) {
 			}
 			fmt.Fprint(w, `{"data":{"name":"rule-5","addr":"127.0.0.1:12345","sockopts":{"mark":100},"handler":{"type":"red","chain":"tunnel-1-clash-chain"},"listener":{"type":"red"}}}`)
 		case "/api/config/services/rule-5-docker":
-			fmt.Fprintf(w, `{"data":{"name":"rule-5-docker","addr":"192.0.2.100:12345","sockopts":{"mark":%d},"handler":{"type":"red","chain":"tunnel-1-clash-chain"},"listener":{"type":"red"}}}`, dockerMark.Load())
+			fmt.Fprintf(w, `{"data":{"name":"rule-5-docker","addr":"192.0.2.100:12345","sockopts":{"mark":%d},"handler":{"type":"red","chainGroup":{"chains":[{"chain":"tunnel-1-clash-chain"},{"chain":"tunnel-2-clash-chain"}]}},"listener":{"type":"red"}}}`, dockerMark.Load())
 		default:
 			t.Errorf("unexpected Gost request %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -233,6 +234,14 @@ func TestRedirectRelayIPsUseIPv4AddressesOnly(t *testing.T) {
 	}
 	if _, err := redirectRelayIPs(t.Context(), "invalid relay address"); err == nil {
 		t.Fatal("invalid Relay address resolved")
+	}
+	want := []netip.Addr{netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("192.0.2.123")}
+	ips, err := redirectRelayIPs(t.Context(), "::ffff:192.0.2.123", "localhost", "2001:db8::1", "192.0.2.123")
+	if err != nil || !slices.Equal(ips, want) {
+		t.Fatalf("multiple Relay addresses = %v, %v, want %v", ips, err, want)
+	}
+	if ips, err := redirectRelayIPs(t.Context(), "192.0.2.123", "invalid relay address"); err == nil || len(ips) != 0 {
+		t.Fatalf("partial Relay resolution = %v, %v", ips, err)
 	}
 }
 

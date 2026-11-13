@@ -31,7 +31,8 @@ func (r *RuleRepository) Create(rule *model.GostRule) error {
 
 // Update 更新规则
 func (r *RuleRepository) Update(rule *model.GostRule) error {
-	return r.DB.Save(rule).Error
+	return r.DB.Omit("relay_counter_id", "relay_input_bytes", "relay_output_bytes",
+		"relay_last_input_bytes", "relay_last_output_bytes", "relay_service_created_at").Save(rule).Error
 }
 
 // Delete 删除规则
@@ -100,7 +101,7 @@ func (r *RuleRepository) FindByTunnelID(tunnelID uint) ([]model.GostRule, error)
 func (r *RuleRepository) EntranceBindings(ruleIDs []uint) ([]model.GostTunnel, error) {
 	var tunnels []model.GostTunnel
 	err := r.DB.Select("id", "entry_rule_id", "exit_rule_id", "status").
-		Where("entry_rule_id IN ? OR exit_rule_id IN ?", ruleIDs, ruleIDs).Find(&tunnels).Error
+		Where("entry_rule_id IN ? OR exit_rule_id IN ?", ruleIDs, ruleIDs).Order("id").Find(&tunnels).Error
 	return tunnels, err
 }
 
