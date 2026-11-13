@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"yagp/internal/model"
@@ -67,13 +68,24 @@ func (r *TunnelTestResult) checkExitRelay(tunnel *model.GostTunnel, relay gost.S
 		r.record("exit_relay", "warning", "出口 Relay 的配置存在，但 Gost 未提供可确认的运行状态。")
 	}
 
+	var whitelistEntries []string
+	whitelistEnabled := false
 	for _, admission := range admissions {
 		if admission.Whitelist && relay.HasAdmission(admission.Name) {
-			r.record("relay_policy", "warning", "出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。")
-			if r.FailureStage == "relay_round_trip" {
-				r.Recommendation = "请先核对出口实际看到的入口源 IP 是否在 Relay 白名单内，再核对两端的协议与认证设置。"
-			}
-			break
+			whitelistEnabled = true
+			whitelistEntries = append(whitelistEntries, admission.Matchers...)
+		}
+	}
+	if whitelistEnabled {
+		message := "出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。"
+		if len(whitelistEntries) == 0 {
+			message += "当前配置未列出白名单条目。"
+		} else {
+			message += "当前配置的白名单条目：" + strings.Join(whitelistEntries, "、") + "。"
+		}
+		r.record("relay_policy", "warning", message)
+		if r.FailureStage == "relay_round_trip" {
+			r.Recommendation = "请先核对出口实际看到的入口源 IP 是否在 Relay 白名单内，再核对两端的协议与认证设置。"
 		}
 	}
 	if tunnel.ExitNode.TrafficQuotaState == model.TrafficQuotaBlocked {
