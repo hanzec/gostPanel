@@ -33,6 +33,13 @@ func run(ctx context.Context, args []string) error {
 		case "--runtime-layout-version":
 			_, err := fmt.Fprintln(os.Stdout, nodebridge.RuntimeLayoutVersion)
 			return err
+		case "--node-id":
+			config, err := readConfig(parseConfigFlag(args[0], args[1:]))
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(os.Stdout, config.NodeID)
+			return err
 		case "enroll":
 			return enroll(ctx, args[1:])
 		case "prepare-gost":

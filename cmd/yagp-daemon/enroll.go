@@ -20,8 +20,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const nodeStateDir = "/etc/yagp-daemon"
-
 func enroll(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("enroll", flag.ExitOnError)
 	host := flags.String("host", "", "panel DNS name or IP address")
@@ -39,7 +37,7 @@ func enroll(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read registration token: %w", err)
 	}
-	nodeID, err := registerNode(ctx, *host, strings.TrimSpace(string(token)), nodeStateDir, *output, *existing, nodebridge.DetectPublicIPs)
+	nodeID, err := registerNode(ctx, *host, strings.TrimSpace(string(token)), nodebridge.DefaultNodeStateDir, *output, *existing, nodebridge.DetectPublicIPs)
 	if err != nil {
 		return err
 	}
@@ -120,11 +118,12 @@ func enrollmentConfig(stateDir, existing string, id uint64) (nodebridge.Config, 
 		}
 		return cfg, nil
 	}
-	basePath := filepath.Join(stateDir, strconv.FormatUint(id, 10))
-	if _, err := os.Lstat(basePath); err == nil {
-		return nodebridge.Config{}, fmt.Errorf("existing node directory %s; use --existing to re-enroll", basePath)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nodebridge.Config{}, err
+	for _, path := range []string{filepath.Join(stateDir, "node.yaml"), filepath.Join(stateDir, strconv.FormatUint(id, 10))} {
+		if _, err := os.Lstat(path); err == nil {
+			return nodebridge.Config{}, fmt.Errorf("existing node files at %s; use --existing to re-enroll", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nodebridge.Config{}, err
+		}
 	}
 	return nodebridge.Config{NodeID: id}, nil
 }

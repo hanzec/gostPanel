@@ -90,6 +90,15 @@ func TestTransparentIngressSelectedRulesAndDomainsUseDedicatedPolicy(t *testing.
 			t.Fatalf("selected matchers did not reach the dedicated policy: %+v", bypass)
 		}
 	}
+	exitRelay := f.exitNode.service(relayServiceName(f.tunnel.ID))
+	if exitRelay.Bypass != policyName {
+		t.Fatalf("exit Relay does not enforce the selected rules: %+v", exitRelay)
+	}
+	var exitBypass gost.AdmissionConfig
+	f.exitNode.read("/config/bypasses/"+exitRelay.Bypass, &exitBypass)
+	if !exitBypass.Whitelist || !slices.Equal(exitBypass.Matchers, bypass.Matchers) {
+		t.Fatalf("exit rules = %+v, want %+v", exitBypass, bypass)
+	}
 	var chain struct{ Hops []struct{ Bypass string } }
 	f.entryNode.read("/config/chains/"+clashTunnelChainName(f.tunnel.ID), &chain)
 	if chain.Hops[0].Bypass != policyName || f.entryNode.service(entranceServiceName(f.source.ID)).Handler.Metadata["sniffing"] != true ||
@@ -101,8 +110,10 @@ func TestTransparentIngressSelectedRulesAndDomainsUseDedicatedPolicy(t *testing.
 	requireServiceError(t, f.db.Model(&updated).Select("Matchers").Updates(&updated).Error, nil)
 	NewGostRulesetService(f.db).sync(t.Context(), map[uint]bool{})
 	f.entryNode.read("/config/bypasses/"+policyName, &bypass)
-	if !slices.Contains(bypass.Matchers, ".updated.test") || slices.Contains(bypass.Matchers, ".one.test") {
-		t.Fatalf("selected policy was not refreshed: %+v", bypass)
+	f.exitNode.read("/config/bypasses/"+policyName, &exitBypass)
+	if !slices.Contains(bypass.Matchers, ".updated.test") || slices.Contains(bypass.Matchers, ".one.test") ||
+		!slices.Equal(exitBypass.Matchers, bypass.Matchers) {
+		t.Fatalf("selected policy was not refreshed on both nodes: entry %+v, exit %+v", bypass, exitBypass)
 	}
 	// A cleanup failure must remain retryable without discarding the binding.
 	f.entryNode.mu.Lock()
@@ -120,6 +131,10 @@ func TestTransparentIngressSelectedRulesAndDomainsUseDedicatedPolicy(t *testing.
 	f.entryNode.read("/config/bypasses/"+policyName, &removed)
 	if removed.Name != "" {
 		t.Fatal("stopped tunnel retained its private policy")
+	}
+	f.exitNode.read("/config/bypasses/"+policyName, &removed)
+	if removed.Name != "" {
+		t.Fatal("stopped tunnel retained its exit policy")
 	}
 	_, err = rules.Update(f.destination.ID, &dto.UpdateRuleReq{Name: "all targets", Protocol: "tcp", ListenPort: f.destination.ListenPort,
 		RulesetIDs: []uint{}, ManualDomains: []string{}}, testAdmin, testIP, testAgent)

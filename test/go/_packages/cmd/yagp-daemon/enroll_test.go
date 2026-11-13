@@ -247,8 +247,16 @@ func TestRegisterNodeRejectsInvalidInputAndPanelReply(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(installed, "42"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registerNode(ctx, enrollmentTestHost, token, installed, output, "", detect); err == nil || !strings.Contains(err.Error(), "existing node directory") {
+	if _, err := registerNode(ctx, enrollmentTestHost, token, installed, output, "", detect); err == nil || !strings.Contains(err.Error(), "existing node files") {
 		t.Fatalf("existing node: %v", err)
+	}
+	flat := t.TempDir()
+	config := filepath.Join(flat, "node.yaml")
+	if err := os.WriteFile(config, []byte("node_id: 7\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registerNode(ctx, enrollmentTestHost, token, flat, output, "", detect); err == nil || !strings.Contains(err.Error(), config) {
+		t.Fatalf("existing flat node: %v", err)
 	}
 	for _, test := range []struct {
 		name     string

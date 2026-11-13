@@ -127,7 +127,21 @@ func TestUpgradeSystemdWorkerRPC(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("YAGP_UPGRADE_TEST_CALLS", callLog)
 	writeUpgradeFixture(t, filepath.Join(bin, "systemd-run"), `#!/bin/sh
+if [ "$1" = --version ]; then
+  printf 'systemd %s\n' "$YAGP_UPGRADE_TEST_SYSTEMD_VERSION"
+  exit 0
+fi
 printf '%s\n' "$@" > "$YAGP_UPGRADE_TEST_CALLS"
+if [ "$YAGP_UPGRADE_TEST_SYSTEMD_VERSION" = 239 ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      --working-directory=*|--property=Type=exec)
+        echo "unsupported option $arg" >&2
+        exit 1
+        ;;
+    esac
+  done
+fi
 if [ "$YAGP_UPGRADE_TEST_FAILURE" = fail ]; then
   echo 'worker launch failed' >&2
   exit 1
@@ -149,19 +163,29 @@ esac
 	control := controlServer{config: cfg}
 	ctx := t.Context()
 	request := &nodegrpc.NodeUpgradeRequest{Component: "gost", Version: "v3.3.3"}
-	state, err := control.StartUpgrade(ctx, request)
-	if err != nil || !state.GetSupported() || state.GetState() != "queued" || state.GetTargetVersion() != "v3.3.3" {
-		t.Fatalf("launch status = %v, %v", state, err)
+	for _, version := range []string{"239", "259~rc1"} {
+		t.Run(version, func(t *testing.T) {
+			t.Setenv("YAGP_UPGRADE_TEST_SYSTEMD_VERSION", version)
+			state, err := control.StartUpgrade(ctx, request)
+			if err != nil || !state.GetSupported() || state.GetState() != "queued" || state.GetTargetVersion() != "v3.3.3" {
+				t.Fatalf("launch status = %v, %v", state, err)
+			}
+			args, err := os.ReadFile(callLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantArgs := []string{"--unit=yagp-upgrade-42.service", "--collect", "--property=WorkingDirectory=" + dir}
+			if version != "239" {
+				wantArgs = append(wantArgs, "--property=Type=exec")
+			}
+			wantArgs = append(wantArgs, "--", filepath.Join(dir, "yagp-daemon"), "upgrade-component", "-c", path,
+				"--component", "gost", "--tag", "v3.3.3")
+			if got := strings.Split(strings.TrimSpace(string(args)), "\n"); !slices.Equal(got, wantArgs) {
+				t.Fatalf("worker arguments = %v, want %v", got, wantArgs)
+			}
+		})
 	}
-	args, err := os.ReadFile(callLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantArgs := []string{"--unit=yagp-upgrade-42.service", "--collect", "--property=Type=exec", "--working-directory=" + dir,
-		"--", filepath.Join(dir, "yagp-daemon"), "upgrade-component", "-c", path, "--component", "gost", "--tag", "v3.3.3"}
-	if got := strings.Split(strings.TrimSpace(string(args)), "\n"); !slices.Equal(got, wantArgs) {
-		t.Fatalf("worker arguments = %v, want %v", got, wantArgs)
-	}
+	t.Setenv("YAGP_UPGRADE_TEST_SYSTEMD_VERSION", "239")
 	t.Setenv("YAGP_UPGRADE_TEST_FAILURE", "fail")
 	if _, err := control.StartUpgrade(ctx, request); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("failed systemd-run returned %v", err)
@@ -172,7 +196,7 @@ esac
 	if err := writeUpgradeStatus(dir, stale); err != nil {
 		t.Fatal(err)
 	}
-	state, err = control.GetUpgradeStatus(ctx, &emptypb.Empty{})
+	state, err := control.GetUpgradeStatus(ctx, &emptypb.Empty{})
 	if err != nil || state.GetState() != "failed" || state.GetError() != "upgrade worker stopped before reporting its result" ||
 		state.GetGostVersion() != "v3.3.2" {
 		t.Fatalf("orphan worker status = %v, %v", state, err)

@@ -39,6 +39,7 @@ while (($#)); do
 done
 
 state_dir=/etc/yagp-daemon
+flat_layout_version=3
 
 if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
     manager=systemd
@@ -56,6 +57,15 @@ if [[ "$action" != install ]]; then
     nft_table="yagp_node_$node_id"
     quota_table="yagp_quota_$node_id"
     redirect_table="yagp_redirect_$node_id"
+    if [[ -x "$state_dir/yagp-daemon" && -f "$state_dir/node.yaml" ]]; then
+        installed_id=$("$state_dir/yagp-daemon" --node-id -c "$state_dir/node.yaml") ||
+            die "无法读取已安装节点的 ID: $state_dir/node.yaml"
+        [[ "$installed_id" == "$node_id" ]] || die "已安装节点的 ID 为 $installed_id"
+        base_path=$state_dir
+    elif [[ "$action" == uninstall && -f "$state_dir/node.yaml" && ! -x "$base_path/yagp-daemon" ]]; then
+        printf '节点服务已卸载，配置位于 %s\n' "$state_dir"
+        exit 0
+    fi
     if [[ -x "$base_path/yagp-daemon" && -f "$base_path/.runtime-layout" ]] &&
         [[ $(cat "$base_path/.runtime-layout") =~ ^[1-9][0-9]*$ ]]; then
         nft_table=yagp_node
@@ -97,6 +107,9 @@ if [[ "$action" == uninstall ]]; then
     exit 0
 fi
 
+if [[ "$action" == install && ( -e "$state_dir/yagp-daemon" || -e "$state_dir/node.yaml" ) ]]; then
+    die "节点文件已存在于 $state_dir，请先检查现有安装。"
+fi
 for installed in "$state_dir"/*/yagp-daemon; do
     [[ -f "$installed" ]] || continue
     installed_dir=${installed%/*}
@@ -106,9 +119,15 @@ for installed in "$state_dir"/*/yagp-daemon; do
     fi
 done
 
+service_load_state() {
+    local state
+    state=$(systemctl show --property=LoadState "$1.service" 2>/dev/null || true)
+    printf '%s\n' "${state#LoadState=}"
+}
+
 if [[ "$action" == install && "$manager" == systemd ]]; then
     for unit in yagp-daemon yagp-gost; do
-        [[ $(systemctl show --property=LoadState --value "$unit.service" 2>/dev/null || true) == not-found ]] ||
+        [[ $(service_load_state "$unit") == not-found ]] ||
             die "已有服务 $unit.service，请先检查该服务。"
     done
 fi
@@ -118,7 +137,7 @@ if [[ "$action" == upgrade || "$action" == reenroll ]]; then
         die '请通过 YAGP_DAEMON_VERSION 指定当前面板的版本标签，或通过 YAGP_DAEMON_BIN 指定对应的二进制。'
     [[ -f "$base_path/node.yaml" && -x "$base_path/yagp-daemon" ]] || die "未找到已安装的节点 $node_id"
     if [[ "$manager" == systemd ]]; then
-        [[ $(systemctl show --property=LoadState --value "$bridge_unit.service") == loaded ]] || die "未找到服务 $bridge_unit.service"
+        [[ $(service_load_state "$bridge_unit") == loaded ]] || die "未找到服务 $bridge_unit.service"
     else
         [[ "$action" == reenroll ]] || die "在线升级功能需要 systemd 节点"
         [[ -x "/etc/init.d/$bridge_unit" ]] || die "未找到服务 $bridge_unit"
@@ -152,6 +171,83 @@ bridge_service() {
         rc-service "$bridge_unit" "$1"
     fi
 }
+
+supports_flat_layout() {
+    [[ "$runtime_layout" =~ ^[1-9][0-9]*$ ]] && (( runtime_layout >= flat_layout_version ))
+}
+
+move_node_files() (
+    local from=$1 to=$2 source name
+    local -a moved=()
+    shopt -s dotglob nullglob
+    for source in "$from"/*; do
+        name=${source##*/}
+        [[ ! -e "$to/$name" && ! -L "$to/$name" ]] || return 1
+    done
+    for source in "$from"/*; do
+        name=${source##*/}
+        if ! mv -nT -- "$source" "$to/$name" || [[ -e "$source" || -L "$source" ]]; then
+            for name in "${moved[@]}"; do
+                mv -T -- "$to/$name" "$from/$name"
+            done
+            return 1
+        fi
+        moved+=("$name")
+    done
+)
+
+migrate_openrc_layout() (
+    local source=$base_path file target
+    local -a paths=( "$source/node.yaml" "$source/gost.yaml" "/etc/init.d/$bridge_unit" "/etc/init.d/$gost_unit" )
+    local -a moved=()
+    local gost_running=false
+    local migrated=false
+    if rc-service "$gost_unit" status >/dev/null 2>&1; then gost_running=true; fi
+    for file in "${paths[@]}"; do
+        cp -p -- "$file" "$tmp_dir/${file##*/}"
+    done
+    restore_layout() {
+        local result=$? file
+        if (( result == 0 )); then return; fi
+        if [[ "$migrated" == true ]]; then
+            bridge_service stop || true
+            rc-service "$gost_unit" stop || true
+            for file in "${moved[@]}"; do
+                mv -T -- "$state_dir/$file" "$source/$file"
+            done
+            for file in "${paths[@]}"; do
+                cp -p -- "$tmp_dir/${file##*/}" "$file"
+            done
+            if [[ -f "$tmp_dir/openrc-runtime-layout" ]]; then
+                cp -p -- "$tmp_dir/openrc-runtime-layout" "$source/.runtime-layout"
+            else
+                rm -f -- "$state_dir/.runtime-layout"
+            fi
+        fi
+        if [[ "$gost_running" == true ]]; then rc-service "$gost_unit" start || true; fi
+    }
+    trap restore_layout EXIT
+    if [[ -f "$source/.runtime-layout" ]]; then
+        cp -p -- "$source/.runtime-layout" "$tmp_dir/openrc-runtime-layout"
+    fi
+    rc-service "$gost_unit" stop
+    shopt -s dotglob nullglob
+    for file in "$source"/*; do
+        moved+=("${file##*/}")
+    done
+    move_node_files "$source" "$state_dir" || die "无法迁移 $source 中的节点文件，请检查目标目录是否有同名文件"
+    migrated=true
+    for file in "${paths[@]}"; do
+        target=$file
+        if [[ "$file" == "$source/"* ]]; then target="$state_dir/${file##*/}"; fi
+        sed -e "s|$source/|$state_dir/|g" -e "s|\"$source\"|\"$state_dir\"|g" "$tmp_dir/${file##*/}" > "$target"
+    done
+    printf '%s\n' "$runtime_layout" > "$state_dir/.runtime-layout"
+    rc-service "$gost_unit" start || die "无法启动迁移后的服务 $gost_unit"
+    bridge_service start || die "无法启动迁移后的服务 $bridge_unit"
+    rmdir -- "$source"
+)
+
 cleanup() {
     local result=$?
     if (( result != 0 )) && [[ "$restore_bridge" == true ]] && ! bridge_service start; then
@@ -196,10 +292,16 @@ fi
 if [[ "$action" == upgrade ]]; then
     candidate="$tmp_dir/yagp-daemon"
     install -m 0700 -- "$bridge_bin" "$candidate"
-    upgrade_unit="yagp-upgrade-$node_id.service"
-    if ! systemd-run --wait --collect --unit="$upgrade_unit" --property=Type=exec \
-        --working-directory="$base_path" -- "$candidate" --upgrade-installed -c "$base_path/node.yaml" --node-id "$node_id"; then
-        die "升级失败，请查看日志: journalctl -u $upgrade_unit"
+    upgrade_args=( --upgrade-installed -c "$base_path/node.yaml" --node-id "$node_id" )
+    run_options=$(systemd-run --help 2>/dev/null || true)
+    if [[ "$run_options" == *--wait* && "$run_options" == *--collect* ]]; then
+        upgrade_unit="yagp-upgrade-$node_id.service"
+        if ! systemd-run --wait --collect --unit="$upgrade_unit" --property="WorkingDirectory=$base_path" \
+            -- "$candidate" "${upgrade_args[@]}"; then
+            die "升级失败，请查看日志: journalctl -u $upgrade_unit"
+        fi
+    elif ! (cd -- "$base_path" && "$candidate" "${upgrade_args[@]}"); then
+        die "升级失败，请检查上面的日志。"
     fi
     printf '节点 %s 的 yagp-daemon 已就绪，可在面板管理后续升级。\n' "$node_id"
     exit 0
@@ -211,6 +313,9 @@ if [[ "$action" == reenroll ]]; then
     runtime_layout=$("$candidate" --runtime-layout-version 2>/dev/null || true)
     if [[ -f "$base_path/.runtime-layout" && ! "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
         die '该节点使用新版运行布局，请选择支持当前布局的 yagp-daemon。'
+    fi
+    if [[ "$base_path" == "$state_dir" ]] && ! supports_flat_layout; then
+        die '该节点已迁移到新目录，请选择支持当前目录的 yagp-daemon。'
     fi
     if [[ "$manager" == systemd ]]; then
         if systemctl is-active --quiet "$bridge_unit.service"; then restore_bridge=true; fi
@@ -227,15 +332,20 @@ if [[ "$action" == reenroll ]]; then
     mv -fT -- "$candidate" "$base_path/yagp-daemon" || die "节点已重新注册，但未能替换守护进程"
     if [[ "$manager" == systemd && "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
         "$base_path/yagp-daemon" update-runtime -c "$base_path/node.yaml" || die '节点已重新注册。服务迁移失败，请检查上面的日志。'
-    fi
-    if [[ "$manager" == openrc && "$runtime_layout" =~ ^[1-9][0-9]*$ && ! -f "$base_path/.runtime-layout" ]]; then
-        printf '%s\n' "$runtime_layout" > "$base_path/.runtime-layout"
-        if ! bridge_service start; then
-            if [[ "$manager" == systemd ]]; then
-                die "节点已重新注册。服务启动失败，请查看日志: journalctl -u $bridge_unit"
-            fi
-            die "节点已重新注册。服务启动失败，请检查 $bridge_unit"
+        if [[ -f "$state_dir/node.yaml" ]]; then
+            base_path=$state_dir
         fi
+        if [[ -f "$base_path/.runtime-layout" ]]; then
+            bridge_unit=yagp-daemon
+        fi
+    fi
+    if [[ "$manager" == openrc ]] && supports_flat_layout && [[ "$base_path" != "$state_dir" ]]; then
+        migrate_openrc_layout
+    else
+        if [[ "$manager" == openrc && "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
+            printf '%s\n' "$runtime_layout" > "$base_path/.runtime-layout"
+        fi
+        bridge_service start || die "节点已重新注册。服务启动失败，请检查 $bridge_unit"
     fi
     restore_bridge=false
     printf '节点 %s 已重新注册，面板地址 %s\n' "$node_id" "$panel_host"
@@ -245,6 +355,13 @@ fi
 mkdir -- "$stage"
 install -m 0700 -- "$bridge_bin" "$stage/yagp-daemon"
 runtime_layout=$("$stage/yagp-daemon" --runtime-layout-version 2>/dev/null || true)
+if supports_flat_layout; then
+    base_path=$state_dir
+    for name in yagp-daemon gost node.yaml gost.yaml panel-credentials.yaml .runtime-layout LICENSE; do
+        [[ ! -e "$base_path/$name" && ! -L "$base_path/$name" ]] ||
+            die "节点文件已存在: $base_path/$name"
+    done
+fi
 if [[ -f "$tmp_dir/bridge/LICENSE" ]]; then
     install -m 0600 -- "$tmp_dir/bridge/LICENSE" "$stage/LICENSE"
 fi
@@ -257,11 +374,16 @@ if ! node_id=$(printf '%s' "$token" | "$stage/yagp-daemon" enroll --host "$panel
 fi
 unset token
 [[ "$node_id" =~ ^[1-9][0-9]{0,17}$ ]] || die "yagp-daemon 未返回有效的节点 ID"
-base_path="$state_dir/$node_id"
 gost_unit="yagp-gost-$node_id"
 bridge_unit="yagp-daemon-$node_id"
-mv -T -n -- "$stage" "$base_path"
-[[ ! -e "$stage" ]] || die "节点安装目录已存在: $base_path"
+if supports_flat_layout; then
+    move_node_files "$stage" "$base_path" || die "无法将注册文件写入 $base_path"
+    rmdir -- "$stage"
+else
+    base_path="$state_dir/$node_id"
+    mv -T -n -- "$stage" "$base_path"
+    [[ ! -e "$stage" ]] || die "节点安装目录已存在: $base_path"
+fi
 
 if [[ "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
     if [[ "$manager" == systemd ]]; then

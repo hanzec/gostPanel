@@ -351,6 +351,13 @@ func (s *TunnelService) provisionEndpointRelay(t *model.GostTunnel, entryClient,
 	}
 	if len(peers) != 0 {
 		t.ServiceID, relay.Name = peers[0].ServiceID, peers[0].ServiceID
+	}
+	source := endpointTargetRule(t)
+	relay.Bypass, err = NewRuleService(s.tunnelRepo.DB).prepareTransparentBypass(exitClient, relayPolicyName(relay.Name), &source)
+	if err != nil {
+		return err
+	}
+	if len(peers) != 0 {
 		if err := s.configureSharedRelay(exitClient, relay, append(peers, t)); err != nil {
 			return err
 		}
@@ -479,8 +486,15 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 	if transparent {
 		cleanupErr = stderrors.Join(cleanupErr, entryClient.DeleteChain(sharedTransparentChainName(t.ID)))
 	}
-	if len(source.RulesetIDs) != 0 || len(source.ManualDomains) != 0 {
+	if hasSelectedRules(&source) {
 		cleanupErr = stderrors.Join(cleanupErr, entryClient.DeleteNamedTransparentBypass(transparentPolicyName(t.ID)))
+		if len(exitPeers) == 0 {
+			name := t.ServiceID
+			if name == "" {
+				name = relayServiceName(t.ID)
+			}
+			cleanupErr = stderrors.Join(cleanupErr, exitClient.DeleteNamedTransparentBypass(relayPolicyName(name)))
+		}
 	}
 	if err := cleanupErr; err != nil {
 		return err

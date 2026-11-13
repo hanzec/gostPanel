@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"yagp/internal/errors"
 	"yagp/internal/model"
@@ -32,13 +33,21 @@ func transparentPolicyName(id uint) string {
 	return fmt.Sprintf("tunnel-%d-bypass", id)
 }
 
+func relayPolicyName(serviceID string) string {
+	return strings.TrimPrefix(serviceID, "relay-") + "-bypass"
+}
+
+func hasSelectedRules(rule *model.GostRule) bool {
+	return len(rule.RulesetIDs) != 0 || len(rule.ManualDomains) != 0
+}
+
 func transparentFiltering(rule *model.GostRule) bool {
-	return rule.UseClashRuleset || len(rule.RulesetIDs) != 0 || len(rule.ManualDomains) != 0
+	return rule.UseClashRuleset || hasSelectedRules(rule)
 }
 
 func (s *RuleService) prepareTransparentChain(client *gost.Client, tunnel *model.GostTunnel, rule *model.GostRule, mark uint32) (string, error) {
 	name := clashTunnelChainName(tunnel.ID)
-	bypass, err := s.prepareTransparentBypass(client, tunnel, rule)
+	bypass, err := s.prepareTransparentBypass(client, transparentPolicyName(tunnel.ID), rule)
 	if err != nil {
 		return "", err
 	}
@@ -49,9 +58,9 @@ func (s *RuleService) prepareTransparentChain(client *gost.Client, tunnel *model
 	return name, nil
 }
 
-func (s *RuleService) prepareTransparentBypass(client *gost.Client, tunnel *model.GostTunnel, rule *model.GostRule) (string, error) {
+func (s *RuleService) prepareTransparentBypass(client *gost.Client, name string, rule *model.GostRule) (string, error) {
 	bypass := ""
-	if len(rule.RulesetIDs) != 0 || len(rule.ManualDomains) != 0 {
+	if hasSelectedRules(rule) {
 		matchers, err := s.rulesetService.SelectedMatchers(context.Background(), rule.RulesetIDs, rule.ManualDomains)
 		if err != nil {
 			return "", err
@@ -59,7 +68,7 @@ func (s *RuleService) prepareTransparentBypass(client *gost.Client, tunnel *mode
 		if len(matchers) == 0 {
 			return "", errors.ErrRuleClashUnavailable
 		}
-		bypass = transparentPolicyName(tunnel.ID)
+		bypass = name
 		if _, err := client.SetNamedTransparentBypass(bypass, matchers); err != nil {
 			return "", errors.ErrRuleChainCreateFailed
 		}

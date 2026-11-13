@@ -94,6 +94,63 @@ func TestUpgradeRejectsInvalidAndUnsupportedRequests(t *testing.T) {
 	}
 }
 
+func TestUpgradeStatusFollowsWorkerAcrossLayoutMigration(t *testing.T) {
+	dir := t.TempDir()
+	legacyDir := filepath.Join(dir, "42")
+	if err := os.Mkdir(legacyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	write := func(dir string, operation UpgradeStatus, modified time.Time) {
+		t.Helper()
+		if err := writeUpgradeStatus(dir, operation); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(filepath.Join(dir, upgradeStatusFile), modified, modified); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertCurrent := func(want UpgradeStatus) {
+		t.Helper()
+		if got, err := readCurrentUpgradeOperation(dir, legacyDir); err != nil || got != want {
+			t.Fatalf("upgrade status = %+v, %v, want %+v", got, err, want)
+		}
+	}
+	running := UpgradeStatus{Component: "daemon", Tag: "0.1.100-abcdef1", State: "running"}
+	write(dir, running, now)
+	assertCurrent(running)
+	write(legacyDir, running, now)
+	assertCurrent(running)
+	if _, err := os.Stat(filepath.Join(legacyDir, upgradeStatusFile)); err != nil {
+		t.Fatalf("running legacy status was removed: %v", err)
+	}
+	completed := running
+	completed.State = "succeeded"
+	write(legacyDir, completed, now.Add(time.Second))
+	assertCurrent(completed)
+	if _, err := os.Stat(legacyDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy directory was not removed: %v", err)
+	}
+	if got, err := readUpgradeStatusFile(filepath.Join(dir, legacyUpgradeStatusFile)); err != nil || got != completed {
+		t.Fatalf("archived status = %+v, %v", got, err)
+	}
+	next := UpgradeStatus{Component: "gost", Tag: "v3.3.3", State: "running"}
+	write(dir, next, now.Add(2*time.Second))
+	assertCurrent(next)
+	if err := os.Mkdir(legacyDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(legacyDir, "operator-backup")
+	if err := os.WriteFile(keep, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	write(legacyDir, completed, now.Add(time.Second))
+	assertCurrent(next)
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("unrelated old directory content was removed: %v", err)
+	}
+}
+
 func TestUpgradeStagingRejectsUnusableExecutable(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "staged")

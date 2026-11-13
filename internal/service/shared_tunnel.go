@@ -35,7 +35,7 @@ func (s *TunnelService) configureSharedRelay(client *gost.Client, relay *gost.Se
 	if err != nil {
 		return err
 	}
-	if current != nil && current.Handler != nil && current.Handler.Auther == relay.Name {
+	if current != nil && current.Handler != nil && current.Handler.Auther == relay.Name && current.Bypass == relay.Bypass {
 		return nil
 	}
 	address, err := client.ObserverAddress()
@@ -53,15 +53,13 @@ func (s *TunnelService) configureSharedRelay(client *gost.Client, relay *gost.Se
 func (s *GostAllowlistService) writeSharedRelayPolicy(client *gost.Client, name string, tunnels []*model.GostTunnel) error {
 	policy := nodegrpc.RelayAuthConfig{Users: make([]nodegrpc.RelayAuthUser, 0, len(tunnels))}
 	for _, tunnel := range tunnels {
-		admission, err := s.relayAdmission(tunnel)
+		addresses, restrict, err := s.relaySources(tunnel)
 		if err != nil {
 			return err
 		}
-		user := nodegrpc.RelayAuthUser{Username: relayServiceName(tunnel.ID), Password: tunnel.RelaySecret}
-		if admission != nil && admission.Whitelist {
-			user.RestrictSources, user.AllowedIPs = true, admission.Matchers
-		} else if tunnel.AutoAllowlist && admission == nil {
-			user.RestrictSources = true
+		user := nodegrpc.RelayAuthUser{
+			Username: relayServiceName(tunnel.ID), Password: tunnel.RelaySecret,
+			RestrictSources: restrict, AllowedIPs: addresses,
 		}
 		policy.Users = append(policy.Users, user)
 	}
@@ -109,7 +107,7 @@ func (s *TunnelService) applySharedIngress(client *gost.Client, t *model.GostTun
 	rules := NewRuleService(s.tunnelRepo.DB)
 	for _, tunnel := range tunnels {
 		source := endpointTargetRule(tunnel)
-		if _, err := rules.prepareTransparentBypass(client, tunnel, &source); err != nil {
+		if _, err := rules.prepareTransparentBypass(client, transparentPolicyName(tunnel.ID), &source); err != nil {
 			return err
 		}
 	}
@@ -119,8 +117,7 @@ func (s *TunnelService) applySharedIngress(client *gost.Client, t *model.GostTun
 func (s *TunnelService) applySharedTransparentIngress(client *gost.Client, endpoint *model.GostRule, tunnels []*model.GostTunnel, redirect *nodegrpc.TransparentRedirectRequest) error {
 	group, sniff := sharedTransparentGroup(tunnels)
 	for _, tunnel := range tunnels {
-		// The group evaluates the policy. The marked route must still reach its Relay
-		// when selected by the unmatched-traffic fallback.
+		// The group evaluates the policy before selecting the marked route.
 		if err := client.EnsureMarkedTransparentChain(tunnel.ChainID, sharedTransparentChainName(tunnel.ID), redirect.GetMark(), ""); err != nil {
 			return err
 		}
@@ -158,7 +155,7 @@ func sharedTransparentGroup(tunnels []*model.GostTunnel) (*gost.ChainGroupConfig
 		entry := gost.ChainGroupEntry{Chain: sharedTransparentChainName(tunnel.ID)}
 		if transparentFiltering(&source) {
 			name := transparentPolicyName(tunnel.ID)
-			if source.UseClashRuleset && len(source.RulesetIDs) == 0 && len(source.ManualDomains) == 0 {
+			if source.UseClashRuleset && !hasSelectedRules(&source) {
 				name = gost.TransparentBypassName
 			}
 			rule := fmt.Sprintf("Bypass(%q)", name)
@@ -172,11 +169,6 @@ func sharedTransparentGroup(tunnels []*model.GostTunnel) (*gost.ChainGroupConfig
 		for i, entry := range group.Chains {
 			if entry.Matcher == nil {
 				group.Chains[i].Matcher = fallback
-			}
-		}
-		if len(matches) == len(tunnels) && len(tunnels) > 1 {
-			for _, tunnel := range tunnels {
-				group.Chains = append(group.Chains, gost.ChainGroupEntry{Chain: sharedTransparentChainName(tunnel.ID), Matcher: fallback})
 			}
 		}
 	}

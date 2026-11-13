@@ -1,6 +1,7 @@
 package nodebridge
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,7 +66,7 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 				return
 			}
 			cfg.RuntimeLayout = ReadRuntimeLayout(configPath)
-			if err != nil || cfg.RuntimeLayout != RuntimeLayoutVersion || !strings.Contains(string(log), "disable --now yagp-daemon-42.service yagp-gost-42.service") {
+			if err != nil || cfg.RuntimeLayout != networkOrderLayoutVersion || !strings.Contains(string(log), "disable --now yagp-daemon-42.service yagp-gost-42.service") {
 				t.Fatalf("migration did not replace the legacy units: %v\n%s", err, log)
 			}
 			if _, err := os.Stat(filepath.Join(unitDir, "yagp-daemon-42.service")); !os.IsNotExist(err) {
@@ -130,7 +131,7 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if (err != nil) != fail {
 				t.Fatalf("update systemd network order: %v, want failure %t", err, fail)
 			}
-			wantVersion := RuntimeLayoutVersion
+			wantVersion := networkOrderLayoutVersion
 			if fail {
 				wantVersion = singleNodeLayoutVersion
 			} else {
@@ -158,6 +159,97 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 				t.Fatalf("systemctl commands = %q, %v, want %q", log, err, want)
 			}
 		})
+	}
+}
+
+func TestMigrateFlatSystemdRuntime(t *testing.T) {
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(admin.Close)
+	for _, test := range []struct {
+		name           string
+		version        int
+		fail, conflict bool
+	}{
+		{name: "from numbered units"},
+		{name: "from fixed units", version: networkOrderLayoutVersion},
+		{name: "rollback", version: networkOrderLayoutVersion, fail: true},
+		{name: "conflict", version: networkOrderLayoutVersion, conflict: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			unitDir, newDir := t.TempDir(), t.TempDir()
+			oldDir := filepath.Join(newDir, "42")
+			if err := os.Mkdir(oldDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			oldConfig, newConfig := filepath.Join(oldDir, "node.yaml"), filepath.Join(newDir, "node.yaml")
+			originalConfig := fmt.Sprintf("report_ca_file: %s/panel-ca.pem\n", oldDir)
+			writeRuntimeTestFile(t, oldConfig, originalConfig)
+			writeRuntimeTestFile(t, filepath.Join(oldDir, "gost.yaml"), "tls:\n  keyFile: "+oldDir+"/relay.key\n")
+			for _, name := range []string{"panel-ca.pem", "relay.key", "yagp-daemon", "gost", "nft.json", PanelCredentialsFile} {
+				writeRuntimeTestFile(t, filepath.Join(oldDir, name), name)
+			}
+			if test.version != 0 {
+				writeRuntimeTestFile(t, filepath.Join(oldDir, runtimeLayoutFile), fmt.Sprintln(test.version))
+			}
+			if test.conflict {
+				writeRuntimeTestFile(t, filepath.Join(newDir, "nft.json"), "keep this")
+			}
+			logPath := filepath.Join(unitDir, "commands")
+			t.Setenv("PATH", unitDir)
+			t.Setenv("TEST_SYSTEMCTL_LOG", logPath)
+			if test.fail {
+				t.Setenv("TEST_SYSTEMCTL_FAILURE", "daemon-reload")
+			}
+			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
+printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
+test "$*" != "$TEST_SYSTEMCTL_FAILURE"
+`)
+			address := strings.TrimPrefix(admin.URL, "http://")
+			cfg := Config{NodeID: 42, RuntimeLayout: test.version, AdminAddress: address, ObserverListen: address}
+			units := []string{cfg.runtimeUnit("daemon"), cfg.runtimeUnit("gost")}
+			originalUnits := runtimeUnitDefinitions(oldDir, oldConfig)
+			for i, unit := range units {
+				writeRuntimeTestFile(t, filepath.Join(unitDir, unit), originalUnits[i])
+			}
+			err := migrateFlatSystemdRuntime(t.Context(), cfg, oldConfig, newConfig, unitDir)
+			if test.conflict || test.fail {
+				if err == nil || ReadRuntimeLayout(oldConfig) != test.version || ReadRuntimeLayout(newConfig) != 0 {
+					t.Fatalf("failed migration did not retain the original layout: %v", err)
+				}
+				assertRuntimeTestFile(t, oldConfig, originalConfig)
+				for i, unit := range units {
+					assertRuntimeTestFile(t, filepath.Join(unitDir, unit), originalUnits[i])
+				}
+				if test.conflict {
+					assertRuntimeTestFile(t, filepath.Join(newDir, "nft.json"), "keep this")
+					if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+						t.Fatalf("systemctl was called after a file conflict: %v", err)
+					}
+				}
+				return
+			}
+			if err != nil || ReadRuntimeLayout(newConfig) != RuntimeLayoutVersion {
+				t.Fatalf("migrate flat runtime: %v", err)
+			}
+			if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+				t.Fatalf("old directory remains: %v", err)
+			}
+			assertRuntimeTestFile(t, newConfig, strings.ReplaceAll(originalConfig, oldDir, newDir))
+			assertRuntimeTestFile(t, filepath.Join(newDir, "gost.yaml"), "tls:\n  keyFile: "+newDir+"/relay.key\n")
+			assertRuntimeTestFile(t, filepath.Join(newDir, PanelCredentialsFile), PanelCredentialsFile)
+			for i, unit := range []string{"yagp-daemon.service", "yagp-gost.service"} {
+				assertRuntimeTestFile(t, filepath.Join(unitDir, unit), strings.ReplaceAll(originalUnits[i], oldDir, newDir))
+			}
+		})
+	}
+}
+
+func assertRuntimeTestFile(t *testing.T, path, want string) {
+	t.Helper()
+	if data, err := os.ReadFile(path); err != nil || string(data) != want {
+		t.Fatalf("read %s: %q, %v, want %q", path, data, err, want)
 	}
 }
 
