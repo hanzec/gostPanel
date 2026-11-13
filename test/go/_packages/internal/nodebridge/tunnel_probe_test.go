@@ -1,6 +1,7 @@
 package nodebridge
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"yagp/pkg/gost"
 	"yagp/pkg/nodegrpc"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -45,10 +47,11 @@ func TestTunnelProbeVerifiesResponse(t *testing.T) {
 		replyBytes int
 		keepOpen   bool
 		want       codes.Code
+		stage      string
 	}{
-		{"plain echo", sha256.Size, false, codes.DataLoss},
-		{"truncated reply", 1, false, codes.Unavailable},
-		{"no reply before deadline", 0, true, codes.DeadlineExceeded},
+		{"plain echo", sha256.Size, false, codes.DataLoss, "relay_response"},
+		{"truncated reply", 1, false, codes.Unavailable, "relay_read"},
+		{"no reply before deadline", 0, true, codes.DeadlineExceeded, "relay_read"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -67,9 +70,8 @@ func TestTunnelProbeVerifiesResponse(t *testing.T) {
 				}
 				_, _ = server.Write(request[:tc.replyBytes])
 			}()
-			if _, err := exchangeTunnelProbe(ctx, client, endpoint.GetToken()); status.Code(err) != tc.want {
-				t.Fatalf("exchangeTunnelProbe returned %v, want %s", err, tc.want)
-			}
+			_, err := exchangeTunnelProbe(ctx, client, endpoint.GetToken())
+			requireTunnelProbeFailure(t, err, tc.want, tc.stage)
 		})
 	}
 }
@@ -95,14 +97,16 @@ func TestTunnelProbeReportsMissingOrInvalidGostSetup(t *testing.T) {
 		adminOffline   bool
 		failingProcess bool
 		want           codes.Code
+		stage          string
+		gostFailure    string
 	}{
-		{name: "missing chain", response: `{"data":null}`, want: codes.NotFound},
-		{name: "wrong chain", response: `{"data":{"name":"tunnel-2-chain"}}`, want: codes.FailedPrecondition},
-		{name: "Gost admin is offline", adminOffline: true, want: codes.Internal},
-		{name: "Gost denies admin access", httpStatus: http.StatusUnauthorized, want: codes.Internal},
-		{name: "invalid Gost admin response", response: "not JSON", want: codes.Internal},
-		{name: "missing Gost binary", response: liveChain, want: codes.Internal},
-		{name: "Gost exits during startup", response: liveChain, failingProcess: true, want: codes.Internal},
+		{name: "missing chain", response: `{"data":null}`, want: codes.NotFound, stage: "entry_chain"},
+		{name: "wrong chain", response: `{"data":{"name":"tunnel-2-chain"}}`, want: codes.FailedPrecondition, stage: "entry_chain"},
+		{name: "Gost admin is offline", adminOffline: true, want: codes.Internal, stage: "entry_gost_api"},
+		{name: "Gost denies admin access", httpStatus: http.StatusUnauthorized, want: codes.Internal, stage: "entry_gost_api", gostFailure: "admin_authentication"},
+		{name: "invalid Gost admin response", response: "not JSON", want: codes.Internal, stage: "entry_gost_api"},
+		{name: "missing Gost binary", response: liveChain, want: codes.Internal, stage: "entry_gost_process", gostFailure: "binary_missing"},
+		{name: "Gost exits during startup", response: liveChain, failingProcess: true, want: codes.Internal, stage: "entry_gost_process"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -137,17 +141,60 @@ func TestTunnelProbeReportsMissingOrInvalidGostSetup(t *testing.T) {
 			_, err := control.ProbeTunnel(context.Background(), &nodegrpc.TunnelProbeRequest{
 				ChainName: "tunnel-1-chain", Address: "127.0.0.1:12345", Token: make([]byte, sha256.Size),
 			})
-			if status.Code(err) != tc.want {
-				t.Fatalf("ProbeTunnel returned %v, want %s", err, tc.want)
+			info := requireTunnelProbeFailure(t, err, tc.want, tc.stage)
+			if got := info.GetMetadata()["gost_error"]; got != tc.gostFailure {
+				t.Fatalf("Gost failure = %q, want %q", got, tc.gostFailure)
 			}
 		})
 	}
 }
 
+func requireTunnelProbeFailure(t *testing.T, err error, code codes.Code, stage string) *errdetails.ErrorInfo {
+	t.Helper()
+	st := status.Convert(err)
+	if st.Code() != code {
+		t.Fatalf("probe returned %v, want %s", err, code)
+	}
+	for _, detail := range st.Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok && info.GetDomain() == "yagp.tunnel_probe" && info.GetReason() == stage {
+			return info
+		}
+	}
+	t.Fatalf("probe failure has details %v, want %s", st.Details(), stage)
+	return nil
+}
+
+func TestTunnelProbeLogClassifiesOnlyKnownPrivateProcessErrors(t *testing.T) {
+	var log tunnelProbeLog
+	for _, chunk := range []string{
+		string(bytes.Repeat([]byte{'x'}, 5000)),
+		`{"level":"debug","service":"yagp-tunnel-probe","msg":"pipe: 2 Unauthorized"}` + "\n",
+		`{"level":"debug","service":"other","msg":"pipe: 2 Unauthorized"}` + "\n",
+		`{"level":"debug","service":"yagp-tunnel-probe","msg":"pipe: 3 For`,
+		`bidden","authorization":"sensitive value"}` + "\n",
+	} {
+		if n, err := io.WriteString(&log, chunk); err != nil || n != len(chunk) {
+			t.Fatalf("log accepted %d/%d bytes, error %v", n, len(chunk), err)
+		}
+	}
+	if log.failure != "relay_target_forbidden" {
+		t.Fatalf("Gost failure = %q, want relay_target_forbidden", log.failure)
+	}
+}
+
+func TestTunnelProbeTCPDiagnosticSkipsDatagramTransports(t *testing.T) {
+	for _, transport := range []string{"udp", "kcp", "quic", "h3"} {
+		relay := &gost.NodeConfig{Addr: "127.0.0.1:0", Dialer: &gost.DialerConfig{Type: transport}}
+		if got := checkTunnelRelayTCP(t.Context(), relay); got != "not_applicable" {
+			t.Errorf("TCP diagnostic for %s = %q, want not_applicable", transport, got)
+		}
+	}
+}
+
 func TestTunnelProbeThroughGostRelay(t *testing.T) {
 	binary := os.Getenv("YAGP_TEST_GOST_BINARY")
-	if binary == "" || runtime.GOOS != "linux" {
-		t.Skip("set YAGP_TEST_GOST_BINARY to an installed Linux Gost binary")
+	if binary == "" || (runtime.GOOS != "linux" && runtime.GOOS != "darwin") {
+		t.Skip("set YAGP_TEST_GOST_BINARY to an installed Linux or macOS Gost binary")
 	}
 	binary, err := filepath.Abs(binary)
 	if err != nil {
@@ -172,7 +219,7 @@ func TestTunnelProbeThroughGostRelay(t *testing.T) {
 
 	relay := gost.ServiceConfig{Name: "relay-tunnel-1", Addr: relayAddress,
 		Listener: gost.RelayListener("ws", map[string]string{"path": "/probe"}),
-		Handler:  &gost.HandlerConfig{Type: "relay", Auth: chain.Hops[0].Nodes[0].Connector.Auth},
+		Handler:  &gost.HandlerConfig{Type: "relay", Auth: &gost.AuthConfig{Username: "probe", Password: "relay-password"}},
 	}
 	startTunnelProbeTestRelay(t, binary, dir, relay, chain, control)
 	probe := func() (*nodegrpc.TunnelProbeReply, error) {
@@ -187,14 +234,58 @@ func TestTunnelProbeThroughGostRelay(t *testing.T) {
 	if _, err := probe(); err != nil {
 		t.Fatalf("probe through live Gost Relay: %v", err)
 	}
+	node := chain.Hops[0].Nodes[0]
+	for _, tc := range []struct {
+		name, password, path, failure string
+	}{
+		{"wrong relay credentials", "wrong-password", "/probe", "relay_authentication"},
+		{"wrong websocket path", "relay-password", "/wrong-path", "relay_handshake"},
+		{"restore relay settings", "relay-password", "/probe", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node.Connector.Auth.Password = tc.password
+			node.Dialer = gost.RelayDialer("ws", map[string]string{"path": tc.path})
+			body, err := json.Marshal(chain)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply, err := control.Execute(t.Context(), &nodegrpc.CommandRequest{
+				Method: http.MethodPut, Path: "/config/chains/" + chain.Name, Body: body,
+			})
+			if err != nil || reply.GetStatusCode() != http.StatusOK {
+				t.Fatalf("update live Gost chain: %v %s", err, reply.GetBody())
+			}
+			_, err = probe()
+			if tc.failure == "" {
+				if err != nil {
+					t.Fatalf("probe through restored Gost Relay: %v", err)
+				}
+				return
+			}
+			info := requireTunnelProbeFailure(t, err, codes.Unavailable, "relay_read")
+			if info.GetMetadata()["gost_error"] != tc.failure || info.GetMetadata()["relay_tcp"] != "reachable" {
+				t.Fatalf("unexpected diagnostics %v, want %s and TCP reachable", info.GetMetadata(), tc.failure)
+			}
+		})
+	}
+	unavailable, _ := tunnelProbeTestAddresses(t)
+	_, err = control.ProbeTunnel(t.Context(), &nodegrpc.TunnelProbeRequest{
+		ChainName: chain.Name, Address: unavailable, Token: make([]byte, sha256.Size),
+	})
+	info := requireTunnelProbeFailure(t, err, codes.Unavailable, "relay_read")
+	if info.GetMetadata()["gost_error"] != "relay_target_unreachable" || info.GetMetadata()["relay_tcp"] != "reachable" {
+		t.Fatalf("unexpected diagnostics for closed test target: %v", info.GetMetadata())
+	}
 	reply, err := control.Execute(context.Background(), &nodegrpc.CommandRequest{
 		Method: http.MethodDelete, Path: "/config/services/" + relay.Name,
 	})
 	if err != nil || reply.GetStatusCode() != http.StatusOK {
 		t.Fatalf("delete live Gost Relay: %v %s", err, reply.GetBody())
 	}
-	if _, err := probe(); status.Code(err) != codes.Unavailable {
-		t.Fatalf("probe through stopped Gost Relay returned %v, want Unavailable", err)
+	_, err = probe()
+	info = requireTunnelProbeFailure(t, err, codes.Unavailable, "relay_read")
+	if got := info.GetMetadata()["relay_tcp"]; got != "refused" {
+		t.Fatalf("relay TCP check = %q, want refused", got)
 	}
 }
 

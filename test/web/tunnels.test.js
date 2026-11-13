@@ -711,6 +711,7 @@ describe('Relay tunnel configuration', () => {
     expect(testTunnel).toHaveBeenCalledExactlyOnceWith(relay.id)
     expect(popup.get('[role="status"]').text()).toContain('正在测试隧道转发')
     expect(start.classes()).toContain('is-loading')
+    expect(button(popup, '测试中…').element.disabled).toBe(true)
 
     pending.resolve({ data: { success: true, latency_ms: 42 } })
     await flushPromises()
@@ -719,7 +720,7 @@ describe('Relay tunnel configuration', () => {
     expect(start.classes()).not.toContain('is-loading')
 
     testTunnel.mockRejectedValueOnce({ response: { data: { message: '出口节点离线' } } })
-    await start.trigger('click')
+    await button(popup, '重新测试').trigger('click')
     await flushPromises()
     expect(popup.get('[role="status"]').text()).toContain('测试失败')
     expect(popup.text()).toContain('出口节点离线')
@@ -731,6 +732,60 @@ describe('Relay tunnel configuration', () => {
     expect(dialog(wrapper).text()).not.toContain('出口节点离线')
     expect(button(dialog(wrapper), '开始测试').element.disabled).toBe(true)
     expect(testTunnel).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the failed stage, next check and diagnostic evidence, then replaces them on retry', async () => {
+    testTunnel.mockRejectedValueOnce({
+      response: {
+        data: {
+          message: '测试数据往返失败',
+          data: {
+            success: false,
+            failure_stage: 'relay_round_trip',
+            recommendation: '检查出口安全组是否允许 Relay 端口。',
+            diagnostics: [
+              { stage: 'entry_chain', status: 'passed', message: '已找到入口转发链。' },
+              { stage: 'relay_round_trip', status: 'failed', message: '未收到出口回包。' },
+              { stage: 'relay_policy', status: 'warning', message: '请核对出口白名单。' },
+              { stage: 'relay_connection', status: 'skipped', message: '当前协议不支持单独检查。' }
+            ]
+          }
+        }
+      }
+    })
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await button(row(wrapper, relay.name), '测试').trigger('click')
+    const popup = dialog(wrapper)
+    const start = button(popup, '开始测试')
+    await start.trigger('click')
+    await flushPromises()
+
+    const status = popup.get('[role="status"]')
+    expect(status.text()).toContain('失败环节 · Relay 数据往返')
+    expect(status.text()).toContain('未收到出口回包。')
+    expect(popup.get('[aria-labelledby="tunnel-test-recommendation-title"]').text()).toContain('检查出口安全组是否允许 Relay 端口。')
+    const checks = popup.get('[aria-labelledby="tunnel-test-checks-title"]')
+    expect(checks.element.open).toBe(false)
+    expect(checks.get('summary').findAll('.ops-status').map(item => item.text())).toEqual(['1 项失败', '1 项需检查', '1 项通过', '1 项未验证'])
+    checks.get('summary').element.click()
+    expect(checks.element.open).toBe(true)
+    expect(checks.findAll('li').map(item => item.get('.ops-status').text())).toEqual(['通过', '失败', '需检查', '未验证'])
+    expect(checks.text()).toContain('未收到出口回包。')
+
+    testTunnel.mockResolvedValueOnce({ data: {
+      success: true,
+      latency_ms: 36,
+      diagnostics: [{ stage: 'relay_round_trip', status: 'passed', message: '已收到出口回包。' }]
+    } })
+    await button(popup, '重新测试').trigger('click')
+    await flushPromises()
+    expect(status.text()).toContain('往返耗时 36 ms')
+    const retryChecks = popup.get('[aria-labelledby="tunnel-test-checks-title"]')
+    expect(retryChecks.element.open).toBe(false)
+    expect(retryChecks.findAll('li')).toHaveLength(1)
+    expect(retryChecks.text()).toContain('已收到出口回包。')
+    expect(popup.text()).not.toContain('检查出口安全组')
   })
 
   it('disables competing toggles during a pending start and confirms deletions', async () => {

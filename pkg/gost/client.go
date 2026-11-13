@@ -220,7 +220,11 @@ type GostConfig struct {
 
 // GetConfig 获取节点配置
 func (c *Client) GetConfig() (*GostConfig, error) {
-	resp, err := c.doRequest("GET", "/config", nil)
+	return c.GetConfigContext(context.Background())
+}
+
+func (c *Client) GetConfigContext(ctx context.Context) (*GostConfig, error) {
+	resp, err := c.doRequestContext(ctx, http.MethodGet, "/config", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -402,6 +406,10 @@ func (c *Client) ObserverToken() string {
 
 // doRequest 将 Gost 管理命令交给节点的 gRPC 桥接进程。
 func (c *Client) doRequest(method, path string, body interface{}) (*http.Response, error) {
+	return c.doRequestContext(context.Background(), method, path, body)
+}
+
+func (c *Client) doRequestContext(ctx context.Context, method, path string, body interface{}) (*http.Response, error) {
 	request := &nodegrpc.CommandRequest{Method: method, Path: path}
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -411,13 +419,9 @@ func (c *Client) doRequest(method, path string, body interface{}) (*http.Respons
 		request.Body = data
 	}
 
-	client, err := c.connect()
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
-	defer cancel()
-	reply, err := client.Execute(ctx, request)
+	reply, err := callNode(ctx, c, c.config.Timeout, func(ctx context.Context, client nodegrpc.V1Client) (*nodegrpc.CommandReply, error) {
+		return client.Execute(ctx, request)
+	})
 	if err != nil {
 		return nil, err
 	}

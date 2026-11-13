@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -120,6 +121,12 @@ func (s *Session) Invoke(ctx context.Context, method string, args, reply any, _ 
 	select {
 	case response := <-result:
 		if response.GetCode() != 0 {
+			// Older peers send only the code and message.
+			var detail statuspb.Status
+			if len(response.GetPayload()) != 0 && proto.Unmarshal(response.GetPayload(), &detail) == nil &&
+				detail.GetCode() == response.GetCode() && detail.GetMessage() == response.GetError() {
+				return status.FromProto(&detail).Err()
+			}
 			return status.Error(codes.Code(response.GetCode()), response.GetError())
 		}
 		if err := proto.Unmarshal(response.GetPayload(), reply.(proto.Message)); err != nil {
@@ -188,6 +195,9 @@ func (s *Session) dispatch(frame *StreamFrame) {
 			result = status.FromContextError(err)
 		}
 		response.Code, response.Error = int32(result.Code()), result.Message()
+		if detail := result.Proto(); len(detail.GetDetails()) != 0 {
+			response.Payload, _ = proto.Marshal(detail)
+		}
 	}
 	if proto.Size(response) > MaxStreamFrameBytes {
 		response = &StreamFrame{Id: frame.GetId(), Code: int32(codes.ResourceExhausted), Error: "RPC response exceeds stream message limit"}
