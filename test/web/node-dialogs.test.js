@@ -14,6 +14,7 @@ vi.mock('@/api/node', () => ({
   getGostLogs: vi.fn(),
   restartGostService: vi.fn(),
   getNodeNftConfig: vi.fn(),
+  getNodeFirewallStatus: vi.fn(),
   getNodeUpgradeStatus: vi.fn(),
   updateNodeUpgradePolicy: vi.fn(),
   upgradeNodeComponent: vi.fn()
@@ -139,6 +140,10 @@ describe('inline Gost service', () => {
 describe('nftables preview', () => {
   const activeRules = '{"nftables":[{"quota":{"table":"yagp_quota","bytes":9223372036854775807}}]}'
 
+  beforeEach(() => {
+    api.getNodeFirewallStatus.mockResolvedValue(response({ supported: true, managed: false }))
+  })
+
   it('retries a read failure and displays active rules without editing controls', async () => {
     api.getNodeNftConfig.mockRejectedValueOnce(apiError('节点离线'))
       .mockResolvedValueOnce(response({ config: activeRules, live: true }))
@@ -154,15 +159,37 @@ describe('nftables preview', () => {
   })
 
   it('labels saved rules from older nodes and shows when no live rules are configured', async () => {
+    api.getNodeFirewallStatus.mockRejectedValue({ response: { status: 501 } })
     api.getNodeNftConfig.mockResolvedValueOnce(response({ config: activeRules, live: false }))
       .mockResolvedValueOnce(response({ config: '{"nftables":[]}', live: true }))
     wrapper = mountNodeComponent(NodeNftPreview, { node })
     await flushPromises()
+    expect(wrapper.get('.nft-firewall').text()).toContain('守护程序版本较旧')
     expect(wrapper.text()).toContain('旧版守护程序仅提供上次保存的规则')
     expect(wrapper.get('pre').text()).toBe(activeRules)
     await click(wrapper, '刷新')
     expect(wrapper.text()).toContain('此节点暂无 yagp 管理的 nftables 规则。')
     expect(wrapper.find('pre').exists()).toBe(false)
+  })
+
+  it('shows firewall failures and the last successful sync even when the rule preview fails', async () => {
+    const lastSync = '2026-11-13T03:30:00Z'
+    const state = { supported: true, managed: true, last_sync: lastSync }
+    api.getNodeNftConfig.mockRejectedValue(apiError('无法读取节点规则'))
+    api.getNodeFirewallStatus.mockResolvedValueOnce(response({ ...state, synchronized: false, last_error: 'missing firewall jump' }))
+      .mockResolvedValueOnce(response({ ...state, synchronized: true, last_error: null }))
+    wrapper = mountNodeComponent(NodeNftPreview, { node })
+    await flushPromises()
+    const health = wrapper.get('.nft-firewall')
+    expect(health.text()).toContain('同步异常')
+    expect(health.text()).toContain('missing firewall jump')
+    expect(health.get('time').attributes('datetime')).toBe(lastSync)
+    expect(wrapper.get('[role="alert"]').text()).toContain('无法读取节点规则')
+
+    await click(wrapper, '重新加载')
+    expect(api.getNodeFirewallStatus).toHaveBeenCalledWith(node.id)
+    expect(health.text()).toContain('已同步')
+    expect(health.text()).not.toContain('missing firewall jump')
   })
 })
 

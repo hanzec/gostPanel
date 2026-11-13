@@ -22,6 +22,7 @@ func controlDispatcher(control *controlServer) nodegrpc.StreamHandler {
 		nodegrpc.V1_GetGostLogs_FullMethodName,
 		nodegrpc.V1_GetNftConfig_FullMethodName,
 		nodegrpc.V1_ApplyNftConfig_FullMethodName,
+		nodegrpc.V1_GetFirewallStatus_FullMethodName,
 		nodegrpc.V1_SyncTrafficQuota_FullMethodName,
 		nodegrpc.V1_GetUpgradeStatus_FullMethodName,
 		nodegrpc.V1_StartUpgrade_FullMethodName,

@@ -146,6 +146,34 @@ systemd 服务启动失败时执行 `journalctl -u yagp-daemon -u yagp-gost`。�
 | 订阅 Clash 规则集 | **系统设置 → Clash 规则集**。可为多个 HTTPS 订阅命名，支持 `payload:` YAML 和文本规则集。 |
 | 配置 SMTP 和 Bark | **系统设置 → 通知管理**。测试使用当前表单参数，确认后保存。SMTP 465 使用隐式 TLS 1.2+，私有 CA 须加入面板运行环境的系统信任库。 |
 
+### 节点防火墙端口放行
+
+在使用 nftables 的 Linux 节点上，可以让 `yagp-daemon` 自动放行 Gost 转发和 Relay 的运行中监听端口。默认关闭。在节点的 `node.yaml` 中加入以下配置，将 `filter` 和 `input` 换成主机现有的 `inet` 表名和 `filter` 类型的 `input` 基链名。
+
+```yaml
+firewall:
+  table: filter
+  input_chain: input
+```
+
+重启 `yagp-daemon` 后，它会创建节点专用的放行链和监听集合。在主机持久化的 nftables 配置中声明该普通链，并在现有 `input` 基链中加入无条件跳转。以节点 `42` 为例，下面两段分别加入现有 `table inet filter` 和现有 `chain input`。跳转放在需要保留的主机访问控制之后、拒绝转发流量的兜底规则之前。
+
+```nft
+chain yagp_42_input {
+    comment "yagp daemon firewall 42"
+}
+```
+
+```nft
+jump yagp_42_input
+```
+
+主机仍由原有规则处理 SSH、管理入口和其他流量，其他防火墙链和流量配额仍可拒绝连接。Gost 监听绑定到指定 IP 时，放行匹配该 IP 和端口。回环监听与透明转发由原有机制处理。
+
+守护进程在启动、Gost 服务变更和每 15 秒检查时重建或同步自己的规则。内核更新先校验，再作为一个事务提交。节点重启后，Gost 从保存的配置恢复监听，守护进程据此重新生成放行规则。面板的 **节点管理 → 配置 → nft 配置** 显示同步结果和最近的错误。停用、切换主机表或卸载前，从当前规则和主机持久化配置中移除旧的跳转，即可撤销对应放行。回退到不支持防火墙同步的 daemon 前，还需从 `node.yaml` 移除 `firewall` 配置。
+
+### 双节点隧道
+
 创建双节点隧道时，先在 **端点管理** 为 A 创建**入口**，选择 TCP、UDP 或透明转发入口；为 B 创建**出口**，设置监听地址，并在 **目标与策略** 中选择隧道协议和目标类型。目标与策略随出口保存，入口无需填写目标。隧道协议用于 A 到 B 的 Relay 连接。
 
 隧道可选 TCP、MTCP、TLS、MTLS、WS、MWS、WSS、MWSS、H2、H2C、gRPC、PHT、PHTS、KCP、QUIC、H3、OHTTP 和 OTLS。KCP、QUIC 和 H3 使用 UDP 监听端口。原有裸 UDP 通道选项用于兼容旧配置，在 Gost v3.3.3 的 Relay 回环验证中转发超时。[Gost 协议概述](https://gost.run/tutorials/protocols/overview/)

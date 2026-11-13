@@ -5,7 +5,6 @@ import (
 	"net"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -79,7 +78,7 @@ func syncTrafficQuota(repo *repository.NodeRepository, client *gost.Client, node
 
 func quotaPorts(services []gost.ServiceConfig) (tcp, udp []uint32) {
 	for _, svc := range services {
-		if !isQuotaService(svc) || svc.Listener == nil {
+		if !svc.IsManagedForwarder() || svc.Listener == nil {
 			continue
 		}
 		if svc.Status != nil && utils.GostStateToRuleStatus(svc.Status.State) != model.RuleStatusRunning {
@@ -103,24 +102,6 @@ func quotaPorts(services []gost.ServiceConfig) (tcp, udp []uint32) {
 	slices.Sort(tcp)
 	slices.Sort(udp)
 	return slices.Compact(tcp), slices.Compact(udp)
-}
-
-func isQuotaService(svc gost.ServiceConfig) bool {
-	if svc.Handler == nil {
-		return false
-	}
-	var prefix string
-	switch svc.Handler.Type {
-	case "forward", "red":
-		prefix = "rule-"
-	case "relay":
-		prefix = "relay-tunnel-"
-	default:
-		return false
-	}
-	id, ok := strings.CutPrefix(svc.Name, prefix)
-	value, err := strconv.ParseUint(id, 10, 64)
-	return ok && err == nil && value != 0
 }
 
 func createServiceWithTrafficQuota(repo *repository.NodeRepository, client *gost.Client, node model.GostNode, service *gost.ServiceConfig) (bool, error) {

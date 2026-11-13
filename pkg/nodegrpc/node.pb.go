@@ -10,6 +10,7 @@ import (
 	proto "github.com/go-gost/plugin/observer/proto"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -1789,12 +1790,88 @@ func (x *TunnelProbeReply) GetRoundTripMs() int64 {
 	return 0
 }
 
+type FirewallStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Supported     bool                   `protobuf:"varint,1,opt,name=supported,proto3" json:"supported,omitempty"`
+	Managed       bool                   `protobuf:"varint,2,opt,name=managed,proto3" json:"managed,omitempty"`
+	Synchronized  bool                   `protobuf:"varint,3,opt,name=synchronized,proto3" json:"synchronized,omitempty"`
+	LastSync      *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_sync,json=lastSync,proto3" json:"last_sync,omitempty"`
+	LastError     *string                `protobuf:"bytes,5,opt,name=last_error,json=lastError,proto3,oneof" json:"last_error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FirewallStatus) Reset() {
+	*x = FirewallStatus{}
+	mi := &file_node_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FirewallStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FirewallStatus) ProtoMessage() {}
+
+func (x *FirewallStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_node_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FirewallStatus.ProtoReflect.Descriptor instead.
+func (*FirewallStatus) Descriptor() ([]byte, []int) {
+	return file_node_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *FirewallStatus) GetSupported() bool {
+	if x != nil {
+		return x.Supported
+	}
+	return false
+}
+
+func (x *FirewallStatus) GetManaged() bool {
+	if x != nil {
+		return x.Managed
+	}
+	return false
+}
+
+func (x *FirewallStatus) GetSynchronized() bool {
+	if x != nil {
+		return x.Synchronized
+	}
+	return false
+}
+
+func (x *FirewallStatus) GetLastSync() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastSync
+	}
+	return nil
+}
+
+func (x *FirewallStatus) GetLastError() string {
+	if x != nil && x.LastError != nil {
+		return *x.LastError
+	}
+	return ""
+}
+
 var File_node_proto protoreflect.FileDescriptor
 
 const file_node_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"node.proto\x12\fyagp.node.v1\x1a\x0eobserver.proto\"P\n" +
+	"node.proto\x12\fyagp.node.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x0eobserver.proto\"P\n" +
 	"\x0eCommandRequest\x12\x16\n" +
 	"\x06method\x18\x01 \x01(\tR\x06method\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
@@ -1925,7 +2002,15 @@ const file_node_proto_rawDesc = "" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\fR\x05token\"6\n" +
 	"\x10TunnelProbeReply\x12\"\n" +
-	"\rround_trip_ms\x18\x01 \x01(\x03R\vroundTripMs*\xc0\x01\n" +
+	"\rround_trip_ms\x18\x01 \x01(\x03R\vroundTripMs\"\xd8\x01\n" +
+	"\x0eFirewallStatus\x12\x1c\n" +
+	"\tsupported\x18\x01 \x01(\bR\tsupported\x12\x18\n" +
+	"\amanaged\x18\x02 \x01(\bR\amanaged\x12\"\n" +
+	"\fsynchronized\x18\x03 \x01(\bR\fsynchronized\x127\n" +
+	"\tlast_sync\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\blastSync\x12\"\n" +
+	"\n" +
+	"last_error\x18\x05 \x01(\tH\x00R\tlastError\x88\x01\x01B\r\n" +
+	"\v_last_error*\xc0\x01\n" +
 	"\x19TransparentRedirectAction\x12+\n" +
 	"'TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED\x10\x00\x12'\n" +
 	"#TRANSPARENT_REDIRECT_ACTION_PREPARE\x10\x01\x12%\n" +
@@ -1945,7 +2030,7 @@ func file_node_proto_rawDescGZIP() []byte {
 }
 
 var file_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_node_proto_goTypes = []any{
 	(TransparentRedirectAction)(0),     // 0: yagp.node.v1.TransparentRedirectAction
 	(*CommandRequest)(nil),             // 1: yagp.node.v1.CommandRequest
@@ -1976,19 +2061,22 @@ var file_node_proto_goTypes = []any{
 	(*TunnelProbeEndpoint)(nil),        // 26: yagp.node.v1.TunnelProbeEndpoint
 	(*TunnelProbeRequest)(nil),         // 27: yagp.node.v1.TunnelProbeRequest
 	(*TunnelProbeReply)(nil),           // 28: yagp.node.v1.TunnelProbeReply
-	(*proto.ObserveRequest)(nil),       // 29: proto.ObserveRequest
+	(*FirewallStatus)(nil),             // 29: yagp.node.v1.FirewallStatus
+	(*proto.ObserveRequest)(nil),       // 30: proto.ObserveRequest
+	(*timestamppb.Timestamp)(nil),      // 31: google.protobuf.Timestamp
 }
 var file_node_proto_depIdxs = []int32{
 	8,  // 0: yagp.node.v1.GostLogsReply.entries:type_name -> yagp.node.v1.GostLogEntry
-	29, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
+	30, // 1: yagp.node.v1.ReportRequest.observation:type_name -> proto.ObserveRequest
 	19, // 2: yagp.node.v1.RegisterNodeReply.credentials:type_name -> yagp.node.v1.NodeCredentials
 	22, // 3: yagp.node.v1.NodeIPsRequest.local_ip_snapshot:type_name -> yagp.node.v1.LocalIPSnapshot
 	0,  // 4: yagp.node.v1.TransparentRedirectRequest.action:type_name -> yagp.node.v1.TransparentRedirectAction
-	5,  // [5:5] is the sub-list for method output_type
-	5,  // [5:5] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	31, // 5: yagp.node.v1.FirewallStatus.last_sync:type_name -> google.protobuf.Timestamp
+	6,  // [6:6] is the sub-list for method output_type
+	6,  // [6:6] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_node_proto_init() }
@@ -1998,13 +2086,14 @@ func file_node_proto_init() {
 	}
 	file_node_proto_msgTypes[11].OneofWrappers = []any{}
 	file_node_proto_msgTypes[20].OneofWrappers = []any{}
+	file_node_proto_msgTypes[28].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   28,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

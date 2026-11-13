@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// A bridge manages one nftables table. Serialize apply and persistence for that table.
+// Serialize nftables updates and the reads and persistence they depend on.
 var nftApplyMu sync.Mutex
 
 type nftObject map[string]json.RawMessage

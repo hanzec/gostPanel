@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const handlerNodePassword = "node-test-password"
@@ -37,6 +38,7 @@ func (f *handlerHTTPFixture) enrollFixtureNode(t *testing.T, name string, nodeCo
 	dispatch := nodegrpc.NewDispatcher(nodeControl,
 		nodegrpc.V1_Execute_FullMethodName, nodegrpc.V1_GetGostServiceStatus_FullMethodName, nodegrpc.V1_RestartGostService_FullMethodName,
 		nodegrpc.V1_GetGostLogs_FullMethodName, nodegrpc.V1_GetNftConfig_FullMethodName,
+		nodegrpc.V1_GetFirewallStatus_FullMethodName,
 		nodegrpc.V1_GetUpgradeStatus_FullMethodName, nodegrpc.V1_StartUpgrade_FullMethodName, nodegrpc.V1_SyncTrafficQuota_FullMethodName)
 	startTestReportStream(t, t.Context(), startTestReportServer(t, f.db), node, func(ctx context.Context, method string, body []byte) ([]byte, error) {
 		if err := nodeControl.before(method); err != nil {
@@ -53,6 +55,7 @@ type handlerNodeControl struct {
 	mu          sync.Mutex
 	nft         string
 	nftLive     string
+	firewall    *nodegrpc.FirewallStatus
 	upgrade     *nodegrpc.NodeUpgradeRequest
 	quota       *nodegrpc.TrafficQuotaRequest
 	calibrates  bool
@@ -107,6 +110,12 @@ func (n *handlerNodeControl) GetNftConfig(context.Context, *emptypb.Empty) (*nod
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return &nodegrpc.NftConfig{Config: n.nft, LiveConfig: n.nftLive}, nil
+}
+
+func (n *handlerNodeControl) GetFirewallStatus(context.Context, *emptypb.Empty) (*nodegrpc.FirewallStatus, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.firewall, nil
 }
 
 func (n *handlerNodeControl) GetUpgradeStatus(context.Context, *emptypb.Empty) (*nodegrpc.NodeUpgradeStatus, error) {
@@ -273,7 +282,7 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 	f.request(t, "GET", "/nodes/999/config", "", 500)
 	for _, item := range []struct{ method, suffix string }{
 		{"GET", "/gost/service"}, {"POST", "/gost/restart"}, {"GET", "/gost/logs"},
-		{"GET", "/nft"},
+		{"GET", "/nft"}, {"GET", "/firewall"},
 	} {
 		f.request(t, item.method, "/nodes/0"+item.suffix, "", 400)
 		f.request(t, item.method, "/nodes/999"+item.suffix, "", 404)
@@ -333,6 +342,35 @@ func TestNodeHTTPBridgeOperations(t *testing.T) {
 	if audit.Total != 1 || len(audit.List) != 1 || audit.List[0].ResourceID != node.ID || audit.List[0].Details != "重启 Gost 服务" {
 		t.Fatalf("only successful node operations should appear in the audit log: %+v", audit)
 	}
+}
+
+func TestNodeHTTPFirewallStatus(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	control := &handlerNodeControl{
+		firewall: &nodegrpc.FirewallStatus{Supported: true},
+		failures: make(map[string]codes.Code),
+	}
+	node := f.enrollFixtureNode(t, "firewall", control)
+	path := fmt.Sprintf("/nodes/%d/firewall", node.ID)
+	read := handlerData[nodeFirewallStatus](t, f.request(t, "GET", path, "", 200))
+	if !read.Supported || read.Managed || read.Synchronized || read.LastSync != nil || read.LastError != nil {
+		t.Fatalf("unmanaged firewall status = %+v", read)
+	}
+
+	lastSync := time.Date(2026, 11, 13, 3, 30, 0, 0, time.UTC)
+	lastError := "missing firewall jump"
+	control.mu.Lock()
+	control.firewall = &nodegrpc.FirewallStatus{
+		Supported: true, Managed: true, LastSync: timestamppb.New(lastSync), LastError: &lastError,
+	}
+	control.mu.Unlock()
+	read = handlerData[nodeFirewallStatus](t, f.request(t, "GET", path, "", 200))
+	if !read.Supported || !read.Managed || read.Synchronized || read.LastSync == nil || !read.LastSync.Equal(lastSync) || read.LastError == nil || *read.LastError != lastError {
+		t.Fatalf("unsynchronized firewall status = %+v", read)
+	}
+	control.reject(nodegrpc.V1_GetFirewallStatus_FullMethodName, codes.Unimplemented)
+	f.request(t, "GET", path, "", 501)
 }
 
 func TestNodeHTTPUpgradeLifecycle(t *testing.T) {

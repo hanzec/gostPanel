@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 	"yagp/internal/errors"
 
@@ -54,6 +56,24 @@ type ServiceConfig struct {
 	SockOpts   *SocketOptions   `json:"sockopts,omitempty"`
 	Metadata   map[string]any   `json:"metadata,omitempty"` // 元数据配置
 	Status     *ServiceStatus   `json:"status,omitempty"`   // 服务运行状态
+}
+
+func (s ServiceConfig) IsManagedForwarder() bool {
+	if s.Handler == nil {
+		return false
+	}
+	var prefix string
+	switch s.Handler.Type {
+	case "forward", "red":
+		prefix = "rule-"
+	case "relay":
+		prefix = "relay-tunnel-"
+	default:
+		return false
+	}
+	id, ok := strings.CutPrefix(s.Name, prefix)
+	value, err := strconv.ParseUint(id, 10, 64)
+	return ok && err == nil && value != 0
 }
 
 type SocketOptions struct {
