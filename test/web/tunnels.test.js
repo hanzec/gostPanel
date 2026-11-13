@@ -252,6 +252,56 @@ describe('Relay tunnel configuration', () => {
     })
   })
 
+  it.each(['entry', 'exit'])('can create a tunnel using a running %s already linked to another tunnel', async sharedRole => {
+    const entry = { ...source, role: 'entry' }
+    const exit = { ...destination, role: 'exit', protocol: 'tcp', targets: ['app.example:443'] }
+    const shared = sharedRole === 'entry' ? entry : exit
+    Object.assign(shared, { status: 'running', linked_tunnels: [{ id: 12, status: 'running' }] })
+    const legacy = { ...relaySource, name: 'Existing untyped endpoint' }
+    const standalone = { ...source, id: 25, status: 'running' }
+    getRuleList.mockResolvedValue(result([entry, exit, legacy, standalone]))
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
+
+    const editor = dialog(wrapper)
+    const sourceSelect = selectField(editor, 'entry_rule_id')
+    const destinationSelect = selectField(editor, 'exit_rule_id')
+    expect(sourceSelect.findAllComponents(ElOption).map(option => option.props('value'))).toEqual([entry.id])
+    expect(destinationSelect.findAllComponents(ElOption).map(option => option.props('value'))).toEqual([exit.id])
+    await field(editor, 'name').get('input').setValue('Shared endpoint tunnel')
+    await choose(sourceSelect, entry.id)
+    await choose(destinationSelect, exit.id)
+    await button(editor, '添加并启动').trigger('click')
+    await flushPromises()
+
+    expect(createTunnel).toHaveBeenCalledExactlyOnceWith({
+      name: 'Shared endpoint tunnel', entry_rule_id: entry.id, exit_rule_id: exit.id, remark: ''
+    })
+  })
+
+  it('requires a different pair when both selected endpoints already belong to the same tunnel', async () => {
+    const binding = { status: 'running', linked_tunnels: [{ id: 12, status: 'running' }] }
+    const entry = { ...source, role: 'entry', ...binding }
+    const exit = { ...destination, role: 'exit', protocol: 'tcp', targets: ['app.example:443'], ...binding }
+    getRuleList.mockResolvedValue(result([entry, exit]))
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await button(wrapper, '添加隧道').trigger('click')
+    await flushPromises()
+
+    const editor = dialog(wrapper)
+    await field(editor, 'name').get('input').setValue('Duplicate endpoints')
+    await choose(selectField(editor, 'entry_rule_id'), entry.id)
+    await choose(selectField(editor, 'exit_rule_id'), exit.id)
+    await button(editor, '添加并启动').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.getComponent(ElForm).emitted('validate')).toContainEqual(['exit_rule_id', false, '这组源端点和目的端点已建立隧道'])
+    expect(createTunnel).not.toHaveBeenCalled()
+  })
+
   it('validates the entry for a Clash exit and keeps policy ownership when editing and copying', async () => {
     const entry = { ...mediaSource, role: 'entry' }
     const exit = { ...mediaDestination, role: 'exit', protocol: 'quic', use_clash_ruleset: true, targets: [], strategy: 'round' }

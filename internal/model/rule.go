@@ -89,6 +89,8 @@ type GostRule struct {
 	TotalBytes       int64            `gorm:"default:0" json:"total_bytes"`    // 总流量 (Input + Output)
 	TotalRequests    int64            `gorm:"default:0" json:"total_requests"` // 总请求数
 	ObserverCounters ObserverCounters `gorm:"embedded;embeddedPrefix:observer_" json:"-"`
+	RelayTraffic     RelayTraffic     `gorm:"embedded;embeddedPrefix:relay_" json:"-"`
+	RelayCounterID   string           `gorm:"size:100" json:"-"`
 
 	Remark    string         `gorm:"type:text" json:"remark"` // 备注
 	CreatedAt time.Time      `json:"created_at"`
@@ -100,9 +102,15 @@ type GostRule struct {
 	// 关联 - 隧道
 	Tunnel *GostTunnel `gorm:"foreignKey:TunnelID" json:"tunnel,omitempty"`
 	// 隧道选用该入口后，由查询结果填充绑定信息。
-	LinkedTunnelID     *uint        `gorm:"-" json:"linked_tunnel_id,omitempty"`
-	TunnelRole         string       `gorm:"-" json:"tunnel_role,omitempty"`
-	LinkedTunnelStatus TunnelStatus `gorm:"-" json:"linked_tunnel_status,omitempty"`
+	LinkedTunnelID     *uint           `gorm:"-" json:"linked_tunnel_id,omitempty"`
+	TunnelRole         string          `gorm:"-" json:"tunnel_role,omitempty"`
+	LinkedTunnelStatus TunnelStatus    `gorm:"-" json:"linked_tunnel_status,omitempty"`
+	LinkedTunnels      []TunnelBinding `gorm:"-" json:"linked_tunnels,omitempty"`
+}
+
+type TunnelBinding struct {
+	ID     uint         `json:"id"`
+	Status TunnelStatus `json:"status"`
 }
 
 // TableName 指定表名

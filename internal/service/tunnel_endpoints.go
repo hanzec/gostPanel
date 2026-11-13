@@ -88,15 +88,23 @@ func (s *TunnelService) setTunnelEndpoints(tunnel *model.GostTunnel, entryID, ex
 		return errors.ErrTunnelNodeSame
 	}
 	for _, endpoint := range []*model.GostRule{entry, exit} {
-		bound, err := s.tunnelRepo.FindByEntranceID(endpoint.ID)
-		if err == nil && bound.ID == tunnel.ID {
-			continue
+		bindings, err := rules.EntranceBindings([]uint{endpoint.ID})
+		if err != nil {
+			return err
 		}
-		if err == nil || endpoint.Status == model.RuleStatusRunning {
+		if len(bindings) == 0 && endpoint.Status == model.RuleStatusRunning {
 			return errors.ErrTunnelEndpointInUse
 		}
-		if !stderrors.Is(err, gorm.ErrRecordNotFound) {
-			return err
+		for _, bound := range bindings {
+			if bound.ID == tunnel.ID {
+				continue
+			}
+			if endpoint.Role == "" {
+				return errors.ErrTunnelEndpointInUse
+			}
+			if bound.EntryRuleID != nil && *bound.EntryRuleID == entryID && bound.ExitRuleID != nil && *bound.ExitRuleID == exitID {
+				return errors.ErrTunnelDuplicateEndpoints
+			}
 		}
 	}
 	tunnel.EntryRuleID, tunnel.ExitRuleID = &entryID, &exitID
@@ -221,6 +229,13 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 	if err := validateTunnelTargets(t); err != nil {
 		return err
 	}
+	peers, err := s.runningEndpointTunnels("entry_rule_id", t.EntryRule.ID, t.ID)
+	if err != nil {
+		return err
+	}
+	if err := validateSharedIngress(t, peers); err != nil {
+		return err
+	}
 	if err := endpointNodesOnline(t); err != nil {
 		return err
 	}
@@ -234,12 +249,13 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 		}
 	}
 	entryClient, exitClient := utils.GetGostClient(t.EntryNode), utils.GetGostClient(t.ExitNode)
-	redirect, err := prepareEndpointRedirect(t, entryClient, host)
+	redirect, err := prepareEndpointRedirect(t, entryClient, host, peers)
 	if err != nil {
 		return err
 	}
-	if err := s.provisionEndpointTunnel(t, entryClient, exitClient, host, redirect); err != nil {
-		s.rollbackEndpointTunnel(t, false)
+	if err := s.provisionEndpointTunnel(t, entryClient, exitClient, host, redirect, peers); err != nil {
+		// A shared listener may have been changed while the other tunnels were already persisted.
+		s.rollbackEndpointTunnel(t, len(peers) != 0 && redirect != nil)
 		return err
 	}
 	// Persist both Gost listeners before enabling the redirect, which survives node restarts.
@@ -250,25 +266,38 @@ func (s *TunnelService) startEndpointTunnel(t *model.GostTunnel) error {
 	return nil
 }
 
-func prepareEndpointRedirect(t *model.GostTunnel, entryClient *gost.Client, host string) (*nodegrpc.TransparentRedirectRequest, error) {
+func prepareEndpointRedirect(t *model.GostTunnel, entryClient *gost.Client, host string, peers []*model.GostTunnel) (*nodegrpc.TransparentRedirectRequest, error) {
 	source := endpointTargetRule(t)
 	if !source.UseOriginalTarget && !source.UseClashRuleset {
 		return nil, nil
 	}
 	redirect := transparentRedirectRequest(t.EntryRule, host)
+	if len(peers) != 0 {
+		redirect.RelayHosts = relayHosts(append(peers, t))
+	}
 	prepared, err := entryClient.ConfigureTransparentRedirect(context.Background(), redirect)
 	if err != nil {
 		logger.Warnf("准备隧道 %d 的入口透明分流失败: %v", t.ID, err)
 		return nil, transparentRedirectError(err)
 	}
 	redirect.Mark, redirect.DockerAddress = prepared.GetMark(), prepared.GetDockerAddress()
+	if len(peers) != 0 && !prepared.GetMultiRelaySupported() {
+		return nil, errors.ErrTunnelSharedDaemon
+	}
 	return redirect, nil
 }
 
-func (s *TunnelService) provisionEndpointTunnel(t *model.GostTunnel, entryClient, exitClient *gost.Client, host string, redirect *nodegrpc.TransparentRedirectRequest) error {
+func (s *TunnelService) provisionEndpointTunnel(t *model.GostTunnel, entryClient, exitClient *gost.Client, host string, redirect *nodegrpc.TransparentRedirectRequest, peers []*model.GostTunnel) error {
 	if err := s.provisionEndpointRelay(t, entryClient, exitClient, host); err != nil {
 		return err
 	}
+	if len(peers) != 0 {
+		return s.applySharedIngress(entryClient, t, append(peers, t), redirect)
+	}
+	return s.provisionEndpointIngress(t, entryClient, redirect)
+}
+
+func (s *TunnelService) provisionEndpointIngress(t *model.GostTunnel, entryClient *gost.Client, redirect *nodegrpc.TransparentRedirectRequest) error {
 	rules := NewRuleService(s.tunnelRepo.DB)
 	mark := redirect.GetMark()
 	source := endpointTargetRule(t)
@@ -316,6 +345,17 @@ func (s *TunnelService) provisionEndpointRelay(t *model.GostTunnel, entryClient,
 		Handler:  &gost.HandlerConfig{Type: "relay", Auth: auth},
 		Metadata: map[string]any{"enableStats": true},
 	}
+	peers, err := s.runningEndpointTunnels("exit_rule_id", t.ExitRule.ID, t.ID)
+	if err != nil {
+		return err
+	}
+	if len(peers) != 0 {
+		t.ServiceID, relay.Name = peers[0].ServiceID, peers[0].ServiceID
+		if err := s.configureSharedRelay(exitClient, relay, append(peers, t)); err != nil {
+			return err
+		}
+		return s.createEndpointRelayChain(t, entryClient, host, auth, options)
+	}
 	if err := s.allowlist.prepareRelay(exitClient, relay, t); err != nil {
 		return err
 	}
@@ -331,7 +371,11 @@ func (s *TunnelService) provisionEndpointRelay(t *model.GostTunnel, entryClient,
 			return err
 		}
 	}
-	chain := newTunnelChain(t.ChainID, net.JoinHostPort(host, port), t.Protocol, options, auth)
+	return s.createEndpointRelayChain(t, entryClient, host, auth, options)
+}
+
+func (s *TunnelService) createEndpointRelayChain(t *model.GostTunnel, entryClient *gost.Client, host string, auth *gost.AuthConfig, options map[string]string) error {
+	chain := newTunnelChain(t.ChainID, net.JoinHostPort(host, strconv.Itoa(t.RelayPort)), t.Protocol, options, auth)
 	if err := entryClient.CreateChain(chain); err != nil {
 		return errors.ErrTunnelChainCreateFailed
 	}
@@ -386,9 +430,21 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 		return err
 	}
 	entryClient, exitClient := utils.GetGostClient(t.EntryNode), utils.GetGostClient(t.ExitNode)
+	entryPeers, err := s.runningEndpointTunnels("entry_rule_id", t.EntryRule.ID, t.ID)
+	if err != nil {
+		return err
+	}
+	exitPeers, err := s.runningEndpointTunnels("exit_rule_id", t.ExitRule.ID, t.ID)
+	if err != nil {
+		return err
+	}
 	source := endpointTargetRule(t)
 	transparent := source.UseOriginalTarget || source.UseClashRuleset
-	if save && transparent {
+	if len(entryPeers) > 0 {
+		if err := s.restoreEndpointIngress(entryClient, entryPeers); err != nil {
+			return err
+		}
+	} else if save && transparent {
 		request := &nodegrpc.TransparentRedirectRequest{
 			Action: nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE,
 			Owner:  entranceServiceName(t.EntryRule.ID),
@@ -403,16 +459,26 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 	if serviceName == "" {
 		serviceName = entranceServiceName(t.EntryRule.ID)
 	}
-	if err := entryClient.DeleteService(serviceName); err != nil {
-		return err
+	if len(entryPeers) == 0 {
+		if err := entryClient.DeleteService(serviceName); err != nil {
+			return err
+		}
+		if transparent {
+			if err := entryClient.DeleteService(dockerEntranceServiceName(t.EntryRule.ID)); err != nil {
+				return err
+			}
+		}
 	}
-	if transparent {
-		if err := entryClient.DeleteService(dockerEntranceServiceName(t.EntryRule.ID)); err != nil {
+	if !transparent && (len(entryPeers) != 0 || t.EntryRule.Role == model.EndpointRoleEntry) {
+		if err := entryClient.DeleteService(sharedFixedIngressServiceName(t.EntryRule.ID, t.ID)); err != nil {
 			return err
 		}
 	}
 	cleanupErr := stderrors.Join(entryClient.DeleteChain(tunnelChainName(t.ID)),
-		entryClient.DeleteChain(clashTunnelChainName(t.ID)), exitClient.DeleteService(relayServiceName(t.ID)))
+		entryClient.DeleteChain(clashTunnelChainName(t.ID)), s.removeEndpointRelay(exitClient, t, exitPeers))
+	if transparent {
+		cleanupErr = stderrors.Join(cleanupErr, entryClient.DeleteChain(sharedTransparentChainName(t.ID)))
+	}
 	if len(source.RulesetIDs) != 0 || len(source.ManualDomains) != 0 {
 		cleanupErr = stderrors.Join(cleanupErr, entryClient.DeleteNamedTransparentBypass(transparentPolicyName(t.ID)))
 	}
@@ -426,18 +492,24 @@ func (s *TunnelService) cleanupEndpointTunnel(t *model.GostTunnel, save bool) er
 	}
 	if err := s.tunnelRepo.DB.Transaction(func(tx *gorm.DB) error {
 		rules := repository.NewRuleRepository(tx)
-		if err := rules.UpdateRuntime(t.EntryRule.ID, "", model.RuleStatusStopped); err != nil {
-			return err
+		if len(entryPeers) == 0 {
+			if err := rules.UpdateRuntime(t.EntryRule.ID, "", model.RuleStatusStopped); err != nil {
+				return err
+			}
 		}
-		if err := tx.Model(&model.GostRule{}).Where("id = ?", t.ExitRule.ID).Update("status", model.RuleStatusStopped).Error; err != nil {
-			return err
+		if len(exitPeers) == 0 {
+			if err := rules.UpdateRuntime(t.ExitRule.ID, "", model.RuleStatusStopped); err != nil {
+				return err
+			}
 		}
 		return repository.NewTunnelRepository(tx).UpdateStatus(t.ID, model.TunnelStatusStopped)
 	}); err != nil {
 		return err
 	}
-	t.EntryRule.ServiceID = ""
-	t.EntryRule.Status = model.RuleStatusStopped
+	if len(entryPeers) == 0 {
+		t.EntryRule.ServiceID = ""
+		t.EntryRule.Status = model.RuleStatusStopped
+	}
 	t.Status = model.TunnelStatusStopped
 	return nil
 }

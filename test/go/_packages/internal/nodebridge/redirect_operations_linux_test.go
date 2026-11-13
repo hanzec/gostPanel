@@ -2,8 +2,10 @@ package nodebridge
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -39,7 +41,7 @@ esac
 	ctx := t.Context()
 	req := &nodegrpc.TransparentRedirectRequest{Action: prepare, Owner: "rule-5", Port: 12345, RelayHost: "203.0.113.7"}
 	plan, err := control.ConfigureTransparentRedirect(ctx, req)
-	if err != nil || plan.GetMark() == 0 || plan.GetMark()&0xff000000 == gost.ClashRedirectMark&0xff000000 || plan.GetActive() {
+	if err != nil || plan.GetMark() == 0 || plan.GetMark()&0xff000000 == gost.ClashRedirectMark&0xff000000 || plan.GetActive() || !plan.GetMultiRelaySupported() {
 		t.Fatalf("prepare returned %v, %v", plan, err)
 	}
 	for _, p := range []string{applied, path} {
@@ -62,11 +64,13 @@ esac
 		t.Fatalf("initial batch = %s, %v", batch, err)
 	}
 	req.RequireActive, req.RelayHost = true, "203.0.113.8"
+	req.RelayHosts = []string{"203.0.113.9", "203.0.113.8", "2001:db8::1"}
 	if _, err := control.ConfigureTransparentRedirect(ctx, req); err != nil {
 		t.Fatal(err)
 	}
 	state, err := readRedirectState(path)
-	if err != nil || state.Revision != 2 || state.Mark != plan.GetMark() || len(state.RelayIPs) != 1 || state.RelayIPs[0].String() != req.RelayHost {
+	wantIPs := []netip.Addr{netip.MustParseAddr("203.0.113.8"), netip.MustParseAddr("203.0.113.9")}
+	if err != nil || state.Revision != 2 || state.Mark != plan.GetMark() || !slices.Equal(state.RelayIPs, wantIPs) {
 		t.Fatalf("updated state = %+v, %v", state, err)
 	}
 	if err := os.Remove(applied); err != nil {

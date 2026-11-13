@@ -39,6 +39,7 @@ func TestTunnelChainUpdatesAllowed(t *testing.T) {
 	for name, want := range map[string]bool{
 		"tunnel-42-chain":             true,
 		"tunnel-42-clash-chain":       true,
+		"tunnel-42-shared-chain":      true,
 		"custom-chain":                false,
 		"tunnel-0-chain":              false,
 		"tunnel-042-chain":            false,

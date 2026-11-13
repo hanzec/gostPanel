@@ -69,7 +69,7 @@ func (s *controlServer) ProbeTunnel(ctx context.Context, req *nodegrpc.TunnelPro
 	name, address, token := req.GetChainName(), req.GetAddress(), req.GetToken()
 	target, err := netip.ParseAddrPort(address)
 	if err != nil || target.Addr() != netip.MustParseAddr(tunnelProbeHost) || target.Port() == 0 || len(token) != sha256.Size ||
-		!tunnelChainName.MatchString(name) || strings.HasSuffix(name, "-clash-chain") {
+		!tunnelChainName.MatchString(name) || strings.HasSuffix(name, "-clash-chain") || strings.HasSuffix(name, "-shared-chain") {
 		return nil, status.Error(codes.InvalidArgument, "无效的隧道测试请求")
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, tunnelProbeTimeout)
