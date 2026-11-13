@@ -215,6 +215,7 @@ func (s *controlServer) GetObserverEndpoint(context.Context, *emptypb.Empty) (*n
 
 var resourceName = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*$`)
 var tunnelChainName = regexp.MustCompile(`^tunnel-[1-9][0-9]*-((clash|shared)-)?chain$`)
+var tunnelBypassName = regexp.MustCompile(`^tunnel-[1-9][0-9]*-bypass$`)
 var entranceServiceResource = regexp.MustCompile(`^rule-[1-9][0-9]*(-docker)?$`)
 
 func allowedCommand(method, path string) bool {
@@ -245,6 +246,9 @@ func allowedCommand(method, path string) bool {
 		return false
 	}
 	if parts[2] == "admissions" || parts[2] == "bypasses" {
+		if method == http.MethodDelete {
+			return parts[2] == "bypasses" && tunnelBypassName.MatchString(parts[3])
+		}
 		return method == http.MethodGet || method == http.MethodPut
 	}
 	if method == http.MethodPut {
