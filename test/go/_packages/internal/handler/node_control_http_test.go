@@ -362,11 +362,11 @@ func TestNodeHTTPFirewallStatus(t *testing.T) {
 	lastError := "missing firewall jump"
 	control.mu.Lock()
 	control.firewall = &nodegrpc.FirewallStatus{
-		Supported: true, Managed: true, LastSync: timestamppb.New(lastSync), LastError: &lastError,
+		Supported: true, Managed: true, LastSync: timestamppb.New(lastSync), LastError: &lastError, Backend: "nftables",
 	}
 	control.mu.Unlock()
 	read = handlerData[nodeFirewallStatus](t, f.request(t, "GET", path, "", 200))
-	if !read.Supported || !read.Managed || read.Synchronized || read.LastSync == nil || !read.LastSync.Equal(lastSync) || read.LastError == nil || *read.LastError != lastError {
+	if !read.Supported || !read.Managed || read.Synchronized || read.LastSync == nil || !read.LastSync.Equal(lastSync) || read.LastError == nil || *read.LastError != lastError || read.Backend != "nftables" {
 		t.Fatalf("unsynchronized firewall status = %+v", read)
 	}
 	control.reject(nodegrpc.V1_GetFirewallStatus_FullMethodName, codes.Unimplemented)

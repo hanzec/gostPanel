@@ -174,7 +174,7 @@ describe('nftables preview', () => {
 
   it('shows firewall failures and the last successful sync even when the rule preview fails', async () => {
     const lastSync = '2026-11-13T03:30:00Z'
-    const state = { supported: true, managed: true, last_sync: lastSync }
+    const state = { supported: true, managed: true, last_sync: lastSync, backend: 'nftables' }
     api.getNodeNftConfig.mockRejectedValue(apiError('无法读取节点规则'))
     api.getNodeFirewallStatus.mockResolvedValueOnce(response({ ...state, synchronized: false, last_error: 'missing firewall jump' }))
       .mockResolvedValueOnce(response({ ...state, synchronized: true, last_error: null }))
@@ -182,6 +182,8 @@ describe('nftables preview', () => {
     await flushPromises()
     const health = wrapper.get('.nft-firewall')
     expect(health.text()).toContain('同步异常')
+    expect(health.text()).toContain('放行后端 nftables')
+    expect(health.text()).toContain('inet input 链')
     expect(health.text()).toContain('missing firewall jump')
     expect(health.get('time').attributes('datetime')).toBe(lastSync)
     expect(wrapper.get('[role="alert"]').text()).toContain('无法读取节点规则')
@@ -190,6 +192,21 @@ describe('nftables preview', () => {
     expect(api.getNodeFirewallStatus).toHaveBeenCalledWith(node.id)
     expect(health.text()).toContain('已同步')
     expect(health.text()).not.toContain('missing firewall jump')
+  })
+
+  it('shows the UFW requirement without nftables delegation guidance', async () => {
+    api.getNodeNftConfig.mockResolvedValue(response({ config: activeRules, live: true }))
+    api.getNodeFirewallStatus.mockResolvedValue(response({
+      backend: 'ufw', supported: false, managed: true, synchronized: false, last_error: 'UFW is inactive'
+    }))
+    wrapper = mountNodeComponent(NodeNftPreview, { node })
+    await flushPromises()
+    const health = wrapper.get('.nft-firewall')
+    expect(health.text()).toContain('放行后端 UFW')
+    expect(health.text()).toContain('后端不可用')
+    expect(health.text()).toContain('UFW 已启用并运行')
+    expect(health.text()).toContain('UFW is inactive')
+    expect(health.text()).not.toContain('inet input 链')
   })
 })
 

@@ -17,8 +17,9 @@ import (
 	"time"
 )
 
-// FirewallConfig identifies the host nftables input chain that delegates YAGP traffic.
+// FirewallConfig enables automatic allowances and identifies the delegated chain on nftables hosts.
 type FirewallConfig struct {
+	Enabled    *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 	Table      string `json:"table" yaml:"table"`
 	InputChain string `json:"input_chain" yaml:"input_chain"`
 }
@@ -34,6 +35,7 @@ type FirewallPorts struct {
 }
 
 type FirewallStatus struct {
+	Backend      string     `json:"backend"`
 	Supported    bool       `json:"supported"`
 	Managed      bool       `json:"managed"`
 	Synchronized bool       `json:"synchronized"`
@@ -46,40 +48,60 @@ type FirewallManager struct {
 	configErr error
 	prefix    string
 	owner     string
+	backend   string
 
 	statusMu sync.RWMutex
 	status   FirewallStatus
 }
 
-var (
-	firewallIdentifier     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,254}$`)
-	errFirewallUnsupported = errors.New("firewall synchronization requires nftables on Linux")
-)
+var firewallIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,254}$`)
 
 func NewFirewallManager(nodeID uint64, config FirewallConfig) (*FirewallManager, error) {
+	return newFirewallManager(nodeID, config, hostFirewallBackend())
+}
+
+func newFirewallManager(nodeID uint64, config FirewallConfig, backend string) (*FirewallManager, error) {
 	manager := &FirewallManager{
-		config: config,
-		prefix: fmt.Sprintf("yagp_%d_", nodeID),
-		owner:  fmt.Sprintf("yagp daemon firewall %d", nodeID),
+		config:  config,
+		prefix:  fmt.Sprintf("yagp_%d_", nodeID),
+		owner:   fmt.Sprintf("yagp daemon firewall %d", nodeID),
+		backend: backend,
 	}
-	_, manager.status.Supported = findFirewallNft()
-	manager.status.Managed = config != (FirewallConfig{})
-	if manager.status.Managed && (!firewallIdentifier.MatchString(config.Table) ||
+	manager.status.Backend = backend
+	_, supportErr := firewallExecutable(backend)
+	manager.status.Supported = supportErr == nil
+	manager.status.Managed = config.Table != "" || config.InputChain != ""
+	if config.Enabled != nil {
+		manager.status.Managed = *config.Enabled
+	}
+	if manager.status.Managed && backend == firewallNFT && (!firewallIdentifier.MatchString(config.Table) ||
 		!firewallIdentifier.MatchString(config.InputChain) || config.InputChain == manager.prefix+"input") {
 		manager.configErr = errors.New("firewall requires an existing nftables inet table and input base chain with valid names")
 		manager.recordSyncError(manager.configErr)
-	} else if manager.status.Managed && !manager.status.Supported {
-		manager.recordSyncError(errFirewallUnsupported)
+	} else if manager.status.Managed && supportErr != nil {
+		manager.recordSyncError(supportErr)
 	}
 	return manager, manager.configErr
 }
 
-func findFirewallNft() (string, bool) {
+func firewallExecutable(backend string) (string, error) {
 	if runtime.GOOS != "linux" {
-		return "", false
+		return "", errors.New("automatic firewall allowances require Linux")
 	}
-	nft, err := exec.LookPath("nft")
-	return nft, err == nil
+	var command string
+	switch backend {
+	case firewallNFT:
+		command = "nft"
+	case firewallUFW:
+		command = "ufw"
+	default:
+		return "", errors.New("cannot select a firewall backend without Linux OS release information")
+	}
+	path, err := exec.LookPath(command)
+	if err != nil {
+		return "", fmt.Errorf("automatic firewall allowances require %s on this node", command)
+	}
+	return path, nil
 }
 
 func (m *FirewallManager) Status() FirewallStatus {
@@ -115,18 +137,21 @@ func (m *FirewallManager) Reconcile(ctx context.Context, ports FirewallPorts) er
 
 	nftApplyMu.Lock()
 	defer nftApplyMu.Unlock()
-	nft, supported := findFirewallNft()
+	executable, supportErr := firewallExecutable(m.backend)
 	err := ctx.Err()
 	if err == nil {
-		if supported {
-			err = m.reconcile(ctx, nft, ports)
-		} else {
-			err = errFirewallUnsupported
+		switch {
+		case supportErr != nil:
+			err = supportErr
+		case m.backend == firewallUFW:
+			err = m.reconcileUFW(ctx, executable, ports)
+		default:
+			err = m.reconcile(ctx, executable, ports)
 		}
 	}
 
 	m.statusMu.Lock()
-	m.status.Supported = supported
+	m.status.Supported = supportErr == nil && !errors.Is(err, errUFWInactive)
 	m.status.Synchronized = err == nil
 	if err == nil {
 		now := time.Now().UTC()

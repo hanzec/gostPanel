@@ -76,7 +76,7 @@ func TestNativeFirewallDelegationAndDrift(t *testing.T) {
 		}
 	}
 	config := FirewallConfig{Table: table, InputChain: hostChain}
-	manager, err := NewFirewallManager(nodeID, config)
+	manager, err := newFirewallManager(nodeID, config, firewallNFT)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestNativeFirewallDelegationAndDrift(t *testing.T) {
 	run("delete", "rule", "inet", table, chain, "handle", ruleHandle)
 	assertConnection(second, false)
 	// A fresh manager reconstructs rules from persisted desired inputs after a restart.
-	restarted, err := NewFirewallManager(nodeID, config)
+	restarted, err := newFirewallManager(nodeID, config, firewallNFT)
 	if err != nil {
 		t.Fatal(err)
 	}

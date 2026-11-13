@@ -201,4 +201,5 @@ message FirewallStatus {
   bool synchronized = 3;
   .google.protobuf.Timestamp last_sync = 4;
   optional string last_error = 5;
+  string backend = 6;
 }

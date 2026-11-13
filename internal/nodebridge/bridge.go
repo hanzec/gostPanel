@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -105,9 +106,10 @@ func run(ctx context.Context, cfg Config, dial func(context.Context, string, str
 		},
 	}
 	defer control.client.CloseIdleConnections()
-	control.firewall, err = NewFirewallManager(cfg.NodeID, cfg.Firewall)
-	if err != nil {
-		log.Printf("configure firewall: %v", err)
+	manager, firewallErr := NewFirewallManager(cfg.NodeID, cfg.Firewall)
+	control.firewall = manager
+	if firewallErr != nil {
+		log.Printf("configure firewall: %v", firewallErr)
 	}
 	if cfg.ConfigFile != "" {
 		restoreCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -130,10 +132,14 @@ func run(ctx context.Context, cfg Config, dial func(context.Context, string, str
 	healthpb.RegisterHealthServer(observation, ready)
 
 	channelCtx, cancelChannel := context.WithCancel(ctx)
-	defer cancelChannel()
-	if err == nil && runtime.GOOS == "linux" && control.firewall.Status().Managed {
+	var firewallWorker sync.WaitGroup
+	defer func() {
+		cancelChannel()
+		firewallWorker.Wait()
+	}()
+	if firewallErr == nil && runtime.GOOS == "linux" && manager.Status().Managed {
 		control.firewallChanged = make(chan struct{}, 1)
-		go control.maintainFirewall(channelCtx)
+		firewallWorker.Go(func() { control.maintainFirewall(channelCtx) })
 	}
 	go maintainCredentials(channelCtx, credentials)
 	go maintainPanelChannel(channelCtx, credentials, cfg.ConfigFile, &current, controlDispatcher(control))

@@ -1797,6 +1797,7 @@ type FirewallStatus struct {
 	Synchronized  bool                   `protobuf:"varint,3,opt,name=synchronized,proto3" json:"synchronized,omitempty"`
 	LastSync      *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=last_sync,json=lastSync,proto3" json:"last_sync,omitempty"`
 	LastError     *string                `protobuf:"bytes,5,opt,name=last_error,json=lastError,proto3,oneof" json:"last_error,omitempty"`
+	Backend       string                 `protobuf:"bytes,6,opt,name=backend,proto3" json:"backend,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1862,6 +1863,13 @@ func (x *FirewallStatus) GetLastSync() *timestamppb.Timestamp {
 func (x *FirewallStatus) GetLastError() string {
 	if x != nil && x.LastError != nil {
 		return *x.LastError
+	}
+	return ""
+}
+
+func (x *FirewallStatus) GetBackend() string {
+	if x != nil {
+		return x.Backend
 	}
 	return ""
 }
@@ -2002,14 +2010,15 @@ const file_node_proto_rawDesc = "" +
 	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\fR\x05token\"6\n" +
 	"\x10TunnelProbeReply\x12\"\n" +
-	"\rround_trip_ms\x18\x01 \x01(\x03R\vroundTripMs\"\xd8\x01\n" +
+	"\rround_trip_ms\x18\x01 \x01(\x03R\vroundTripMs\"\xf2\x01\n" +
 	"\x0eFirewallStatus\x12\x1c\n" +
 	"\tsupported\x18\x01 \x01(\bR\tsupported\x12\x18\n" +
 	"\amanaged\x18\x02 \x01(\bR\amanaged\x12\"\n" +
 	"\fsynchronized\x18\x03 \x01(\bR\fsynchronized\x127\n" +
 	"\tlast_sync\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\blastSync\x12\"\n" +
 	"\n" +
-	"last_error\x18\x05 \x01(\tH\x00R\tlastError\x88\x01\x01B\r\n" +
+	"last_error\x18\x05 \x01(\tH\x00R\tlastError\x88\x01\x01\x12\x18\n" +
+	"\abackend\x18\x06 \x01(\tR\abackendB\r\n" +
 	"\v_last_error*\xc0\x01\n" +
 	"\x19TransparentRedirectAction\x12+\n" +
 	"'TRANSPARENT_REDIRECT_ACTION_UNSPECIFIED\x10\x00\x12'\n" +

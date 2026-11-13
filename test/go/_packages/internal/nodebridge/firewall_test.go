@@ -37,7 +37,7 @@ const firewallLiveHost = `{"nftables":[
 
 func newFirewallTestManager(t *testing.T) *FirewallManager {
 	t.Helper()
-	manager, err := NewFirewallManager(42, FirewallConfig{Table: "host-filter", InputChain: "host-input"})
+	manager, err := newFirewallManager(42, FirewallConfig{Table: "host-filter", InputChain: "host-input"}, firewallNFT)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ esac
 }
 
 func TestFirewallStatusRecordsConfigError(t *testing.T) {
-	manager, err := NewFirewallManager(42, FirewallConfig{Table: "filter\nflush ruleset", InputChain: "input"})
+	manager, err := newFirewallManager(42, FirewallConfig{Table: "filter\nflush ruleset", InputChain: "input"}, firewallNFT)
 	if err == nil {
 		t.Fatal("accepted invalid config")
 	}

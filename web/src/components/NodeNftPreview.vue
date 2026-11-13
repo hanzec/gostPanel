@@ -12,7 +12,9 @@
         <h4 class="ops-subsection-title" id="nft-firewall-title">防火墙同步</h4>
         <span class="ops-status" :class="firewallState.tone">{{ firewallState.label }}</span>
       </div>
-      <p v-if="firewall?.managed" class="ops-muted">管理员在主机 inet input 链中接入 YAGP 放行链，状态仅反映节点规则同步。</p>
+      <p v-if="firewallBackend" class="ops-muted">放行后端 {{ firewallBackend }}</p>
+      <p v-if="firewall?.managed && firewall.backend === 'ufw'" class="ops-muted">自动放行需要主机上的 UFW 已启用并运行。</p>
+      <p v-if="firewall?.managed && firewall.backend === 'nftables'" class="ops-muted">管理员在主机 inet input 链中接入 YAGP 放行链。</p>
       <p v-if="firewall?.last_sync" class="ops-muted">最近成功同步 <time :datetime="firewall.last_sync">{{ formatTime(firewall.last_sync) }}</time></p>
       <p v-if="firewallError || firewall?.last_error" class="nft-firewall-error">{{ firewallError || firewall.last_error }}</p>
     </section>
@@ -44,11 +46,16 @@ const firewall = ref(null)
 const firewallLoading = ref(true)
 const firewallError = ref('')
 const legacyFirewall = ref(false)
+const firewallBackend = computed(() => {
+  const backend = firewall.value?.backend
+  return backend === 'ufw' ? 'UFW' : backend
+})
 
 const firewallState = computed(() => {
   if (firewallLoading.value) return { label: '正在读取', tone: 'is-muted' }
   if (legacyFirewall.value) return { label: '守护程序版本较旧', tone: 'is-muted' }
   if (firewallError.value) return { label: '读取失败', tone: 'is-danger' }
+  if (firewall.value?.managed && !firewall.value.supported) return { label: '后端不可用', tone: 'is-danger' }
   if (!firewall.value?.supported) return { label: '环境不支持', tone: 'is-muted' }
   if (!firewall.value.managed) return { label: '未启用', tone: 'is-muted' }
   if (firewall.value.synchronized) return { label: '已同步', tone: 'is-success' }

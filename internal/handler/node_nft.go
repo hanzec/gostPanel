@@ -22,6 +22,7 @@ type nodeFirewallStatus struct {
 	Synchronized bool       `json:"synchronized"`
 	LastSync     *time.Time `json:"last_sync"`
 	LastError    *string    `json:"last_error"`
+	Backend      string     `json:"backend"`
 }
 
 func (h *NodeHandler) GetFirewallStatus(c *gin.Context) {
@@ -35,7 +36,8 @@ func (h *NodeHandler) GetFirewallStatus(c *gin.Context) {
 		return
 	}
 	result := nodeFirewallStatus{
-		Supported: state.GetSupported(), Managed: state.GetManaged(), Synchronized: state.GetSynchronized(), LastError: state.LastError,
+		Supported: state.GetSupported(), Managed: state.GetManaged(), Synchronized: state.GetSynchronized(),
+		LastError: state.LastError, Backend: state.GetBackend(),
 	}
 	if timestamp := state.GetLastSync(); timestamp != nil && timestamp.IsValid() {
 		lastSync := timestamp.AsTime()

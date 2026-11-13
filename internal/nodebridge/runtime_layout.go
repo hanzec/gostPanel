@@ -88,19 +88,7 @@ func UpdateSystemdRuntime(ctx context.Context, cfg Config, configFile string) er
 	return migrateSystemdUnits(ctx, cfg, configFile, systemdUnitDir)
 }
 
-func enableSystemdNftables(ctx context.Context) error {
-	state, err := exec.CommandContext(ctx, "systemctl", "show", "--property=LoadState", "--value", "nftables.service").Output()
-	if err != nil || strings.TrimSpace(string(state)) != "loaded" {
-		return nil
-	}
-	// Starting nftables now could flush rules already installed by Docker and the administrator.
-	return upgradeCommand(ctx, "systemctl", "enable", "nftables.service")
-}
-
 func updateSystemdNetworkOrder(ctx context.Context, cfg Config, configFile, unitDir string) error {
-	if err := enableSystemdNftables(ctx); err != nil {
-		return err
-	}
 	dir := filepath.Join(unitDir, cfg.runtimeUnit("daemon")+".d")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -134,9 +122,6 @@ func migrateSystemdUnits(ctx context.Context, cfg Config, configFile, unitDir st
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return statErr
 		}
-	}
-	if err := enableSystemdNftables(ctx); err != nil {
-		return err
 	}
 	marker := filepath.Join(dir, runtimeLayoutFile)
 	var created []string

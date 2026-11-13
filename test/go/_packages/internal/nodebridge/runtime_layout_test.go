@@ -24,7 +24,6 @@ func TestMigrateSystemdRuntime(t *testing.T) {
 		brokenGost bool
 	}{
 		{name: "installed"},
-		{name: "nftables boot enable failed", fail: "enable nftables.service"},
 		{name: "rollback", fail: "enable --now yagp-daemon.service yagp-gost.service"},
 		{name: "rollback when Gost is unhealthy", brokenGost: true},
 	} {
@@ -37,9 +36,6 @@ func TestMigrateSystemdRuntime(t *testing.T) {
 			t.Setenv("TEST_SYSTEMCTL_FAILURE", test.fail)
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
-if [ "$1" = "show" ]; then
-    printf '%s\n' loaded
-fi
 test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 `)
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "nft"), "#!/bin/sh\nexit 0\n")
@@ -56,12 +52,8 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			if test.fail == "enable nftables.service" {
-				if err == nil || ReadRuntimeLayout(configPath) != 0 ||
-					string(log) != "show --property=LoadState --value nftables.service\nenable nftables.service\n" {
-					t.Fatalf("nftables failure should leave the old services untouched: %v\n%s", err, log)
-				}
-				return
+			if strings.Contains(string(log), "nftables.service") || strings.Contains(string(log), "ufw.service") {
+				t.Fatalf("migration invoked a host firewall service:\n%s", log)
 			}
 			if test.fail != "" || test.brokenGost {
 				if err == nil || ReadRuntimeLayout(configPath) != 0 || !strings.Contains(string(log), "enable --now yagp-daemon-42.service yagp-gost-42.service") {
@@ -102,14 +94,12 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 
 func TestUpdateSystemdNetworkOrder(t *testing.T) {
 	for _, test := range []struct {
-		name, serviceState, rejectedCommand, blockedPath string
+		name, rejectedCommand, blockedPath string
 	}{
-		{name: "installed", serviceState: "loaded"},
-		{name: "no nftables service", serviceState: "not-found"},
-		{name: "enable failed", serviceState: "loaded", rejectedCommand: "enable nftables.service"},
-		{name: "reload failed", serviceState: "loaded", rejectedCommand: "daemon-reload"},
-		{name: "drop-in directory blocked", serviceState: "loaded", blockedPath: "directory"},
-		{name: "drop-in file blocked", serviceState: "loaded", blockedPath: "file"},
+		{name: "installed"},
+		{name: "reload failed", rejectedCommand: "daemon-reload"},
+		{name: "drop-in directory blocked", blockedPath: "directory"},
+		{name: "drop-in file blocked", blockedPath: "file"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			unitDir, nodeDir := t.TempDir(), t.TempDir()
@@ -120,14 +110,10 @@ func TestUpdateSystemdNetworkOrder(t *testing.T) {
 			logPath := filepath.Join(unitDir, "commands")
 			t.Setenv("PATH", unitDir)
 			t.Setenv("TEST_SYSTEMCTL_LOG", logPath)
-			t.Setenv("TEST_NFTABLES_STATE", test.serviceState)
 			t.Setenv("TEST_SYSTEMCTL_FAILURE", test.rejectedCommand)
 			writeRuntimeTestFile(t, unit, "existing unit")
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
-if [ "$1" = "show" ]; then
-    printf '%s\n' "$TEST_NFTABLES_STATE"
-fi
 test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 `)
 			writeRuntimeTestFile(t, filepath.Join(nodeDir, runtimeLayoutFile), "1\n")
@@ -160,14 +146,14 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if err != nil || string(current) != "existing unit" {
 				t.Fatalf("original unit was changed: %q, %v", current, err)
 			}
-			want := "show --property=LoadState --value nftables.service\n"
-			if test.serviceState == "loaded" {
-				want += "enable nftables.service\n"
-			}
-			if test.rejectedCommand != "enable nftables.service" && test.blockedPath == "" {
-				want += "daemon-reload\n"
+			want := ""
+			if test.blockedPath == "" {
+				want = "daemon-reload\n"
 			}
 			log, err := os.ReadFile(logPath)
+			if want == "" && os.IsNotExist(err) {
+				err = nil
+			}
 			if err != nil || string(log) != want {
 				t.Fatalf("systemctl commands = %q, %v, want %q", log, err, want)
 			}

@@ -15,7 +15,8 @@ func (s *controlServer) GetFirewallStatus(context.Context, *emptypb.Empty) (*nod
 	}
 	state := s.firewall.Status()
 	reply := &nodegrpc.FirewallStatus{
-		Supported: state.Supported, Managed: state.Managed, Synchronized: state.Synchronized, LastError: state.LastError,
+		Supported: state.Supported, Managed: state.Managed, Synchronized: state.Synchronized,
+		LastError: state.LastError, Backend: state.Backend,
 	}
 	if state.LastSync != nil {
 		reply.LastSync = timestamppb.New(*state.LastSync)
