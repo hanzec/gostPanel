@@ -1,6 +1,7 @@
 package nodebridge
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,7 +25,6 @@ func TestMigrateSystemdRuntime(t *testing.T) {
 		brokenGost bool
 	}{
 		{name: "installed"},
-		{name: "nftables boot enable failed", fail: "enable nftables.service"},
 		{name: "rollback", fail: "enable --now yagp-daemon.service yagp-gost.service"},
 		{name: "rollback when Gost is unhealthy", brokenGost: true},
 	} {
@@ -37,9 +37,6 @@ func TestMigrateSystemdRuntime(t *testing.T) {
 			t.Setenv("TEST_SYSTEMCTL_FAILURE", test.fail)
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
-if [ "$1" = "show" ]; then
-    printf '%s\n' loaded
-fi
 test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 `)
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "nft"), "#!/bin/sh\nexit 0\n")
@@ -56,12 +53,8 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			if test.fail == "enable nftables.service" {
-				if err == nil || ReadRuntimeLayout(configPath) != 0 ||
-					string(log) != "show --property=LoadState --value nftables.service\nenable nftables.service\n" {
-					t.Fatalf("nftables failure should leave the old services untouched: %v\n%s", err, log)
-				}
-				return
+			if strings.Contains(string(log), "nftables.service") || strings.Contains(string(log), "ufw.service") {
+				t.Fatalf("migration invoked a host firewall service:\n%s", log)
 			}
 			if test.fail != "" || test.brokenGost {
 				if err == nil || ReadRuntimeLayout(configPath) != 0 || !strings.Contains(string(log), "enable --now yagp-daemon-42.service yagp-gost-42.service") {
@@ -73,7 +66,7 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 				return
 			}
 			cfg.RuntimeLayout = ReadRuntimeLayout(configPath)
-			if err != nil || cfg.RuntimeLayout != RuntimeLayoutVersion || !strings.Contains(string(log), "disable --now yagp-daemon-42.service yagp-gost-42.service") {
+			if err != nil || cfg.RuntimeLayout != networkOrderLayoutVersion || !strings.Contains(string(log), "disable --now yagp-daemon-42.service yagp-gost-42.service") {
 				t.Fatalf("migration did not replace the legacy units: %v\n%s", err, log)
 			}
 			if _, err := os.Stat(filepath.Join(unitDir, "yagp-daemon-42.service")); !os.IsNotExist(err) {
@@ -102,14 +95,12 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 
 func TestUpdateSystemdNetworkOrder(t *testing.T) {
 	for _, test := range []struct {
-		name, serviceState, rejectedCommand, blockedPath string
+		name, rejectedCommand, blockedPath string
 	}{
-		{name: "installed", serviceState: "loaded"},
-		{name: "no nftables service", serviceState: "not-found"},
-		{name: "enable failed", serviceState: "loaded", rejectedCommand: "enable nftables.service"},
-		{name: "reload failed", serviceState: "loaded", rejectedCommand: "daemon-reload"},
-		{name: "drop-in directory blocked", serviceState: "loaded", blockedPath: "directory"},
-		{name: "drop-in file blocked", serviceState: "loaded", blockedPath: "file"},
+		{name: "installed"},
+		{name: "reload failed", rejectedCommand: "daemon-reload"},
+		{name: "drop-in directory blocked", blockedPath: "directory"},
+		{name: "drop-in file blocked", blockedPath: "file"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			unitDir, nodeDir := t.TempDir(), t.TempDir()
@@ -120,14 +111,10 @@ func TestUpdateSystemdNetworkOrder(t *testing.T) {
 			logPath := filepath.Join(unitDir, "commands")
 			t.Setenv("PATH", unitDir)
 			t.Setenv("TEST_SYSTEMCTL_LOG", logPath)
-			t.Setenv("TEST_NFTABLES_STATE", test.serviceState)
 			t.Setenv("TEST_SYSTEMCTL_FAILURE", test.rejectedCommand)
 			writeRuntimeTestFile(t, unit, "existing unit")
 			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
-if [ "$1" = "show" ]; then
-    printf '%s\n' "$TEST_NFTABLES_STATE"
-fi
 test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 `)
 			writeRuntimeTestFile(t, filepath.Join(nodeDir, runtimeLayoutFile), "1\n")
@@ -144,7 +131,7 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if (err != nil) != fail {
 				t.Fatalf("update systemd network order: %v, want failure %t", err, fail)
 			}
-			wantVersion := RuntimeLayoutVersion
+			wantVersion := networkOrderLayoutVersion
 			if fail {
 				wantVersion = singleNodeLayoutVersion
 			} else {
@@ -160,18 +147,109 @@ test "$*" != "$TEST_SYSTEMCTL_FAILURE"
 			if err != nil || string(current) != "existing unit" {
 				t.Fatalf("original unit was changed: %q, %v", current, err)
 			}
-			want := "show --property=LoadState --value nftables.service\n"
-			if test.serviceState == "loaded" {
-				want += "enable nftables.service\n"
-			}
-			if test.rejectedCommand != "enable nftables.service" && test.blockedPath == "" {
-				want += "daemon-reload\n"
+			want := ""
+			if test.blockedPath == "" {
+				want = "daemon-reload\n"
 			}
 			log, err := os.ReadFile(logPath)
+			if want == "" && os.IsNotExist(err) {
+				err = nil
+			}
 			if err != nil || string(log) != want {
 				t.Fatalf("systemctl commands = %q, %v, want %q", log, err, want)
 			}
 		})
+	}
+}
+
+func TestMigrateFlatSystemdRuntime(t *testing.T) {
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(admin.Close)
+	for _, test := range []struct {
+		name           string
+		version        int
+		fail, conflict bool
+	}{
+		{name: "from numbered units"},
+		{name: "from fixed units", version: networkOrderLayoutVersion},
+		{name: "rollback", version: networkOrderLayoutVersion, fail: true},
+		{name: "conflict", version: networkOrderLayoutVersion, conflict: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			unitDir, newDir := t.TempDir(), t.TempDir()
+			oldDir := filepath.Join(newDir, "42")
+			if err := os.Mkdir(oldDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			oldConfig, newConfig := filepath.Join(oldDir, "node.yaml"), filepath.Join(newDir, "node.yaml")
+			originalConfig := fmt.Sprintf("report_ca_file: %s/panel-ca.pem\n", oldDir)
+			writeRuntimeTestFile(t, oldConfig, originalConfig)
+			writeRuntimeTestFile(t, filepath.Join(oldDir, "gost.yaml"), "tls:\n  keyFile: "+oldDir+"/relay.key\n")
+			for _, name := range []string{"panel-ca.pem", "relay.key", "yagp-daemon", "gost", "nft.json", PanelCredentialsFile} {
+				writeRuntimeTestFile(t, filepath.Join(oldDir, name), name)
+			}
+			if test.version != 0 {
+				writeRuntimeTestFile(t, filepath.Join(oldDir, runtimeLayoutFile), fmt.Sprintln(test.version))
+			}
+			if test.conflict {
+				writeRuntimeTestFile(t, filepath.Join(newDir, "nft.json"), "keep this")
+			}
+			logPath := filepath.Join(unitDir, "commands")
+			t.Setenv("PATH", unitDir)
+			t.Setenv("TEST_SYSTEMCTL_LOG", logPath)
+			if test.fail {
+				t.Setenv("TEST_SYSTEMCTL_FAILURE", "daemon-reload")
+			}
+			writeRuntimeTestFile(t, filepath.Join(unitDir, "systemctl"), `#!/bin/sh
+printf '%s\n' "$*" >> "$TEST_SYSTEMCTL_LOG"
+test "$*" != "$TEST_SYSTEMCTL_FAILURE"
+`)
+			address := strings.TrimPrefix(admin.URL, "http://")
+			cfg := Config{NodeID: 42, RuntimeLayout: test.version, AdminAddress: address, ObserverListen: address}
+			units := []string{cfg.runtimeUnit("daemon"), cfg.runtimeUnit("gost")}
+			originalUnits := runtimeUnitDefinitions(oldDir, oldConfig)
+			for i, unit := range units {
+				writeRuntimeTestFile(t, filepath.Join(unitDir, unit), originalUnits[i])
+			}
+			err := migrateFlatSystemdRuntime(t.Context(), cfg, oldConfig, newConfig, unitDir)
+			if test.conflict || test.fail {
+				if err == nil || ReadRuntimeLayout(oldConfig) != test.version || ReadRuntimeLayout(newConfig) != 0 {
+					t.Fatalf("failed migration did not retain the original layout: %v", err)
+				}
+				assertRuntimeTestFile(t, oldConfig, originalConfig)
+				for i, unit := range units {
+					assertRuntimeTestFile(t, filepath.Join(unitDir, unit), originalUnits[i])
+				}
+				if test.conflict {
+					assertRuntimeTestFile(t, filepath.Join(newDir, "nft.json"), "keep this")
+					if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+						t.Fatalf("systemctl was called after a file conflict: %v", err)
+					}
+				}
+				return
+			}
+			if err != nil || ReadRuntimeLayout(newConfig) != RuntimeLayoutVersion {
+				t.Fatalf("migrate flat runtime: %v", err)
+			}
+			if _, err := os.Stat(oldDir); !os.IsNotExist(err) {
+				t.Fatalf("old directory remains: %v", err)
+			}
+			assertRuntimeTestFile(t, newConfig, strings.ReplaceAll(originalConfig, oldDir, newDir))
+			assertRuntimeTestFile(t, filepath.Join(newDir, "gost.yaml"), "tls:\n  keyFile: "+newDir+"/relay.key\n")
+			assertRuntimeTestFile(t, filepath.Join(newDir, PanelCredentialsFile), PanelCredentialsFile)
+			for i, unit := range []string{"yagp-daemon.service", "yagp-gost.service"} {
+				assertRuntimeTestFile(t, filepath.Join(unitDir, unit), strings.ReplaceAll(originalUnits[i], oldDir, newDir))
+			}
+		})
+	}
+}
+
+func assertRuntimeTestFile(t *testing.T, path, want string) {
+	t.Helper()
+	if data, err := os.ReadFile(path); err != nil || string(data) != want {
+		t.Fatalf("read %s: %q, %v, want %q", path, data, err, want)
 	}
 }
 

@@ -116,6 +116,10 @@ func TestRuleReconciliationRepairsStatusAndExitAllowlist(t *testing.T) {
 	syncService.syncNodeRules(node, nil)
 	assertAdmission(firstName, true, []string{originalIPv4, "203.0.113.8"})
 	refreshConfig()
+	requireServiceError(t, db.Model(&entry).Update("manual_addresses", "[\"192.168.1.10\",\"fd00::10\"]").Error, nil)
+	syncService.syncNodeRules(node, nil)
+	assertAdmission(firstName, true, nil)
+	refreshConfig()
 	tunnel.AllowlistNodeIDs = []uint{}
 	requireServiceError(t, db.Save(&tunnel).Error, nil)
 	syncService.syncNodeRules(node, nil)

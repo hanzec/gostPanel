@@ -139,7 +139,7 @@ func (s *RuleService) Create(req *dto.CreateRuleReq, username, ip, userAgent str
 
 // Update also permits policy changes on an exit whose tunnel has stopped.
 func (s *RuleService) Update(id uint, req *dto.UpdateRuleReq, username, ip, userAgent string) (*model.GostRule, error) {
-	rule, err := s.GetByID(id)
+	rule, err := s.getByID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +344,7 @@ func normalizeRuleListenIP(protocol model.RuleProtocol, value string) (string, e
 
 // Delete 删除规则
 func (s *RuleService) Delete(id uint, username, ip, userAgent string) error {
-	rule, err := s.GetByID(id)
+	rule, err := s.getByID(id)
 	if err != nil {
 		return err
 	}
@@ -379,6 +379,17 @@ func (s *RuleService) Delete(id uint, username, ip, userAgent string) error {
 
 // GetByID 获取规则详情
 func (s *RuleService) GetByID(id uint) (*model.GostRule, error) {
+	rule, err := s.getByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadExitTraffic(map[uint]*model.GostRule{rule.ID: rule}); err != nil {
+		return nil, err
+	}
+	return rule, nil
+}
+
+func (s *RuleService) getByID(id uint) (*model.GostRule, error) {
 	rule, err := s.ruleRepo.FindByID(id)
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
@@ -470,7 +481,33 @@ func (s *RuleService) List(req *dto.RuleListReq) ([]model.GostRule, int64, error
 			setEntranceBinding(byID[*tunnel.ExitRuleID], tunnel.ID, "exit", tunnel.Status)
 		}
 	}
+	if err := s.loadExitTraffic(byID); err != nil {
+		return nil, 0, err
+	}
 	return rules, total, nil
+}
+
+// loadExitTraffic replaces observer totals on read responses only.
+func (s *RuleService) loadExitTraffic(rules map[uint]*model.GostRule) error {
+	var ids []uint
+	for id, rule := range rules {
+		if rule.Role == model.EndpointRoleExit {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	exits, err := s.tunnelRepo.EndpointExitTraffic(ids...)
+	if err != nil {
+		return err
+	}
+	for _, exit := range exits {
+		rule := rules[exit.ID]
+		rule.InputBytes, rule.OutputBytes = exit.InputBytes, exit.OutputBytes
+		rule.TotalBytes = exit.InputBytes + exit.OutputBytes
+	}
+	return nil
 }
 
 // Start 启动规则

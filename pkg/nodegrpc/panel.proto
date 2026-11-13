@@ -29,4 +29,5 @@ service v1 {
   rpc ConfigureTransparentRedirect(.yagp.node.v1.TransparentRedirectRequest) returns (.yagp.node.v1.TransparentRedirectReply);
   rpc StartTunnelProbe(.google.protobuf.Empty) returns (.yagp.node.v1.TunnelProbeEndpoint);
   rpc ProbeTunnel(.yagp.node.v1.TunnelProbeRequest) returns (.yagp.node.v1.TunnelProbeReply);
+  rpc GetFirewallStatus(.google.protobuf.Empty) returns (.yagp.node.v1.FirewallStatus);
 }

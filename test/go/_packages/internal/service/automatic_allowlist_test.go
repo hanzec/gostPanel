@@ -23,7 +23,8 @@ func TestAutomaticTunnelAllowlistDefaultsAndLegacySelections(t *testing.T) {
 				entryRemote, exitRemote := &lifecycleNode{t: t}, &lifecycleNode{t: t}
 				entry, exit := startServiceTestNode(t, entryRemote), startServiceTestNode(t, exitRemote)
 				entry.IPv4, entry.IPv6 = "192.0.2.1", "2001:db8::1"
-				entry.ManualAddresses, entry.LocalAddresses = []string{"203.0.113.1", entry.IPv4}, []string{"10.0.0.1", "fd00::1"}
+				entry.ManualAddresses = []string{"203.0.113.1", entry.IPv4, "100.64.0.1", "::ffff:192.168.0.1", "127.0.0.1", "fe80::1"}
+				entry.LocalAddresses = []string{"10.0.0.1", "fd00::1"}
 				exit.Name = "exit"
 				other := model.GostNode{Name: "manual source", IPv4: "192.0.2.2", LocalAddresses: []string{"10.0.0.2"}}
 				saveServiceFixtures(t, db, &entry, &exit, &other)
@@ -36,7 +37,7 @@ func TestAutomaticTunnelAllowlistDefaultsAndLegacySelections(t *testing.T) {
 					req.EntryNodeID, req.ExitNodeID, req.RelayPort = 0, 0, 0
 					req.EntryRuleID, req.ExitRuleID = source.ID, destination.ID
 				}
-				want := []string{"10.0.0.1", "192.0.2.1", "2001:db8::1", "203.0.113.1", "fd00::1"}
+				want := []string{"192.0.2.1", "2001:db8::1", "203.0.113.1"}
 				switch selection {
 				case "explicit empty":
 					req.AllowlistNodeIDs, want = []uint{}, nil
@@ -114,11 +115,18 @@ func TestAutomaticAllowlistWaitsForAddressesAndRetainsRunningSnapshot(t *testing
 			}
 			requireServiceError(t, NewNodeService(db, "").UpdateIPs(t.Context(), &entry, "192.0.2.9", "", []string{"192.0.2.9"}, []string{"10.0.0.9"}, false), nil)
 			synchronize()
-			want := []string{"10.0.0.9", "192.0.2.9"}
+			want := []string{"192.0.2.9"}
 			admission := exitRemote.admission(admissionName)
 			if !exitRemote.service(tunnel.ServiceID).HasAdmission(admissionName) || !admission.Whitelist || !slices.Equal(admission.Matchers, want) {
 				t.Fatalf("first address report did not activate the source allowlist: %+v", admission)
 			}
+			// Simulate the persisted admission from a panel that included local addresses.
+			admission.Matchers = append(admission.Matchers, "10.0.0.9")
+			legacyAdmission, err := json.Marshal(admission)
+			requireServiceError(t, err, nil)
+			exitRemote.mu.Lock()
+			exitRemote.resources["/config/admissions/"+admissionName] = legacyAdmission
+			exitRemote.mu.Unlock()
 			requireServiceError(t, db.Model(&entry).Select("IPv4", "IPv6", "Addresses", "LocalAddresses").Updates(&model.GostNode{}).Error, nil)
 			synchronize()
 			if admission = exitRemote.admission(admissionName); !admission.Whitelist || !slices.Equal(admission.Matchers, want) || !exitRemote.service(tunnel.ServiceID).HasAdmission(admissionName) {
@@ -126,7 +134,7 @@ func TestAutomaticAllowlistWaitsForAddressesAndRetainsRunningSnapshot(t *testing
 			}
 			requireServiceError(t, NewNodeService(db, "").UpdateIPs(t.Context(), &entry, "192.0.2.10", "", []string{"192.0.2.10"}, []string{"10.0.0.10"}, false), nil)
 			synchronize()
-			if admission = exitRemote.admission(admissionName); !slices.Equal(admission.Matchers, []string{"10.0.0.10", "192.0.2.10"}) {
+			if admission = exitRemote.admission(admissionName); !slices.Equal(admission.Matchers, []string{"192.0.2.10"}) {
 				t.Fatalf("changed addresses did not replace the automatic allowlist: %+v", admission)
 			}
 			requireServiceError(t, tunnels.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
@@ -165,12 +173,12 @@ func TestAutomaticAllowlistFollowsChangedEntranceAndWaitsForItsReport(t *testing
 		t.Fatal("new entrance without an address inherited the previous entrance's admission")
 	}
 	assertAutomaticRelayAuth(t, replacementRemote, exitRemote, tunnel)
-	// A private-only report is sufficient for a LAN/VPN entrance.
+	// A private-only report must not let traffic bypass the configured source policy.
 	requireServiceError(t, NewNodeService(db, "").UpdateIPs(t.Context(), &replacement, "", "", nil, []string{"10.2.0.2", "fd02::2"}, false), nil)
 	refreshAutomaticAllowlistConfig(t, exitRemote, tunnel.ServiceID)
 	NewRuleSyncService(db).syncNodeRules(exit, nil)
-	if got := exitRemote.admission(admissionName).Matchers; !slices.Equal(got, []string{"10.2.0.2", "fd02::2"}) || !exitRemote.service(tunnel.ServiceID).HasAdmission(admissionName) {
-		t.Fatalf("automatic sources did not follow the replacement entry: %v", got)
+	if admission := exitRemote.admission(admissionName); !admission.Whitelist || len(admission.Matchers) != 0 || !exitRemote.service(tunnel.ServiceID).HasAdmission(admissionName) {
+		t.Fatalf("private-only automatic sources must produce an empty whitelist: %+v", admission)
 	}
 	requireServiceError(t, tunnels.Stop(tunnel.ID, testAdmin, testIP, testAgent), nil)
 }

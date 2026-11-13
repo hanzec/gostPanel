@@ -426,7 +426,10 @@ func (s *GostRulesetService) syncPolicies(ctx context.Context, cfg *model.GostRu
 			continue
 		}
 		policy := endpointTargetRule(tunnel)
-		if len(policy.RulesetIDs) == 0 && len(policy.ManualDomains) == 0 {
+		if !hasSelectedRules(&policy) {
+			if policy.UseClashRuleset && cfg.URL != "" && tunnel.ServiceID != "" {
+				add(tunnel.ExitNodeID, gost.TransparentBypassName, cfg.Matchers)
+			}
 			continue
 		}
 		matchers, err := s.SelectedMatchers(ctx, policy.RulesetIDs, policy.ManualDomains)
@@ -436,6 +439,9 @@ func (s *GostRulesetService) syncPolicies(ctx context.Context, cfg *model.GostRu
 			continue
 		}
 		add(tunnel.EntryNodeID, transparentPolicyName(tunnel.ID), matchers)
+		if tunnel.ServiceID != "" {
+			add(tunnel.ExitNodeID, relayPolicyName(tunnel.ServiceID), matchers)
+		}
 	}
 	return policies
 }

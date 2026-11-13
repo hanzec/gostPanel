@@ -166,6 +166,30 @@ host: panel.example.com
 	}
 }
 
+func TestInstalledNodeIDCLIReadsConfig(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "node.yaml")
+	if err := os.WriteFile(config, []byte("node_id: 42\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.CreateTemp(dir, "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	original := os.Stdout
+	os.Stdout = output
+	err = run(t.Context(), []string{"--node-id", "-c", config})
+	os.Stdout = original
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output.Name())
+	if err != nil || string(got) != "42\n" {
+		t.Fatalf("installed node ID = %q, %v", got, err)
+	}
+}
+
 func TestNftTemplateCLIPrintsCachedTemplate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "node.yaml")

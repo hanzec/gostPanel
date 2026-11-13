@@ -247,7 +247,7 @@ func (r *TunnelTestResult) recordGostEvidence(outcome string) {
 	case "relay_target_unreachable":
 		r.fail("relay_handshake", "Gost Relay 报告无法连接临时测试目标。", "请检查出口 Gost 能否访问 daemon 所在网络命名空间的回环地址，以及出口是否限制了回环访问。")
 	case "relay_target_forbidden":
-		r.fail("relay_handshake", "Gost Relay 拒绝访问临时回环测试目标。", "请检查出口 Gost 的目标访问规则是否允许连接 daemon 的本机回环地址。")
+		r.fail("relay_handshake", "Gost Relay 拒绝访问临时回环测试目标。", "若出口启用了域名白名单，请用允许的业务域名验证转发。")
 	case "relay_handshake":
 		r.fail("relay_handshake", "Gost 报告传输握手失败。", "请核对两端传输协议及其参数，例如 WebSocket 路径。")
 	case "relay_tls":

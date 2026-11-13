@@ -13,7 +13,7 @@ vi.mock('@/api/node', () => ({
   calibrateNodeTraffic: vi.fn(),
   issueNodeRegistrationToken: vi.fn(), getNodeConfig: vi.fn(),
   getGostService: vi.fn(), getGostLogs: vi.fn(), restartGostService: vi.fn(),
-  getNodeNftConfig: vi.fn(),
+  getNodeNftConfig: vi.fn(), getNodeFirewallStatus: vi.fn(),
   getNodeUpgradeStatus: vi.fn(), updateNodeUpgradePolicy: vi.fn(), upgradeNodeComponent: vi.fn()
 }))
 vi.mock('@/api/system', () => ({ getPublicSystemConfig: vi.fn() }))
@@ -46,6 +46,7 @@ beforeEach(async () => {
   api.getNodeList.mockResolvedValue(list([primary]))
   api.getNode.mockResolvedValue(response(primary))
   api.getGostService.mockResolvedValue(response({ unit: 'gost.service', active_state: 'active', load_state: 'loaded' }))
+  api.getNodeFirewallStatus.mockResolvedValue(response({ supported: true, managed: false }))
   getPublicSystemConfig.mockResolvedValue(response({ host: 'panel.example.com' }))
   api.issueNodeRegistrationToken.mockImplementation(async () => token())
   router = createRouter({

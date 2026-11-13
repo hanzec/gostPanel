@@ -104,7 +104,7 @@ func TestManualDaemonUpgradeValidatesStateAndSkipsReleaseLookup(t *testing.T) {
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	NewNodeUpgradeService(db).Run(canceled)
-	_, err = waitForNodeUpgrade(canceled, utils.GetGostClient(&node), "daemon", "0.1.90-abcdef0")
+	_, err = waitForNodeUpgrade(canceled, utils.GetGostClient(&node), "daemon", "0.1.90-abcdef0", false)
 	requireServiceError(t, err, context.Canceled)
 }
 
@@ -178,7 +178,7 @@ func TestWaitForNodeUpgradeReturnsConfirmedResult(t *testing.T) {
 	node := startServiceTestNode(t, remote)
 	ctx, cancel := context.WithTimeout(context.Background(), nodeUpgradePoll+3*time.Second)
 	defer cancel()
-	state, err := waitForNodeUpgrade(ctx, utils.GetGostClient(&node), "gost", "v3.2.8")
+	state, err := waitForNodeUpgrade(ctx, utils.GetGostClient(&node), "gost", "v3.2.8", false)
 	requireServiceError(t, err, nil)
 	if state.GetState() != "succeeded" || state.GetTargetVersion() != "v3.2.8" {
 		t.Fatalf("confirmation = %v", state)

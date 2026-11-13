@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"slices"
 
 	bizerrors "yagp/internal/errors"
@@ -13,6 +14,8 @@ import (
 
 	"gorm.io/gorm"
 )
+
+var relaySharedNATRange = netip.MustParsePrefix("100.64.0.0/10")
 
 type GostAllowlistService struct {
 	db *gorm.DB
@@ -93,23 +96,38 @@ func (s *GostAllowlistService) prepareRelay(client *gost.Client, relay *gost.Ser
 }
 
 func (s *GostAllowlistService) relayAdmission(tunnel *model.GostTunnel) (*gost.AdmissionConfig, error) {
+	addresses, restrict, err := s.relaySources(tunnel)
+	if err != nil || (tunnel.AutoAllowlist && len(addresses) == 0) {
+		return nil, err
+	}
+	return &gost.AdmissionConfig{
+		Name:      gost.TunnelRelayAllowlistName(relayServiceName(tunnel.ID)),
+		Whitelist: restrict,
+		Matchers:  publicRelayMatchers(addresses),
+	}, nil
+}
+
+func publicRelayMatchers(addresses []string) []string {
+	matchers := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		ip, err := netip.ParseAddr(address)
+		ip = ip.Unmap()
+		if err == nil && ip.Zone() == "" && ip.IsGlobalUnicast() && !ip.IsPrivate() && !relaySharedNATRange.Contains(ip) {
+			matchers = append(matchers, ip.String())
+		}
+	}
+	slices.Sort(matchers)
+	return slices.Compact(matchers)
+}
+
+func (s *GostAllowlistService) relaySources(tunnel *model.GostTunnel) ([]string, bool, error) {
 	nodeIDs := tunnel.AllowlistNodeIDs
 	if tunnel.AutoAllowlist {
 		nodeIDs = []uint{tunnel.EntryNodeID}
 	}
 	// Resolve current addresses on every sync so address changes are picked up without saving the selection again.
 	addresses, err := s.resolveAddresses(context.Background(), nodeIDs, false, tunnel.AutoAllowlist)
-	if err != nil {
-		return nil, err
-	}
-	if tunnel.AutoAllowlist && len(addresses) == 0 {
-		return nil, nil
-	}
-	return &gost.AdmissionConfig{
-		Name:      gost.TunnelRelayAllowlistName(relayServiceName(tunnel.ID)),
-		Whitelist: len(nodeIDs) > 0,
-		Matchers:  addresses,
-	}, nil
+	return addresses, len(nodeIDs) > 0, err
 }
 
 func (s *GostAllowlistService) syncRelays(client *gost.Client, current *gost.GostConfig, nodeID uint, tunnels []model.GostTunnel) (bool, error) {
@@ -138,7 +156,8 @@ func (s *GostAllowlistService) syncRelays(client *gost.Client, current *gost.Gos
 		if !managedRelay || relay.Handler == nil || relay.Handler.Type != "relay" {
 			continue
 		}
-		hasAdmission := relay.HasAdmission(gost.TunnelRelayAllowlistName(relay.Name))
+		admissionName := gost.TunnelRelayAllowlistName(relay.Name)
+		hasAdmission := relay.HasAdmission(admissionName)
 		// Keep an existing per-tunnel binding when clearing the selection to avoid reloading the relay.
 		enabled := tunnel.AutoAllowlist || len(tunnel.AllowlistNodeIDs) > 0 || hasAdmission
 		if enabled {
@@ -148,8 +167,16 @@ func (s *GostAllowlistService) syncRelays(client *gost.Client, current *gost.Gos
 				continue
 			}
 			if desired == nil {
-				// Keep the applied list during a temporary loss of the running entry's address snapshot.
-				continue
+				// Keep the last known public addresses during a temporary loss of the entry snapshot.
+				i := slices.IndexFunc(current.Admissions, func(admission gost.AdmissionConfig) bool {
+					return admission.Name == admissionName
+				})
+				if !hasAdmission || i < 0 {
+					continue
+				}
+				applied := current.Admissions[i]
+				applied.Matchers = publicRelayMatchers(applied.Matchers)
+				desired = &applied
 			}
 			updated, err := client.EnsureAdmission(*desired, current.Admissions)
 			changed = changed || updated

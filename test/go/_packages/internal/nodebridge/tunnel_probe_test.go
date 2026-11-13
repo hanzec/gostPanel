@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -149,18 +150,18 @@ func TestTunnelProbeReportsMissingOrInvalidGostSetup(t *testing.T) {
 	}
 }
 
-func requireTunnelProbeFailure(t *testing.T, err error, code codes.Code, stage string) *errdetails.ErrorInfo {
+func requireTunnelProbeFailure(t *testing.T, err error, code codes.Code, stages ...string) *errdetails.ErrorInfo {
 	t.Helper()
 	st := status.Convert(err)
 	if st.Code() != code {
 		t.Fatalf("probe returned %v, want %s", err, code)
 	}
 	for _, detail := range st.Details() {
-		if info, ok := detail.(*errdetails.ErrorInfo); ok && info.GetDomain() == "yagp.tunnel_probe" && info.GetReason() == stage {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok && info.GetDomain() == "yagp.tunnel_probe" && slices.Contains(stages, info.GetReason()) {
 			return info
 		}
 	}
-	t.Fatalf("probe failure has details %v, want %s", st.Details(), stage)
+	t.Fatalf("probe failure has details %v, want one of %v", st.Details(), stages)
 	return nil
 }
 
@@ -283,7 +284,8 @@ func TestTunnelProbeThroughGostRelay(t *testing.T) {
 		t.Fatalf("delete live Gost Relay: %v %s", err, reply.GetBody())
 	}
 	_, err = probe()
-	info = requireTunnelProbeFailure(t, err, codes.Unavailable, "relay_read")
+	// Gost may close the local probe socket before or after the token is written.
+	info = requireTunnelProbeFailure(t, err, codes.Unavailable, "relay_write", "relay_read")
 	if got := info.GetMetadata()["relay_tcp"]; got != "refused" {
 		t.Fatalf("relay TCP check = %q, want refused", got)
 	}

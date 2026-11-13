@@ -113,6 +113,72 @@ func TestEndpointTunnelsShareAnExitRelay(t *testing.T) {
 	}
 }
 
+func TestSharedExitRetainsItsDomainBypassUntilLastTunnelStops(t *testing.T) {
+	db := newServiceTestDB(t)
+	loadServiceConfig(t, "report:\n  listen: 127.0.0.1:39001\n")
+	firstRemote := &redirectLifecycleNode{lifecycleNode: lifecycleNode{t: t}, mark: 1234}
+	secondRemote := &redirectLifecycleNode{lifecycleNode: lifecycleNode{t: t}, mark: 1234}
+	exitRemote := &sharedRelayTestNode{lifecycleNode: lifecycleNode{t: t}, policies: make(map[string]nodegrpc.RelayAuthConfig)}
+	first, second, exit := startServiceTestNode(t, firstRemote), startServiceTestNode(t, secondRemote), startServiceTestNode(t, exitRemote)
+	first.Name, second.Name, exit.Name = "first entry", "second entry", "shared exit"
+	exit.Address = "192.0.2.20"
+	saveServiceFixtures(t, db, &first, &second, &exit)
+	firstEntry := model.GostRule{Name: "first source", NodeID: &first.ID, Role: model.EndpointRoleEntry,
+		ListenIP: "127.0.0.1", ListenPort: 18001, Protocol: model.RuleProtocolTransparent}
+	secondEntry := model.GostRule{Name: "second source", NodeID: &second.ID, Role: model.EndpointRoleEntry,
+		ListenIP: "127.0.0.1", ListenPort: 18002, Protocol: model.RuleProtocolTransparent}
+	sharedExit := model.GostRule{Name: "filtered exit", NodeID: &exit.ID, Role: model.EndpointRoleExit,
+		ListenPort: 18443, Protocol: model.RuleProtocolTCP, UseOriginalTarget: true, ManualDomains: []string{"match.test"}}
+	saveServiceFixtures(t, db, &firstEntry, &secondEntry, &sharedExit)
+	tunnels := NewTunnelService(db)
+
+	firstPath := startSharedTunnel(t, tunnels, "first path", firstEntry.ID, sharedExit.ID)
+	secondPath := startSharedTunnel(t, tunnels, "second path", secondEntry.ID, sharedExit.ID)
+	relay := firstPath.ServiceID
+	policy := relayPolicyName(relay)
+	if relay == "" || secondPath.ServiceID != relay {
+		t.Fatalf("shared exit used different Relay services: %q and %q", relay, secondPath.ServiceID)
+	}
+	assertExitResources := func(running bool) {
+		t.Helper()
+		exitRemote.mu.Lock()
+		defer exitRemote.mu.Unlock()
+		var services, bypasses []string
+		for path := range exitRemote.resources {
+			if name, ok := strings.CutPrefix(path, "/config/services/"); ok {
+				services = append(services, name)
+			}
+			if name, ok := strings.CutPrefix(path, "/config/bypasses/"); ok {
+				bypasses = append(bypasses, name)
+			}
+		}
+		if !running {
+			if len(services) != 0 || len(bypasses) != 0 {
+				t.Fatalf("stopping the last tunnel left services %v and bypasses %v", services, bypasses)
+			}
+			return
+		}
+		if !slices.Equal(services, []string{relay}) || !slices.Equal(bypasses, []string{policy}) {
+			t.Fatalf("expected one shared Relay and bypass, got services %v and bypasses %v", services, bypasses)
+		}
+		var service gost.ServiceConfig
+		requireServiceError(t, json.Unmarshal(exitRemote.resources["/config/services/"+relay], &service), nil)
+		var bypass struct {
+			Whitelist bool
+			Matchers  []string
+		}
+		requireServiceError(t, json.Unmarshal(exitRemote.resources["/config/bypasses/"+policy], &bypass), nil)
+		if service.Bypass != policy || !bypass.Whitelist || !slices.Equal(bypass.Matchers, []string{".match.test:443"}) {
+			t.Fatalf("shared Relay bypass = %q, policy = %+v", service.Bypass, bypass)
+		}
+	}
+	assertExitResources(true)
+	requireServiceError(t, tunnels.Stop(firstPath.ID, testAdmin, testIP, testAgent), nil)
+	assertExitResources(true)
+	requireServiceError(t, tunnels.Stop(secondPath.ID, testAdmin, testIP, testAgent), nil)
+	assertExitResources(false)
+}
+
 type sharedRelayTestNode struct {
 	lifecycleNode
 	policies map[string]nodegrpc.RelayAuthConfig
