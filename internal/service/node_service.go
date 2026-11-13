@@ -60,6 +60,7 @@ func (s *NodeService) Create(req *dto.CreateNodeReq, username, ip, userAgent str
 	// 创建节点
 	node := &model.GostNode{
 		Name:               req.Name,
+		Tags:               model.NodeTags(req.Tags),
 		Remark:             req.Remark,
 		Status:             model.NodeStatusOffline,
 		TrafficResetPeriod: model.TrafficResetNone,
@@ -121,7 +122,7 @@ func (s *NodeService) Update(id uint, req *dto.UpdateNodeReq, username, ip, user
 	node.Name = req.Name
 	node.Remark = req.Remark
 
-	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod, req.AddressMappings); err != nil {
+	if err = s.nodeRepo.Update(node, req.TrafficLimitBytes, req.TrafficResetPeriod, req.AddressMappings, model.NodeTags(req.Tags)); err != nil {
 		return nil, err
 	}
 
@@ -285,7 +286,7 @@ func (s *NodeService) List(req *dto.NodeListReq) ([]model.GostNode, int64, error
 		opt.Conditions["name LIKE ? OR address LIKE ? OR ipv4 LIKE ? OR ipv6 LIKE ? OR addresses LIKE ? OR local_addresses LIKE ? OR address_mappings LIKE ?"] = []any{keyword, keyword, keyword, keyword, keyword, keyword, keyword}
 	}
 
-	return s.nodeRepo.List(opt)
+	return s.nodeRepo.List(opt, req.Tag)
 }
 
 // CreateGostClient 创建节点的 Gost 客户端

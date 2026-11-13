@@ -25,7 +25,7 @@ func openRepositoryDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = raw.Close() })
-	mustPersist(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.SystemConfig{}))
+	mustPersist(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.ExitRelayHistory{}, &model.OperationLog{}, &model.SystemConfig{}))
 	return db
 }
 
@@ -70,7 +70,7 @@ func TestNodeRepositoryEnrollmentAndStaleReports(t *testing.T) {
 	mustPersist(t, nodes.UpdateLastCheck(stale.ID))
 	legacyPort := stale.Port
 	stale.Name, stale.Remark, stale.Port = "renamed", "saved after enrollment", 39111
-	mustPersist(t, nodes.Update(&stale, nil, nil, nil))
+	mustPersist(t, nodes.Update(&stale, nil, nil, nil, nil))
 	current, err := nodes.FindByName("renamed")
 	mustPersist(t, err)
 	if current.Password != enrolled.Password || current.Status != model.NodeStatusOnline || current.LastCheckAt == nil ||
@@ -133,7 +133,7 @@ func TestNodeRepositoryRejectsStaleQuotaSnapshots(t *testing.T) {
 	mustPersist(t, nodes.UpdateTrafficQuota(*current, 24, 50, model.TrafficQuotaActive))
 	stale := *current
 	limit, reset := int64(200), "weekly"
-	mustPersist(t, nodes.Update(current, &limit, &reset, nil))
+	mustPersist(t, nodes.Update(current, &limit, &reset, nil, nil))
 	mustPersist(t, nodes.UpdateTrafficQuota(stale, 24, 100, model.TrafficQuotaBlocked))
 	current, err = nodes.FindByID(node.ID)
 	mustPersist(t, err)
@@ -334,12 +334,12 @@ func TestRepositoryListPaginationAndQueryErrors(t *testing.T) {
 		Orders:     []string{"name ASC"},
 		Preloads:   []string{"Rules"},
 		Pagination: &Pagination{Page: 2, PageSize: 1},
-	})
+	}, "")
 	mustPersist(t, err)
 	if total != 2 || len(page) != 1 || page[0].ID != newer.ID {
 		t.Fatalf("filtered pagination should count matches before LIMIT: %+v, %d", page, total)
 	}
-	page, _, err = nodes.List(&QueryOption{Preloads: []string{"Rules"}, Orders: []string{"id ASC"}})
+	page, _, err = nodes.List(&QueryOption{Preloads: []string{"Rules"}, Orders: []string{"id ASC"}}, "")
 	mustPersist(t, err)
 	if len(page) != 3 || page[0].ID != old.ID || len(page[0].Rules) != 1 || page[0].Rules[0].ID != rule.ID {
 		t.Fatalf("explicit preloads: %+v", page)
@@ -351,7 +351,7 @@ func TestRepositoryListPaginationAndQueryErrors(t *testing.T) {
 		t.Fatalf("default pagination and log ordering: %+v, %d, %+v", defaults, logCount, recent)
 	}
 	clamped := &Pagination{Page: 1, PageSize: 1000}
-	_, _, err = nodes.List(&QueryOption{Pagination: clamped})
+	_, _, err = nodes.List(&QueryOption{Pagination: clamped}, "")
 	mustPersist(t, err)
 	if clamped.PageSize != 100 {
 		t.Fatalf("maximum page size was not enforced: %+v", clamped)
@@ -381,7 +381,7 @@ func TestRepositoryListPaginationAndQueryErrors(t *testing.T) {
 		{Conditions: map[string]any{"unknown_column = ?": "bad filter"}},
 		{Preloads: []string{"UnknownRelation"}},
 	} {
-		if _, _, err := nodes.List(opt); err == nil {
+		if _, _, err := nodes.List(opt, ""); err == nil {
 			t.Fatalf("node list silently ignored a query error: %+v", opt)
 		}
 		if _, _, err := rules.List(opt); err == nil {

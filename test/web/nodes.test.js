@@ -76,6 +76,31 @@ async function openDetail(view) {
 }
 
 describe('node inventory', () => {
+  it('shows node labels in the inventory and detail and applies a tag filter', async () => {
+    const node = { ...primary, tags: ['备用', '入口'] }
+    api.getNodeList.mockResolvedValue(list([node]))
+    api.getNode.mockResolvedValue(response(node))
+    const view = open()
+    await flushPromises()
+    expect(view.findAll('.node-row-tags .el-tag').map(tag => tag.text())).toEqual(node.tags)
+
+    const tagFilter = view.get('#node-tag-filter')
+    await tagFilter.setValue('  备用  ')
+    await view.get('form[aria-label="筛选节点"]').trigger('submit')
+    await flushPromises()
+    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', status: '', tag: '备用' })
+
+    await openDetail(view)
+    expect(view.findAll('.detail-meta .el-tag').map(tag => tag.text())).toEqual(node.tags)
+    api.getNodeList.mockResolvedValueOnce(list([]))
+    await router.push('/nodes')
+    await flushPromises()
+    expect(view.get('#node-tag-filter').element.value).toBe('备用')
+    expect(view.text()).toContain('没有匹配的节点')
+    await click(view, '清除筛选')
+    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', status: '', tag: '' })
+  })
+
   it('opens the add dialog from the empty inventory heading and refreshes automatically', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     api.getNodeList.mockResolvedValueOnce(list([]))
@@ -203,11 +228,11 @@ describe('node inventory', () => {
     await view.get('#node-keyword').setValue('缺失的节点')
     await view.get('form[aria-label="筛选节点"]').trigger('submit')
     await flushPromises()
-    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '缺失的节点', status: '' })
+    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '缺失的节点', status: '', tag: '' })
     expect(view.text()).toContain('没有匹配的节点')
     api.getNodeList.mockRejectedValueOnce(new Error('offline'))
     await click(view, '清除筛选')
-    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', status: '' })
+    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', status: '', tag: '' })
     expect(view.get('[role="alert"]').text()).toContain('无法加载节点清单')
     await vi.advanceTimersByTimeAsync(5000)
     expect(api.getNodeList).toHaveBeenCalledTimes(3)
@@ -225,7 +250,7 @@ describe('node inventory', () => {
     api.getNodeList.mockResolvedValue(list([
       { ...primary, addresses: ['192.0.2.7', '192.0.2.17', '2001:db8::7', '2001:db8::17'], traffic_reset_period: 'monthly' },
       { id: 8, name: '待注册', status: 'offline', traffic_quota_state: 'pending' },
-      { id: 9, name: '未限流', status: 'error', region: 'US', address: '192.0.2.9', total_bytes: 1536 },
+      { id: 9, name: '未限流', status: 'error', region: 'US', address: '192.0.2.9', total_bytes: 1536, traffic_current_period_used_bytes: 1536 },
       { id: 10, name: '旧守护程序', status: 'unknown', address: '2001:db8::10', traffic_limit_bytes: GIB, traffic_quota_state: 'unsupported' },
       { id: 12, name: '生效中', traffic_limit_bytes: GIB, traffic_quota_state: 'active', traffic_current_period_used_bytes: 0 }
     ], 22))
@@ -253,10 +278,11 @@ describe('node inventory', () => {
     expect(cells[0][3].text()).toBe('节点 IP2001:db8::7')
     expect(cells[0][5].text()).toBe('本期用量1.07 GB / 1.07 GB')
     expect(rows[1]).toContain('待获取地址')
+    expect(cells[1][5].text()).toBe('本期用量未统计 / Unlimited')
     expect(rows[2]).toContain('192.0.2.9')
     expect(rows[2]).not.toContain('IPv6')
     expect(rows[2]).not.toContain('检查')
-    expect(cells[2][5].text()).toBe('本期用量未统计 / Unlimited')
+    expect(cells[2][5].text()).toBe('本期用量<0.01 GB / Unlimited')
     expect(rows[3]).toContain('2001:db8::10')
     expect(cells[3][5].text()).toBe('本期用量未统计 / 1.07 GB')
     expect(cells[4][5].text()).toBe('本期用量0.00 GB / 1.07 GB')
@@ -265,14 +291,14 @@ describe('node inventory', () => {
     status.vm.$emit('update:modelValue', 'online')
     status.vm.$emit('change', 'online')
     await flushPromises()
-    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', status: 'online' })
+    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 10, keyword: '', status: 'online', tag: '' })
     await view.get('button.btn-next').trigger('click')
     await flushPromises()
-    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 2, pageSize: 10, keyword: '', status: 'online' })
+    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 2, pageSize: 10, keyword: '', status: 'online', tag: '' })
     pageSize.vm.$emit('update:modelValue', 20)
     pageSize.vm.$emit('change', 20)
     await flushPromises()
-    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 20, keyword: '', status: 'online' })
+    expect(api.getNodeList).toHaveBeenLastCalledWith({ page: 1, pageSize: 20, keyword: '', status: 'online', tag: '' })
   })
 
   it('shows only the current usage and limit in the list and detail', async () => {
@@ -341,6 +367,59 @@ describe('node inventory', () => {
 })
 
 describe('node registration and quota settings', () => {
+  it('creates a node with unique tags entered from the keyboard', async () => {
+    api.createNode.mockResolvedValue(response(newNode))
+    const view = open()
+    await flushPromises()
+    await click(view, '添加节点')
+    const form = editForm(view, '添加节点')
+    await form.get('[placeholder="例如 华东入口"]').setValue(newNode.name)
+    const input = form.get('.el-input-tag input')
+    for (const label of ['入口', '  备用  ', '入口']) {
+      await input.setValue(label)
+      await input.trigger('keydown', { code: 'Enter', key: 'Enter' })
+    }
+    expect(form.findAll('.el-tag__content').map(tag => tag.text())).toEqual(['入口', '备用'])
+    await click(dialog(view, '添加节点'), '添加节点')
+    expect(api.createNode).toHaveBeenCalledExactlyOnceWith({
+      name: newNode.name, tags: ['入口', '备用'], remark: '', traffic_limit_bytes: 0, traffic_reset_period: 'none'
+    })
+  })
+
+  it('shows an inline error for an overlong tag and leaves the form open', async () => {
+    const view = open()
+    await flushPromises()
+    await click(view, '添加节点')
+    const form = editForm(view, '添加节点')
+    await form.get('[placeholder="例如 华东入口"]').setValue(newNode.name)
+    const input = form.get('.el-input-tag input')
+    await input.setValue('节'.repeat(33))
+    await input.trigger('keydown', { code: 'Enter', key: 'Enter' })
+    await click(dialog(view, '添加节点'), '添加节点')
+    await vi.waitFor(() => {
+      expect(form.get('.el-form-item__error').text()).toBe('每个标签最多 32 个字符。')
+      expect(document.activeElement).toBe(input.element)
+    })
+    expect(api.createNode).not.toHaveBeenCalled()
+  })
+
+  it('clears saved tags with an empty array', async () => {
+    const node = { ...primary, tags: ['入口'] }
+    api.getNodeList.mockResolvedValue(list([node]))
+    api.updateNode.mockResolvedValue(response({ ...node, tags: [] }))
+    const view = open()
+    await flushPromises()
+    await click(view, '配置')
+    const form = editForm(view, settingsTitle)
+    expect(form.get('.el-tag__content').text()).toBe('入口')
+    await form.get('.el-input-tag input').trigger('keydown', { code: 'Backspace', key: 'Backspace' })
+    expect(form.find('.el-tag__content').exists()).toBe(false)
+    await click(dialog(view, settingsTitle), '保存更改')
+    expect(api.updateNode).toHaveBeenCalledExactlyOnceWith(primary.id, {
+      name: node.name, remark: node.remark, tags: []
+    })
+  })
+
   it('creates a node without supplemental IP or listener mapping controls', async () => {
     api.createNode.mockResolvedValue(response(newNode))
     const view = open()

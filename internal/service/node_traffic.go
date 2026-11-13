@@ -12,6 +12,37 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func (s *NodeService) CurrentTrafficUsage(ctx context.Context, nodes []model.GostNode, now time.Time) (map[uint]uint64, error) {
+	usage := make(map[uint]uint64, len(nodes))
+	var uncapped []uint
+	for _, node := range nodes {
+		if node.TrafficLimitBytes == 0 {
+			uncapped = append(uncapped, node.ID)
+			// Observer traffic is already attributed to the node hosting the listener.
+			if node.TotalBytes > 0 {
+				usage[node.ID] = uint64(node.TotalBytes)
+			}
+			continue
+		}
+		if (node.TrafficQuotaState == model.TrafficQuotaActive || node.TrafficQuotaState == model.TrafficQuotaBlocked) &&
+			node.TrafficQuotaWindowStart == model.TrafficQuotaWindow(node.TrafficResetPeriod, now) {
+			usage[node.ID] = node.TrafficQuotaUsedBytes
+		}
+	}
+	if len(uncapped) == 0 {
+		return usage, nil
+	}
+
+	relays, err := s.nodeRepo.RelayUsageByNode(ctx, uncapped)
+	if err != nil {
+		return nil, err
+	}
+	for id, bytes := range relays {
+		usage[id] += bytes
+	}
+	return usage, nil
+}
+
 func (s *NodeService) CalibrateNodeTotals(ctx context.Context, id uint, input, output int64) error {
 	if _, err := s.GetByID(id); err != nil {
 		return err

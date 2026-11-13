@@ -4,6 +4,17 @@
     <el-form-item label="节点名称" prop="name">
       <el-input v-model="form.name" placeholder="例如 华东入口" />
     </el-form-item>
+    <el-form-item label="标签（可选）" prop="tags">
+      <el-input-tag
+        :model-value="form.tags"
+        :max="20"
+        clearable
+        aria-describedby="node-tags-help"
+        placeholder="例如 入口、备用"
+        @update:model-value="form.tags = [...new Set($event)]"
+      />
+      <p id="node-tags-help" class="node-settings-help ops-muted">按回车添加标签，最多 20 个，每个最多 32 个字符。</p>
+    </el-form-item>
     <fieldset v-if="listenAddresses" class="node-address-mappings" aria-describedby="node-address-mappings-help">
       <legend ref="mappingHeading" tabindex="-1">监听 IP 映射（可选）</legend>
       <p id="node-address-mappings-help" class="node-settings-help ops-muted">
@@ -112,6 +123,7 @@ defineExpose({
 .node-address-mapping .el-select { width: 100%; }
 @media (max-width: 700px) {
   .node-settings-form :deep(.el-input__wrapper),
+  .node-settings-form :deep(.el-input-tag),
   .node-settings-form :deep(.el-select__wrapper) { min-height: 44px; }
   .node-address-mappings .el-button { min-height: 44px; }
 }

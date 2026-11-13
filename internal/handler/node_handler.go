@@ -135,8 +135,14 @@ func (h *NodeHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	h.setNodeRegions(c.Request.Context(), node)
-	response.Success(c, withCurrentTrafficUsage(*node, time.Now()))
+	ctx := c.Request.Context()
+	usage, err := h.nodeService.CurrentTrafficUsage(ctx, []model.GostNode{*node}, time.Now())
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
+	h.setNodeRegions(ctx, node)
+	response.Success(c, withCurrentTrafficUsage(*node, usage))
 }
 
 // List 获取节点列表
@@ -153,14 +159,19 @@ func (h *NodeHandler) List(c *gin.Context) {
 		return
 	}
 
-	now := time.Now()
+	ctx := c.Request.Context()
+	usage, err := h.nodeService.CurrentTrafficUsage(ctx, nodes, time.Now())
+	if err != nil {
+		response.HandleError(c, err)
+		return
+	}
 	items := make([]nodeTrafficResponse, len(nodes))
 	regionTargets := make([]*model.GostNode, len(nodes))
 	for i, node := range nodes {
-		items[i] = withCurrentTrafficUsage(node, now)
+		items[i] = withCurrentTrafficUsage(node, usage)
 		regionTargets[i] = &items[i].GostNode
 	}
-	h.setNodeRegions(c.Request.Context(), regionTargets...)
+	h.setNodeRegions(ctx, regionTargets...)
 	response.SuccessPage(c, items, total, req.Page, req.PageSize)
 }
 

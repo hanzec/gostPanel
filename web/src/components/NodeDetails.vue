@@ -5,6 +5,7 @@
         <span class="ops-status" :class="'is-' + (nodeStates[node.status]?.tone || 'muted')">{{ nodeStates[node.status]?.label || '未知' }}</span>
         <span class="detail-chip ops-mono">#{{ node.id }}</span>
         <NodeRegionFlag v-if="node.region" :region="node.region" />
+        <el-tag v-for="tag in node.tags" :key="tag" size="small" type="info" effect="plain" :title="tag">{{ tag }}</el-tag>
       </div>
       <p v-if="node.remark" class="ops-muted">{{ node.remark }}</p>
     </div>
@@ -74,6 +75,8 @@ const endpoints = computed(() => [
 .detail-identity { min-width: 0; }
 .detail-identity p { margin-top: 6px; overflow-wrap: anywhere; }
 .detail-meta { gap: 8px 12px; }
+.detail-meta :deep(.el-tag) { max-width: 100%; }
+.detail-meta :deep(.el-tag__content) { overflow: hidden; text-overflow: ellipsis; }
 .detail-chip {
   display: inline-flex;
   align-items: center;

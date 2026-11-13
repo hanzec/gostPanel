@@ -52,6 +52,10 @@
               <el-option label="异常" value="error" />
             </el-select>
           </div>
+          <div class="inventory-toolbar-field">
+            <label for="node-tag-filter">节点标签</label>
+            <el-input id="node-tag-filter" v-model.trim="searchTag" clearable placeholder="按标签筛选" @clear="handleSearch" />
+          </div>
           <el-button native-type="submit">筛选</el-button>
         </template>
         <template #actions>
@@ -71,7 +75,7 @@
       <div v-else-if="!nodeList.length && !loadError" class="inventory-state">
         <el-icon class="inventory-state-icon" aria-hidden="true"><Monitor /></el-icon>
         <p>{{ filtered ? '没有匹配的节点' : '尚未添加节点' }}</p>
-        <span class="ops-muted">{{ filtered ? '调整关键字或状态后重试。' : '先登记一个 Gost 实例，再生成安装命令。' }}</span>
+        <span class="ops-muted">{{ filtered ? '调整筛选条件后重试。' : '先登记一个 Gost 实例，再生成安装命令。' }}</span>
         <el-button v-if="filtered" @click="clearFilters">清除筛选</el-button>
       </div>
       <div v-else-if="nodeList.length" class="ops-table-scroll inventory-scroll" :aria-busy="loading">
@@ -107,6 +111,9 @@
                   <strong>{{ node.name }}</strong>
                   <el-icon class="node-row-arrow" aria-hidden="true"><ArrowRight /></el-icon>
                 </RouterLink>
+                <div v-if="node.tags?.length" class="node-row-tags">
+                  <el-tag v-for="tag in node.tags" :key="tag" size="small" type="info" effect="plain" :title="tag">{{ tag }}</el-tag>
+                </div>
               </td>
               <td role="cell">
                 <span class="inventory-cell-label" aria-hidden="true">区域</span>
@@ -320,7 +327,9 @@ const pageSize = ref(10)
 const total = ref(null)
 const searchKeyword = ref('')
 const searchStatus = ref('')
-const filtered = computed(() => Boolean(searchKeyword.value.trim() || searchStatus.value))
+const searchTag = ref('')
+const appliedTag = ref('')
+const filtered = computed(() => Boolean(searchKeyword.value.trim() || searchStatus.value || appliedTag.value))
 const nodeMetrics = computed(() => [
   { label: '筛选结果', value: total.value, detail: '全部匹配节点', icon: Monitor },
   ...Object.entries(nodeStates).map(([status, state]) => ({
@@ -345,7 +354,7 @@ const submitError = ref('')
 const deleting = ref(false)
 const formRef = ref(null)
 const daemonUpgradePanel = ref(null)
-const form = reactive({ name: '', remark: '', addressMappings: [], trafficLimitGB: '', trafficResetPeriod: 'none' })
+const form = reactive({ name: '', tags: [], remark: '', addressMappings: [], trafficLimitGB: '', trafficResetPeriod: 'none' })
 const originalTrafficLimitBytes = ref(0)
 let originalTrafficResetPeriod = 'none'
 let originalAddressMappings = []
@@ -364,6 +373,11 @@ const trafficLimitBytes = computed(() => {
 })
 const rules = {
   name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
+  tags: [{
+    validator: (_, tags) => tags.every(tag => [...tag].length <= 32),
+    message: '每个标签最多 32 个字符。',
+    trigger: 'change'
+  }],
   trafficLimitGB: [{
     validator: () => trafficLimitBytes.value !== null && (isEdit.value || Number.isSafeInteger(trafficLimitBytes.value)),
     message: '请输入 0 或至少 1 字节且不超过 9007199.254740991 GB 的数值。',
@@ -529,7 +543,8 @@ const fetchData = async (isSilent = false) => {
       page: page.value,
       pageSize: pageSize.value,
       keyword: searchKeyword.value,
-      status: searchStatus.value
+      status: searchStatus.value,
+      tag: appliedTag.value
     })
     nodeList.value = res.data.list || []
     total.value = res.data.total || 0
@@ -573,6 +588,7 @@ watch([installDialogVisible, () => installNode.value?.status], ([visible, status
 })
 
 const handleSearch = () => {
+  appliedTag.value = searchTag.value
   page.value = 1
   fetchData()
 }
@@ -580,6 +596,7 @@ const handleSearch = () => {
 const clearFilters = () => {
   searchKeyword.value = ''
   searchStatus.value = ''
+  searchTag.value = ''
   handleSearch()
 }
 
@@ -596,6 +613,7 @@ const openDialog = (row = null) => {
   submitError.value = ''
   Object.assign(form, {
     name: row?.name ?? '',
+    tags: [...(row?.tags || [])],
     remark: row?.remark || '',
     addressMappings: originalAddressMappings.map(mapping => ({ ...mapping, key: Symbol() })),
     trafficLimitGB: originalTrafficLimitGB.value,
@@ -614,6 +632,10 @@ const handleSubmit = async () => {
     if (!valid) return
 
     const node = { name: form.name, remark: form.remark }
+    const originalTags = editingNode.value?.tags || []
+    if (form.tags.length !== originalTags.length || form.tags.some((tag, index) => tag !== originalTags[index])) {
+      node.tags = form.tags
+    }
     const addressMappings = form.addressMappings.map(({ listen_ip, connect_ip }) => ({ listen_ip, connect_ip }))
     if (addressMappings.length !== originalAddressMappings.length || addressMappings.some((mapping, index) =>
       mapping.listen_ip !== originalAddressMappings[index].listen_ip || mapping.connect_ip !== originalAddressMappings[index].connect_ip)) {
@@ -746,6 +768,9 @@ onBeforeUnmount(() => {
 .node-row-link { width: fit-content; min-height: 30px; color: var(--ops-text); text-decoration: none; }
 .node-row-link:hover, .node-row-link:focus-visible { color: var(--ops-accent); text-decoration: underline; }
 .node-row-arrow { color: var(--ops-accent); flex: none; }
+.node-row-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.node-row-tags :deep(.el-tag) { max-width: 100%; }
+.node-row-tags :deep(.el-tag__content) { overflow: hidden; text-overflow: ellipsis; }
 .node-page-heading { font-size: var(--ops-text-title); white-space: nowrap; }
 .node-detail-heading, .node-detail-parent, .node-detail-back { display: flex; align-items: center; }
 .node-detail-heading { flex-wrap: wrap; column-gap: 8px; }

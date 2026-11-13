@@ -179,6 +179,7 @@ func autoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&model.GostNode{},
 		&model.GostRule{},
+		&model.ExitRelayHistory{},
 		&model.GostTunnel{},
 		&model.GostRuleset{},
 		&model.OperationLog{},

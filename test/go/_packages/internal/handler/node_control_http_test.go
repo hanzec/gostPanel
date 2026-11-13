@@ -14,6 +14,7 @@ import (
 
 	"yagp/internal/buildinfo"
 	"yagp/internal/model"
+	"yagp/internal/repository"
 	"yagp/internal/service"
 	"yagp/pkg/gost"
 	"yagp/pkg/nodegrpc"
@@ -217,7 +218,6 @@ func TestNodeHTTPCurrentPeriodTraffic(t *testing.T) {
 		{"empty", 100, model.TrafficQuotaActive, currentWindow, 0, true},
 		{"previous", 100, model.TrafficQuotaActive, currentWindow - 1, 42, false},
 		{"pending", 100, model.TrafficQuotaPending, currentWindow, 42, false},
-		{"disabled", 0, model.TrafficQuotaActive, currentWindow, 42, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := model.GostNode{
@@ -247,6 +247,181 @@ func TestNodeHTTPCurrentPeriodTraffic(t *testing.T) {
 			check(page.List[0])
 		})
 	}
+}
+
+func TestNodeHTTPUncappedTrafficIncludesExistingRelaySamples(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	nodes := []model.GostNode{
+		{Name: "shared exit", TrafficResetPeriod: "monthly", TrafficQuotaState: model.TrafficQuotaPending, TrafficQuotaUsedBytes: 999},
+		{Name: "entry with observer traffic"},
+		{Name: "zero-byte exit"},
+		{Name: "unsampled node"},
+		{Name: "capped exit", TrafficLimitBytes: 500, TrafficQuotaState: model.TrafficQuotaActive, TrafficQuotaUsedBytes: 66},
+	}
+	mustSucceed := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustSucceed(f.db.Create(&nodes).Error)
+	shared, entry, zero, unsampled, capped := nodes[0].ID, nodes[1].ID, nodes[2].ID, nodes[3].ID, nodes[4].ID
+	mustSucceed(f.db.Model(&nodes[4]).Update("traffic_quota_window_start", 0).Error)
+	// A shared exit may have counted traffic per tunnel before it started counting per endpoint.
+	exits := []model.GostRule{
+		{NodeID: &shared, Name: "shared", Role: model.EndpointRoleExit, ListenPort: 8001},
+		{NodeID: &zero, Name: "observed zero", Role: model.EndpointRoleExit, ListenPort: 8002},
+		{NodeID: &capped, Name: "quota", Role: model.EndpointRoleExit, ListenPort: 8003},
+		{NodeID: &shared, Name: "archived", Role: model.EndpointRoleExit, ListenPort: 8004},
+	}
+	mustSucceed(f.db.Create(&exits).Error)
+	rules := repository.NewRuleRepository(f.db)
+	mustSucceed(rules.RecordExitRelayTraffic(exits[0].ID, "relay-tunnel-1", 30, 40, 30, 40, 100))
+	mustSucceed(rules.RecordExitRelayTraffic(exits[1].ID, "relay-tunnel-4", 0, 0, 0, 0, 100))
+	mustSucceed(rules.RecordExitRelayTraffic(exits[2].ID, "relay-tunnel-5", 70, 80, 70, 80, 100))
+	mustSucceed(rules.RecordExitRelayTraffic(exits[3].ID, "relay-tunnel-6", 5, 5, 5, 5, 100))
+	tunnels := []model.GostTunnel{
+		{Name: "archived link", EntryNodeID: entry, ExitNodeID: shared, ExitRuleID: &exits[0].ID},
+		{Name: "existing link sharing the exit", EntryNodeID: entry, ExitNodeID: shared, ExitRuleID: &exits[0].ID},
+		{Name: "another link sharing the exit", EntryNodeID: entry, ExitNodeID: shared, ExitRuleID: &exits[0].ID},
+		{Name: "legacy link", EntryNodeID: entry, ExitNodeID: shared},
+		{Name: "unsampled link", EntryNodeID: entry, ExitNodeID: unsampled},
+	}
+	mustSucceed(f.db.Create(&tunnels).Error)
+	tunnelRepo := repository.NewTunnelRepository(f.db)
+	mustSucceed(tunnelRepo.RecordRelayTraffic(tunnels[0].ID, 10, 20, 10, 20, 100))
+	mustSucceed(tunnelRepo.Delete(tunnels[0].ID))
+	mustSucceed(tunnelRepo.RecordRelayTraffic(tunnels[3].ID, 1, 2, 1, 2, 100))
+	nodeRepo := repository.NewNodeRepository(f.db)
+	mustSucceed(nodeRepo.UpdateStats(shared, 3, 4))
+	mustSucceed(nodeRepo.UpdateStats(entry, 7, 8))
+	// Archived counters stay attributed to the node after an exit is removed.
+	mustSucceed(f.db.Delete(&exits[3]).Error)
+
+	want := map[uint]uint64{shared: 120, entry: 15, zero: 0, capped: 66}
+	check := func(got nodeTrafficResponse) {
+		t.Helper()
+		used, measured := want[got.ID]
+		if (got.CurrentPeriodUsedBytes != nil) != measured {
+			t.Fatalf("node %q reported usage: %t, want %t", got.Name, got.CurrentPeriodUsedBytes != nil, measured)
+		}
+		if measured && *got.CurrentPeriodUsedBytes != used {
+			t.Fatalf("node %q usage = %d, want %d", got.Name, *got.CurrentPeriodUsedBytes, used)
+		}
+	}
+	page := handlerData[handlerPage[nodeTrafficResponse]](t, f.request(t, "GET", "/nodes", "", 200))
+	if len(page.List) != len(nodes) {
+		t.Fatalf("expected %d nodes, got %d", len(nodes), len(page.List))
+	}
+	for _, item := range page.List {
+		check(item)
+	}
+	for _, node := range nodes {
+		check(handlerData[nodeTrafficResponse](t, f.request(t, "GET", fmt.Sprintf("/nodes/%d", node.ID), "", 200)))
+	}
+}
+
+func TestNodeHTTPKeepsRelayTrafficOnOriginalNodeWhenExitMoves(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	f.registerForwarding()
+	f.engine.GET("/dashboard/stats", NewStatsHandler(service.NewStatsService(f.db)).GetDashboard)
+
+	mustSucceed := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodes := []model.GostNode{{Name: "original"}, {Name: "destination"}, {Name: "entry"}}
+	mustSucceed(f.db.Create(&nodes).Error)
+	original, destination, entry := nodes[0].ID, nodes[1].ID, nodes[2].ID
+	exit := model.GostRule{
+		NodeID: &original, Name: "movable exit", Role: model.EndpointRoleExit, ListenPort: 8443,
+		Targets: []string{"origin.example:443"},
+		// Samples collected before node attribution was introduced must stay with this node.
+		RelayTraffic: model.RelayTraffic{
+			InputBytes: 30, OutputBytes: 40, LastInputBytes: 30, LastOutputBytes: 40, ServiceCreatedAt: 100,
+		},
+		RelayCounterID: "relay-tunnel-1",
+	}
+	mustSucceed(f.db.Create(&exit).Error)
+	tunnels := repository.NewTunnelRepository(f.db)
+	rules := repository.NewRuleRepository(f.db)
+	newTunnel := func(nodeID uint) uint {
+		t.Helper()
+		tunnel := model.GostTunnel{Name: "link", EntryNodeID: entry, ExitNodeID: nodeID, ExitRuleID: &exit.ID}
+		mustSucceed(tunnels.Create(&tunnel))
+		return tunnel.ID
+	}
+	removeTunnel := func(tunnelID uint) {
+		t.Helper()
+		f.request(t, "DELETE", fmt.Sprintf("/tunnels/%d", tunnelID), "", 200)
+	}
+	moveExit := func(nodeID uint) {
+		t.Helper()
+		path := fmt.Sprintf("/rules/%d", exit.ID)
+		body := fmt.Sprintf(`{"name":"movable exit","node_id":%d,"protocol":"tcp","listen_port":8443}`, nodeID)
+		moved := handlerData[model.GostRule](t, f.request(t, "PUT", path, body, 200))
+		if moved.NodeID == nil || *moved.NodeID != nodeID {
+			t.Fatalf("exit is on node %v, want %d", moved.NodeID, nodeID)
+		}
+	}
+	checkUsage := func(want map[uint]uint64) {
+		t.Helper()
+		check := func(got nodeTrafficResponse) {
+			t.Helper()
+			used, measured := want[got.ID]
+			if (got.CurrentPeriodUsedBytes != nil) != measured {
+				t.Fatalf("node %q reported usage: %t, want %t", got.Name, got.CurrentPeriodUsedBytes != nil, measured)
+			}
+			if measured && *got.CurrentPeriodUsedBytes != used {
+				t.Fatalf("node %q usage = %d, want %d", got.Name, *got.CurrentPeriodUsedBytes, used)
+			}
+		}
+		page := handlerData[handlerPage[nodeTrafficResponse]](t, f.request(t, "GET", "/nodes", "", 200))
+		if len(page.List) != len(nodes) {
+			t.Fatalf("expected %d nodes, got %d", len(nodes), len(page.List))
+		}
+		for _, item := range page.List {
+			check(item)
+		}
+		for _, node := range nodes {
+			path := fmt.Sprintf("/nodes/%d", node.ID)
+			check(handlerData[nodeTrafficResponse](t, f.request(t, "GET", path, "", 200)))
+		}
+	}
+	checkDashboard := func(currentNode uint, input, output int64) {
+		t.Helper()
+		stats := handlerData[service.DashboardStats](t, f.request(t, "GET", "/dashboard/stats", "", 200))
+		want := repository.TrafficTotals{InputBytes: input, OutputBytes: output}
+		if len(stats.Traffic.Exits) != 1 || stats.Traffic.TrafficTotals != want {
+			t.Fatalf("dashboard traffic = %+v, want one exit totaling %+v", stats.Traffic, want)
+		}
+		got := stats.Traffic.Exits[0]
+		if got.ID != exit.ID || got.ExitNodeID != currentNode || !got.Measured || got.TrafficTotals != want {
+			t.Fatalf("dashboard exit = %+v, want exit %d on node %d totaling %+v", got, exit.ID, currentNode, want)
+		}
+	}
+
+	lastTunnel := newTunnel(original)
+	mustSucceed(tunnels.RecordRelayTraffic(lastTunnel, 10, 20, 10, 20, 90))
+	checkUsage(map[uint]uint64{original: 100})
+	removeTunnel(lastTunnel)
+	moveExit(destination)
+	checkUsage(map[uint]uint64{original: 100})
+	checkDashboard(destination, 40, 60)
+
+	lastTunnel = newTunnel(destination)
+	mustSucceed(rules.RecordExitRelayTraffic(exit.ID, fmt.Sprintf("relay-tunnel-%d", lastTunnel), 5, 8, 5, 8, 200))
+	checkUsage(map[uint]uint64{original: 100, destination: 13})
+	removeTunnel(lastTunnel)
+	moveExit(original)
+	lastTunnel = newTunnel(original)
+	mustSucceed(rules.RecordExitRelayTraffic(exit.ID, fmt.Sprintf("relay-tunnel-%d", lastTunnel), 2, 3, 2, 3, 300))
+	checkUsage(map[uint]uint64{original: 105, destination: 13})
+	checkDashboard(original, 47, 71)
 }
 
 type handlerReleaseTransport func(*http.Request) (*http.Response, error)

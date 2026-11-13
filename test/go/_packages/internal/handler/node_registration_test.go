@@ -156,7 +156,7 @@ func TestNodeRegistration(t *testing.T) {
 		t.Fatalf("registration failed to return node credentials: %v", err)
 	}
 	node.Remark = "updated metadata"
-	if err := repository.NewNodeRepository(f.db).Update(&node, nil, nil, nil); err != nil {
+	if err := repository.NewNodeRepository(f.db).Update(&node, nil, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	assertRejected(token, http.StatusUnauthorized)
