@@ -9,7 +9,7 @@ yagp 基于原作者 **code-gopher** 开发的 Gost Panel，沿用 MIT 许可证
 ## 分支与合并
 
 - `master` 是本仓库的远端默认分支，也是日常改动的目标。从最新的 `origin/master` 创建功能分支，推送功能分支后创建 PR，并显式指定 `--base master`。
-- `main` 是历史分支，推送到它仍会触发发布流程。如果请求仅写了「推送到 main」或把 `main` 当作默认分支，先指出本仓库使用 `master`，等用户确认本次确实要操作历史 `main` 后再执行。创建 `main`、更改默认分支或以其他分支为 PR 合并目标也须明确授权。
+- `main` 是历史分支。日常提交、推送或合并请求中写成 `main` 时，直接按 `master` 流程执行，无需再次确认。只有用户明确要求操作历史分支或更改默认分支时，才按该明确要求处理。
 - 推送前用 `git remote -v`、`git status --short --branch` 和 `git ls-remote --symref origin HEAD` 核对远端、当前分支和远端默认分支，并检查推送命令的目标引用。合并前确认 PR 的 `baseRefName` 为 `master`，且必需的 CI 检查已通过。
 
 ## 开发与验证

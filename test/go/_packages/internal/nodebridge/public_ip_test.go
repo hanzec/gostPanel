@@ -2,6 +2,7 @@ package nodebridge
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,7 @@ import (
 
 func TestCollectNodeIPsSeparatesLocalInterfacesFromPublicIP(t *testing.T) {
 	var interfaces []net.Addr
-	for _, address := range []string{"198.51.100.1/24", "198.51.100.2/24", "2001:db8::1/64", "10.0.0.1/8", "fc00::1/64", "fe80::1/64", "127.0.0.1/8"} {
+	for _, address := range []string{"198.51.100.1/24", "198.51.100.2/24", "2001:db8::1/64", "10.0.0.1/8", "100.64.0.2/10", "fc00::1/64", "fe80::1/64", "127.0.0.1/8"} {
 		ip, network, err := net.ParseCIDR(address)
 		if err != nil {
 			t.Fatal(err)
@@ -31,8 +32,47 @@ func TestCollectNodeIPsSeparatesLocalInterfacesFromPublicIP(t *testing.T) {
 	report := collectNodeIPs(egress, "", interfaces)
 	if report.ipv4 != egress || report.ipv6 != "2001:db8::1" ||
 		!slices.Equal(report.public, []string{"198.51.100.1", "198.51.100.2", "2001:db8::1", egress}) ||
-		!slices.Equal(report.local, []string{"10.0.0.1", "198.51.100.1", "198.51.100.2", "2001:db8::1", "fc00::1"}) {
+		!slices.Equal(report.local, []string{"10.0.0.1", "100.64.0.2", "198.51.100.1", "198.51.100.2", "2001:db8::1", "fc00::1"}) {
 		t.Fatalf("IP snapshot = %+v", report)
+	}
+}
+
+func TestPublicIPLookupFallsBackWithinBudget(t *testing.T) {
+	const publicIP = "203.0.113.50"
+	var fallbackCalls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/timeout", func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("/rejected", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "100.64.0.2")
+	})
+	mux.HandleFunc("/valid", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, publicIP)
+	})
+	mux.HandleFunc("/fallback", func(w http.ResponseWriter, _ *http.Request) {
+		fallbackCalls.Add(1)
+		_, _ = io.WriteString(w, publicIP)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	for _, test := range []struct {
+		primary       string
+		fallbackCalls int32
+	}{
+		{"/valid", 0},
+		{"/rejected", 1},
+		{"/timeout", 1},
+	} {
+		t.Run(test.primary, func(t *testing.T) {
+			fallbackCalls.Store(0)
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			got := firstPublicIP(ctx, "tcp4", server.URL+test.primary, server.URL+"/fallback")
+			if got != publicIP || fallbackCalls.Load() != test.fallbackCalls {
+				t.Fatalf("IP lookup = %q, fallback calls = %d, want %q and %d", got, fallbackCalls.Load(), publicIP, test.fallbackCalls)
+			}
+		})
 	}
 }
 

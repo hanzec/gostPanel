@@ -14,6 +14,8 @@ import (
 	"yagp/pkg/nodegrpc"
 )
 
+var sharedNATRange = netip.MustParsePrefix("100.64.0.0/10")
+
 type nodeIPSnapshot struct {
 	ipv4, ipv6     string
 	public, local  []string
@@ -76,7 +78,7 @@ func reportIPChanges(ctx context.Context, nodeID uint64, panel nodegrpc.V1Client
 
 func detectNodeIPs(ctx context.Context) nodeIPSnapshot {
 	ipv4, ipv6 := DetectPublicIPs(ctx)
-	interfaces, err := net.InterfaceAddrs()
+	interfaces, err := localNodeInterfaceAddresses(ctx)
 	snapshot := collectNodeIPs(ipv4, ipv6, interfaces)
 	mptcpSupported := detectMultipathTCP()
 	snapshot.mptcpSupported = &mptcpSupported
@@ -104,7 +106,7 @@ func collectNodeIPs(ipv4, ipv6 string, interfaces []net.Addr) nodeIPSnapshot {
 			continue
 		}
 		local = append(local, ip.String())
-		if !ip.IsPrivate() {
+		if !ip.IsPrivate() && !sharedNATRange.Contains(ip) {
 			addresses = append(addresses, ip.String())
 		}
 	}
@@ -139,10 +141,27 @@ func DetectPublicIPs(ctx context.Context) (string, string) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
+	const fallback = "https://icanhazip.com/"
 	ipv6 := make(chan string, 1)
-	go func() { ipv6 <- probePublicIP(ctx, "tcp6", "https://api6.ipify.org") }()
-	ipv4 := probePublicIP(ctx, "tcp4", "https://api.ipify.org")
+	go func() { ipv6 <- firstPublicIP(ctx, "tcp6", "https://api6.ipify.org", fallback) }()
+	ipv4 := firstPublicIP(ctx, "tcp4", "https://api.ipify.org", fallback)
 	return ipv4, <-ipv6
+}
+
+func firstPublicIP(ctx context.Context, network string, endpoints ...string) string {
+	for _, endpoint := range endpoints {
+		if ctx.Err() != nil {
+			break
+		}
+		// Reserve time for the fallback even if the first service never responds.
+		attempt, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+		ip := probePublicIP(attempt, network, endpoint)
+		cancel()
+		if ip != "" {
+			return ip
+		}
+	}
+	return ""
 }
 
 func probePublicIP(ctx context.Context, network, endpoint string) string {
@@ -177,7 +196,7 @@ func probePublicIP(ctx context.Context, network, endpoint string) string {
 		return ""
 	}
 	ip, err := netip.ParseAddr(strings.TrimSpace(string(body)))
-	if err != nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.Zone() != "" || ip.Is4In6() || ip.Is4() != (network == "tcp4") {
+	if err != nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || sharedNATRange.Contains(ip) || ip.Zone() != "" || ip.Is4In6() || ip.Is4() != (network == "tcp4") {
 		return ""
 	}
 	return ip.String()
