@@ -43,8 +43,12 @@ func TestControlCommandScope(t *testing.T) {
 		{"PUT", "/config/observers/other", true},
 		{"PUT", "/config/limiters/other", false},
 		{"GET", "/config/admissions/other", true},
+		{"DELETE", "/config/admissions/tunnel-42-bypass", false},
 		{"PUT", "/config/bypasses/other", true},
 		{"DELETE", "/config/bypasses/other", false},
+		{"DELETE", "/config/bypasses/yagp-transparent-proxy", false},
+		{"DELETE", "/config/bypasses/tunnel-0-bypass", false},
+		{"DELETE", "/config/bypasses/tunnel-042-bypass", false},
 	} {
 		if got := allowedCommand(test.method, test.path); got != test.allowed {
 			t.Errorf("%s %s allowed = %t, want %t", test.method, test.path, got, test.allowed)
@@ -54,6 +58,7 @@ func TestControlCommandScope(t *testing.T) {
 
 func TestControlExecuteProxy(t *testing.T) {
 	const payload = "{\"services\":[]}"
+	const bypassPath = "/config/bypasses/tunnel-42-bypass"
 	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user, password, ok := r.BasicAuth(); !ok || user != controlTestUser || password != controlTestPassword {
 			t.Errorf("unexpected credentials on local request")
@@ -69,6 +74,11 @@ func TestControlExecuteProxy(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, "created")
+		case "/api" + bypassPath:
+			if r.Method != http.MethodDelete {
+				t.Errorf("proxied bypass request used %s, want DELETE", r.Method)
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case "/api/config/services/truncated":
 			w.Header().Set("Content-Length", "100")
 			_, _ = io.WriteString(w, "truncated")
@@ -87,6 +97,10 @@ func TestControlExecuteProxy(t *testing.T) {
 	reply, err := control.Execute(ctx, &nodegrpc.CommandRequest{Method: "POST", Path: "/config/services", Body: []byte(payload)})
 	if err != nil || reply.GetStatusCode() != http.StatusCreated || string(reply.GetBody()) != "created" {
 		t.Fatalf("proxy result = %v, %v", reply, err)
+	}
+	reply, err = control.Execute(ctx, &nodegrpc.CommandRequest{Method: http.MethodDelete, Path: bypassPath})
+	if err != nil || reply.GetStatusCode() != http.StatusNoContent {
+		t.Errorf("delete tunnel bypass = %v, %v", reply, err)
 	}
 	for _, test := range []struct {
 		path string
