@@ -107,6 +107,9 @@ func (s *RuleSyncService) syncNodeRules(node model.GostNode, exitNodes map[uint]
 	}
 	defer s.syncing.Delete(node.ID)
 
+	endpointTunnelRuntime.RLock()
+	defer endpointTunnelRuntime.RUnlock()
+
 	client := utils.GetGostClient(&node)
 
 	// 获取节点真实运行配置
@@ -181,6 +184,14 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 		chainsByName[chain.Name] = chain
 	}
 	changed := false
+	relayHostsByEntry := make(map[uint][]string)
+	for _, t := range tunnels {
+		if t.EntryNodeID == nodeID && t.EntryRuleID != nil && t.Status == model.TunnelStatusRunning {
+			if host := relayHost(t.ExitRule, exitNodes[t.ExitNodeID]); host != "" {
+				relayHostsByEntry[*t.EntryRuleID] = append(relayHostsByEntry[*t.EntryRuleID], host)
+			}
+		}
+	}
 	for _, t := range tunnels {
 		if t.EntryNodeID != nodeID {
 			continue
@@ -202,14 +213,14 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 		}
 		exitHost := relayHost(t.ExitRule, exitNodes[t.ExitNodeID])
 		clashChain := clashTunnelChainName(t.ID)
-		for _, name := range []string{chainName, clashChain} {
+		for _, name := range []string{chainName, clashChain, sharedTransparentChainName(t.ID)} {
 			addr, ok := chainsByName[name].TunnelRelayAddress()
 			oldHost, _, err := net.SplitHostPort(addr)
 			if !ok || err != nil || exitHost == "" || oldHost == exitHost {
 				continue
 			}
-			if t.EntryRuleID != nil && name == clashChain {
-				if err := s.syncTransparentRelayHost(client, *t.EntryRuleID, exitHost); err != nil {
+			if t.EntryRuleID != nil && name != chainName {
+				if err := s.syncTransparentRelayHost(client, *t.EntryRuleID, exitHost, relayHostsByEntry[*t.EntryRuleID]); err != nil {
 					logger.Warnf("[Sync] 更新隧道 %d 入口透明分流的出口地址失败: %v", t.ID, err)
 					continue
 				}
@@ -235,12 +246,15 @@ func (s *RuleSyncService) syncTunnels(client *gost.Client, nodeID uint, tunnels 
 	}
 }
 
-func (s *RuleSyncService) syncTransparentRelayHost(client *gost.Client, ruleID uint, exitHost string) error {
+func (s *RuleSyncService) syncTransparentRelayHost(client *gost.Client, ruleID uint, exitHost string, hosts []string) error {
 	rule, err := s.ruleRepo.FindByID(ruleID)
 	if err != nil {
 		return err
 	}
 	request := transparentRedirectRequest(rule, exitHost)
+	if len(hosts) > 1 {
+		request.RelayHosts = hosts
+	}
 	request.RequireActive = true
 	ctx := context.Background()
 	prepared, err := client.ConfigureTransparentRedirect(ctx, request)

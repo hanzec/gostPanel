@@ -55,8 +55,10 @@ func (s *controlServer) ConfigureTransparentRedirect(ctx context.Context, req *n
 	if action != prepare && action != apply && action != remove {
 		return nil, status.Error(codes.InvalidArgument, "invalid transparent redirect action")
 	}
-	if action != remove && (req.GetPort() == 0 || req.GetPort() > 65535 || req.GetRelayHost() == "" || len(req.GetRelayHost()) > 253) {
-		return nil, status.Error(codes.InvalidArgument, "invalid transparent redirect port or Relay address")
+	if action != remove {
+		if err := validateRedirectRequest(req); err != nil {
+			return nil, err
+		}
 	}
 
 	path := redirectStatePath(s.config)
@@ -118,6 +120,30 @@ func (s *controlServer) ConfigureTransparentRedirect(ctx context.Context, req *n
 	return next.reply(true), nil
 }
 
+func validateRedirectRequest(req *nodegrpc.TransparentRedirectRequest) error {
+	if req.GetPort() == 0 || req.GetPort() > 65535 || req.GetRelayHost() == "" && len(req.GetRelayHosts()) == 0 {
+		return status.Error(codes.InvalidArgument, "invalid transparent redirect port or Relay address")
+	}
+	if len(req.GetRelayHost()) > 253 {
+		return status.Error(codes.InvalidArgument, "invalid transparent redirect Relay address")
+	}
+	for _, host := range req.GetRelayHosts() {
+		if host == "" || len(host) > 253 {
+			return status.Error(codes.InvalidArgument, "invalid transparent redirect Relay address")
+		}
+	}
+	return nil
+}
+
+func redirectRelayHosts(req *nodegrpc.TransparentRedirectRequest) []string {
+	hosts := slices.Clone(req.GetRelayHosts())
+	if host := req.GetRelayHost(); host != "" {
+		hosts = append(hosts, host)
+	}
+	slices.Sort(hosts)
+	return slices.Compact(hosts)
+}
+
 func prepareRedirectState(ctx context.Context, ruleset []byte, table string, req *nodegrpc.TransparentRedirectRequest, current redirectState, active bool) (redirectState, error) {
 	preferred := uint32(gost.ClashRedirectMark)
 	if active {
@@ -130,7 +156,7 @@ func prepareRedirectState(ctx context.Context, ruleset []byte, table string, req
 	if active && mark != current.Mark {
 		return redirectState{}, status.Error(codes.FailedPrecondition, "the active transparent redirect mark overlaps existing nftables rules; restart the tunnel to select a new mark")
 	}
-	relayIPs, err := redirectRelayIPs(ctx, req.GetRelayHost())
+	relayIPs, err := redirectRelayIPs(ctx, redirectRelayHosts(req)...)
 	if err != nil {
 		return redirectState{}, redirectNftError(ctx, "resolve Relay address", err)
 	}
@@ -171,21 +197,21 @@ func (s *redirectState) detectDocker(ctx context.Context, selectAddress bool) er
 	return nil
 }
 
-func redirectRelayIPs(ctx context.Context, host string) ([]netip.Addr, error) {
-	if address, err := netip.ParseAddr(host); err == nil {
-		if address.Unmap().Is4() {
-			return []netip.Addr{address.Unmap()}, nil
-		}
-		return nil, nil
-	}
-	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
-		return nil, err
-	}
+func redirectRelayIPs(ctx context.Context, hosts ...string) ([]netip.Addr, error) {
 	var ips []netip.Addr
-	for _, address := range addresses {
-		if address.Unmap().Is4() {
-			ips = append(ips, address.Unmap())
+	for _, host := range hosts {
+		address, err := netip.ParseAddr(host)
+		addresses := []netip.Addr{address}
+		if err != nil {
+			addresses, err = net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for _, address := range addresses {
+			if address.Unmap().Is4() {
+				ips = append(ips, address.Unmap())
+			}
 		}
 	}
 	slices.SortFunc(ips, netip.Addr.Compare)
@@ -224,7 +250,7 @@ func (s redirectState) sameRules(other redirectState) bool {
 }
 
 func (s redirectState) reply(active bool) *nodegrpc.TransparentRedirectReply {
-	return &nodegrpc.TransparentRedirectReply{Mark: s.Mark, DockerAddress: redirectAddress(s.DockerAddress), Active: active}
+	return &nodegrpc.TransparentRedirectReply{Mark: s.Mark, DockerAddress: redirectAddress(s.DockerAddress), Active: active, MultiRelaySupported: true}
 }
 
 func redirectAddress(addr netip.Addr) string {
@@ -409,7 +435,8 @@ func (s *controlServer) checkRedirectService(ctx context.Context, name, address 
 	service := result.Data
 	if service.Addr != net.JoinHostPort(address, strconv.Itoa(int(state.Port))) ||
 		service.Listener == nil || service.Listener.Type != "red" ||
-		service.Handler == nil || service.Handler.Type != "red" || service.Handler.Chain == "" ||
+		service.Handler == nil || service.Handler.Type != "red" ||
+		(service.Handler.Chain == "" && (service.Handler.ChainGroup == nil || len(service.Handler.ChainGroup.Chains) == 0)) ||
 		service.SockOpts == nil || uint32(service.SockOpts.Mark) != state.Mark {
 		return fmt.Errorf("Gost transparent service %s does not match the saved nftables configuration", name)
 	}

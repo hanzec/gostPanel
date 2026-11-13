@@ -38,6 +38,18 @@ func transparentFiltering(rule *model.GostRule) bool {
 
 func (s *RuleService) prepareTransparentChain(client *gost.Client, tunnel *model.GostTunnel, rule *model.GostRule, mark uint32) (string, error) {
 	name := clashTunnelChainName(tunnel.ID)
+	bypass, err := s.prepareTransparentBypass(client, tunnel, rule)
+	if err != nil {
+		return "", err
+	}
+	if err := client.EnsureMarkedTransparentChain(tunnel.ChainID, name, mark, bypass); err != nil {
+		logger.Warnf("创建 Clash 分流链失败: %v", err)
+		return "", errors.ErrRuleChainCreateFailed
+	}
+	return name, nil
+}
+
+func (s *RuleService) prepareTransparentBypass(client *gost.Client, tunnel *model.GostTunnel, rule *model.GostRule) (string, error) {
 	bypass := ""
 	if len(rule.RulesetIDs) != 0 || len(rule.ManualDomains) != 0 {
 		matchers, err := s.rulesetService.SelectedMatchers(context.Background(), rule.RulesetIDs, rule.ManualDomains)
@@ -65,9 +77,5 @@ func (s *RuleService) prepareTransparentChain(client *gost.Client, tunnel *model
 		}
 		bypass = gost.TransparentBypassName
 	}
-	if err := client.EnsureMarkedTransparentChain(tunnel.ChainID, name, mark, bypass); err != nil {
-		logger.Warnf("创建 Clash 分流链失败: %v", err)
-		return "", errors.ErrRuleChainCreateFailed
-	}
-	return name, nil
+	return bypass, nil
 }

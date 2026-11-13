@@ -8,7 +8,7 @@
       <header class="overview-panel-header">
         <div>
           <p class="overview-overline">LIVE TRAFFIC</p>
-          <h2 id="overview-traffic-title">实时流量</h2>
+          <h2 id="overview-traffic-title">出口实时流量</h2>
         </div>
         <span class="ops-status" :class="statsError ? 'is-warning' : 'is-success'">
           {{ statsError ? '更新暂缓' : '每 5 秒更新' }}
@@ -18,7 +18,7 @@
         <div class="traffic-metric">
           <dt>累计总流量</dt>
           <dd class="ops-mono">{{ totalTrafficLabel(traffic.input_bytes + traffic.output_bytes) }}</dd>
-          <dd class="traffic-note">{{ hasPendingExits ? '有运行中的隧道等待采集' : '各隧道出口累计流量之和' }}</dd>
+          <dd class="traffic-note">{{ hasPendingExits ? '有运行中的出口等待采集' : '各出口累计流量之和' }}</dd>
         </div>
         <div v-for="direction in trafficDirections" :key="direction.key" class="traffic-metric">
           <dt>{{ direction.label }}速率</dt>
@@ -27,35 +27,34 @@
         </div>
       </dl>
       <div class="traffic-exits">
-        <h3 id="tunnel-traffic-title">隧道出口流量</h3>
-        <p class="traffic-note">每条隧道由其 Gost Relay 独立采集。</p>
-        <p v-if="!traffic.tunnels.length" class="traffic-note">暂无隧道。</p>
-        <div v-else class="ops-table-scroll overview-table traffic-table" tabindex="0" role="region" aria-labelledby="tunnel-traffic-title">
+        <h3 id="exit-traffic-title">出口明细</h3>
+        <p v-if="!traffic.exits.length" class="traffic-note">暂无隧道出口。</p>
+        <div v-else class="ops-table-scroll overview-table traffic-table" tabindex="0" role="region" aria-labelledby="exit-traffic-title">
           <table>
             <thead>
               <tr>
-                <th scope="col">隧道</th>
+                <th scope="col">出口</th>
                 <th scope="col">出口节点</th>
                 <th v-for="direction in trafficDirections" :key="direction.key" scope="col">{{ direction.label }}</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="tunnel in traffic.tunnels" :key="tunnel.id">
+              <tr v-for="exit in traffic.exits" :key="exit.key">
                 <td>
-                  <strong>{{ tunnel.name }}</strong>
-                  <p v-if="!tunnel.measured" class="traffic-note">
-                    {{ tunnel.status === 'running' ? '等待采集。旧隧道在下次启动后开始统计。' : '隧道启动后开始统计。' }}
+                  <strong>{{ exit.name }}</strong>
+                  <p v-if="!exit.measured" class="traffic-note">
+                    {{ exit.running ? '等待采集。' : '隧道启动后开始统计。' }}
                   </p>
                 </td>
                 <td>
-                  <span>{{ tunnel.exit_node_name }}</span>
-                  <span class="ops-status" :class="tunnel.exit_node_status === 'online' ? 'is-success' : 'is-muted'">
-                    {{ tunnel.exit_node_status === 'online' ? '在线' : '离线' }}
+                  <span>{{ exit.exit_node_name }}</span>
+                  <span class="ops-status" :class="exit.exit_node_status === 'online' ? 'is-success' : 'is-muted'">
+                    {{ exit.exit_node_status === 'online' ? '在线' : '离线' }}
                   </span>
                 </td>
                 <td v-for="direction in trafficDirections" :key="direction.key">
-                  <span class="ops-mono">{{ formatRate(tunnelRate(tunnel, direction.key)) }}</span>
-                  <p class="traffic-note">累计 {{ tunnel.measured ? formatTraffic(tunnel[direction.key]) : '—' }}</p>
+                  <span class="ops-mono">{{ formatRate(exitRate(exit, direction.key)) }}</span>
+                  <p class="traffic-note">累计 {{ exit.measured ? formatTraffic(exit[direction.key]) : '—' }}</p>
                 </td>
               </tr>
             </tbody>
@@ -214,10 +213,10 @@ function formatTraffic(bytes) {
 
 const formatRate = (bytes) => bytes == null ? '—' : `${formatTraffic(bytes)}/s`
 const traffic = computed(() => stats.value?.traffic)
-const previousTunnels = computed(() => new Map(previousTraffic.value?.tunnels.map((tunnel) => [tunnel.id, tunnel])))
-const hasPendingExits = computed(() => traffic.value?.tunnels.some((tunnel) => tunnel.status === 'running' && !tunnel.measured))
-const hasMeasuredExits = computed(() => traffic.value?.tunnels.some((tunnel) => tunnel.measured))
-const totalTrafficLabel = (bytes) => traffic.value.tunnels.length && !hasMeasuredExits.value ? '—' : formatTraffic(bytes)
+const previousExits = computed(() => new Map(previousTraffic.value?.exits.map((exit) => [exit.key, exit])))
+const hasPendingExits = computed(() => traffic.value?.exits.some((exit) => exit.running && !exit.measured))
+const hasMeasuredExits = computed(() => traffic.value?.exits.some((exit) => exit.measured))
+const totalTrafficLabel = (bytes) => traffic.value.exits.length && !hasMeasuredExits.value ? '—' : formatTraffic(bytes)
 
 function trafficRate(current, previous) {
   return previous == null || current < previous || sampleSeconds.value <= 0 || statsError.value
@@ -225,15 +224,15 @@ function trafficRate(current, previous) {
     : (current - previous) / sampleSeconds.value
 }
 
-function tunnelRate(tunnel, key) {
-  const previous = previousTunnels.value.get(tunnel.id)
-  if (!tunnel.measured || !previous?.measured || tunnel.exit_node_id !== previous.exit_node_id ||
-      tunnel.status !== 'running' || tunnel.exit_node_status !== 'online' || previous.exit_node_status !== 'online') return null
-  return trafficRate(tunnel[key], previous[key])
+function exitRate(exit, key) {
+  const previous = previousExits.value.get(exit.key)
+  if (!exit.measured || !previous?.measured || exit.exit_node_id !== previous.exit_node_id ||
+      !exit.running || !previous.running || exit.exit_node_status !== 'online' || previous.exit_node_status !== 'online') return null
+  return trafficRate(exit[key], previous[key])
 }
 
 function totalTrafficRate(key) {
-  const rates = traffic.value.tunnels.map((tunnel) => tunnelRate(tunnel, key)).filter((rate) => rate != null)
+  const rates = traffic.value.exits.map((exit) => exitRate(exit, key)).filter((rate) => rate != null)
   return rates.length ? rates.reduce((total, rate) => total + rate, 0) : null
 }
 

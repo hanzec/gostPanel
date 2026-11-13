@@ -159,6 +159,8 @@ type redirectLifecycleNode struct {
 	mark           uint32
 	dockerAddress  string
 	lastRelayHost  string
+	lastRelayHosts []string
+	multiRelay     bool
 	saves          []bool
 	savedOnApply   bool
 	redirectActive bool
@@ -202,13 +204,14 @@ func (n *redirectLifecycleNode) ConfigureTransparentRedirect(_ context.Context, 
 		if n.prepareCode != codes.OK {
 			return nil, status.Error(n.prepareCode, "cannot prepare redirect")
 		}
-		return &nodegrpc.TransparentRedirectReply{Mark: n.mark, DockerAddress: n.dockerAddress, Active: n.redirectActive}, nil
+		return &nodegrpc.TransparentRedirectReply{Mark: n.mark, DockerAddress: n.dockerAddress, Active: n.redirectActive, MultiRelaySupported: n.multiRelay}, nil
 	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_APPLY:
 		n.savedOnApply = len(n.saves) > 0 && n.saves[len(n.saves)-1]
 		if n.rejectApply {
 			return nil, status.Error(codes.FailedPrecondition, "cannot apply redirect")
 		}
 		n.lastRelayHost = request.GetRelayHost()
+		n.lastRelayHosts = append([]string(nil), request.GetRelayHosts()...)
 		n.redirectActive = true
 	case nodegrpc.TransparentRedirectAction_TRANSPARENT_REDIRECT_ACTION_REMOVE:
 		if n.removeCode != codes.OK {

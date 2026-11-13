@@ -16,11 +16,11 @@ const resources = {
   traffic: {
     input_bytes: 1_000_000_000,
     output_bytes: 2_000_000_000,
-    tunnels: [
-      { id: 1, name: '东京 1', status: 'running', exit_node_id: 10, exit_node_name: '东京出口', exit_node_status: 'online', input_bytes: 1_000_000_000, output_bytes: 2_000_000_000, measured: true },
-      { id: 2, name: '东京 2', status: 'running', exit_node_id: 10, exit_node_name: '东京出口', exit_node_status: 'online', input_bytes: 0, output_bytes: 0, measured: true },
-      { id: 3, name: '伦敦', status: 'running', exit_node_id: 20, exit_node_name: '伦敦出口', exit_node_status: 'offline', input_bytes: 0, output_bytes: 0, measured: false },
-      { id: 4, name: '香港', status: 'stopped', exit_node_id: 30, exit_node_name: '香港出口', exit_node_status: 'offline', input_bytes: 0, output_bytes: 0, measured: false }
+    tunnels: [{ id: 1, name: '入口 A 到东京' }, { id: 2, name: '入口 B 到东京' }],
+    exits: [
+      { key: 'exit:1', name: '东京 Relay', running: true, exit_node_id: 10, exit_node_name: '东京出口', exit_node_status: 'online', input_bytes: 1_000_000_000, output_bytes: 2_000_000_000, measured: true },
+      { key: 'exit:2', name: '伦敦 Relay', running: true, exit_node_id: 20, exit_node_name: '伦敦出口', exit_node_status: 'offline', input_bytes: 0, output_bytes: 0, measured: false },
+      { key: 'tunnel:4', name: '香港旧隧道', running: false, exit_node_id: 30, exit_node_name: '香港出口', exit_node_status: 'offline', input_bytes: 0, output_bytes: 0, measured: false }
     ]
   },
   database: 'sqlite',
@@ -155,19 +155,18 @@ describe('Dashboard overview', () => {
     expect(page.findAll('.kpi-value').at(-1).text()).toBe('—')
   })
 
-  it('updates total and per-tunnel rates automatically, even for a shared exit', async () => {
+  it('updates total and exit rates automatically and renders a shared exit once', async () => {
     const nextTraffic = {
       input_bytes: 4_000_000_000,
       output_bytes: 5_000_000_000,
-      tunnels: [
-        { ...resources.traffic.tunnels[0], input_bytes: 2_000_000_000, output_bytes: 4_000_000_000 },
-        { ...resources.traffic.tunnels[1], input_bytes: 2_000_000_000, output_bytes: 1_000_000_000 },
-        ...resources.traffic.tunnels.slice(2)
+      exits: [
+        { ...resources.traffic.exits[0], input_bytes: 4_000_000_000, output_bytes: 5_000_000_000 },
+        ...resources.traffic.exits.slice(1)
       ]
     }
     getDashboardStats.mockResolvedValueOnce({ data: resources })
       .mockResolvedValueOnce({ data: { ...resources, traffic: nextTraffic } })
-      .mockResolvedValue({ data: { ...resources, traffic: { input_bytes: 0, output_bytes: 0, tunnels: [] } } })
+      .mockResolvedValue({ data: { ...resources, traffic: { input_bytes: 0, output_bytes: 0, exits: [] } } })
     getLogList.mockResolvedValue({ data: { list: [] } })
     const page = await mountOverview()
     await flushPromises()
@@ -175,15 +174,15 @@ describe('Dashboard overview', () => {
     expect(page.findAll('button')).toHaveLength(0)
     expect(page.findAll('.traffic-metric .ops-mono').map((item) => item.text())).toEqual(['3 GB', '—', '—'])
     const rows = page.findAll('.traffic-table tbody tr')
-    expect(rows.map((item) => item.get('strong').text())).toEqual(['东京 1', '东京 2', '伦敦', '香港'])
-    for (const row of rows.slice(0, 2)) expect(row.text()).toContain('东京出口')
-    expect(rows[2].text()).toContain('等待采集')
-    expect(rows[3].text()).toContain('隧道启动后开始统计')
+    expect(rows.map((item) => item.get('strong').text())).toEqual(['东京 Relay', '伦敦 Relay', '香港旧隧道'])
+    expect(rows[0].text()).toContain('东京出口')
+    expect(page.get('.traffic-exits').text()).not.toContain('入口 A 到东京')
+    expect(rows[1].text()).toContain('等待采集')
+    expect(rows[2].text()).toContain('隧道启动后开始统计')
 
     await pollOverview()
     expect(page.findAll('.traffic-metric .ops-mono').map((item) => item.text())).toEqual(['9 GB', '600 MB/s', '600 MB/s'])
-    expect(rows[0].findAll('.ops-mono').map((item) => item.text())).toEqual(['200 MB/s', '400 MB/s'])
-    expect(rows[1].findAll('.ops-mono').map((item) => item.text())).toEqual(['400 MB/s', '200 MB/s'])
+    expect(rows[0].findAll('.ops-mono').map((item) => item.text())).toEqual(['600 MB/s', '600 MB/s'])
 
     await pollOverview()
     expect(page.findAll('.traffic-metric .ops-mono').map((item) => item.text())).toEqual(['0 B', '—', '—'])

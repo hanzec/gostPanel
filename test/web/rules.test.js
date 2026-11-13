@@ -655,6 +655,28 @@ describe('forwarding rule editor and actions', () => {
     expect(field(dialog, 'listen_port').get('input').element.value).toBe('')
   })
 
+  it('displays every exit binding count and only offers policy editing once all associated tunnels are stopped', async () => {
+    const stopped = { id: 8, status: 'stopped' }
+    const running = { id: 9, status: 'running' }
+    const exit = { ...relayRule, role: 'exit', name: 'Shared exit', linked_tunnel_status: 'stopped',
+      linked_tunnels: [stopped, running], protocol: 'tcp', targets: ['app.example:443'] }
+    const idleExit = { ...exit, id: 20, name: 'Idle shared exit', linked_tunnel_id: undefined,
+      linked_tunnels: [stopped, { ...running, status: 'stopped' }] }
+    getRuleList.mockResolvedValue(result([exit, idleExit]))
+    const wrapper = mountInventory(Rules)
+    await flushPromises()
+
+    const activeRow = row(wrapper, exit.name)
+    expect(activeRow.text()).toContain('关联 2 条隧道')
+    expect(activeRow.find('[aria-label="编辑 Shared exit"]').exists()).toBe(false)
+    expect(activeRow.get('a').text()).toBe('隧道管理')
+    expect(row(wrapper, idleExit.name).text()).toContain('关联 2 条隧道')
+    await wrapper.get('[aria-label="编辑 Idle shared exit"]').trigger('click')
+    const editor = editDialog(wrapper)
+    expect(selectField(editor, 'role').props('disabled')).toBe(true)
+    expect(selectField(editor, 'listen_ip').props('disabled')).toBe(true)
+  })
+
   it('binds a mapped local IP and displays its public endpoint with the same port', async () => {
     const mapping = { listen_ip: '10.10.0.8', connect_ip: '2001:db8::80' }
     const mappedNode = { ...entryNode, address_mappings: [mapping] }

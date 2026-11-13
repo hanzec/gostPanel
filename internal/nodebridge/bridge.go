@@ -19,6 +19,7 @@ import (
 	"yagp/internal/buildinfo"
 	"yagp/pkg/nodegrpc"
 
+	auth "github.com/go-gost/plugin/auth/proto"
 	observer "github.com/go-gost/plugin/observer/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -122,11 +123,13 @@ func run(ctx context.Context, cfg Config, dial func(context.Context, string, str
 	var current atomic.Pointer[nodegrpc.Session]
 	observation := grpc.NewServer()
 	defer observation.Stop()
+	pluginToken := nodegrpc.ObserverToken(cfg.Username, cfg.Password)
 	observer.RegisterObserverServer(observation, &observerServer{
 		nodeID:  cfg.NodeID,
-		token:   nodegrpc.ObserverToken(cfg.Username, cfg.Password),
+		token:   pluginToken,
 		current: &current,
 	})
+	auth.RegisterAuthenticatorServer(observation, &relayAuthServer{configFile: cfg.ConfigFile, token: pluginToken})
 	ready := health.NewServer()
 	ready.SetServingStatus(daemonHealthService+buildinfo.Version, healthpb.HealthCheckResponse_SERVING)
 	healthpb.RegisterHealthServer(observation, ready)
@@ -169,8 +172,14 @@ type controlServer struct {
 
 func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
 	method, path := command.GetMethod(), command.GetPath()
+	if service, local := strings.CutPrefix(path, nodegrpc.RelayAuthPathPrefix); local {
+		return s.relayAuthCommand(command, service)
+	}
 	if !allowedCommand(method, path) {
 		return nil, status.Error(codes.InvalidArgument, "unsupported Gost command")
+	}
+	if method == http.MethodPost && path == "/config/authers" && !s.validRelayAuther(command.GetBody()) {
+		return nil, status.Error(codes.InvalidArgument, "invalid local relay authenticator")
 	}
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+s.config.AdminAddress+"/api"+path,
 		bytes.NewReader(command.GetBody()))
@@ -205,7 +214,8 @@ func (s *controlServer) GetObserverEndpoint(context.Context, *emptypb.Empty) (*n
 }
 
 var resourceName = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*$`)
-var tunnelChainName = regexp.MustCompile(`^tunnel-[1-9][0-9]*-(clash-)?chain$`)
+var tunnelChainName = regexp.MustCompile(`^tunnel-[1-9][0-9]*-((clash|shared)-)?chain$`)
+var entranceServiceResource = regexp.MustCompile(`^rule-[1-9][0-9]*(-docker)?$`)
 
 func allowedCommand(method, path string) bool {
 	switch path {
@@ -220,6 +230,11 @@ func allowedCommand(method, path string) bool {
 	}
 	switch parts[2] {
 	case "services", "chains", "observers", "limiters", "climiters", "rlimiters", "admissions", "bypasses":
+	case "authers":
+		if len(parts) == 3 {
+			return method == http.MethodPost
+		}
+		return (method == http.MethodGet || method == http.MethodDelete) && nodegrpc.IsRelayAuthService(parts[3])
 	default:
 		return false
 	}
@@ -237,7 +252,7 @@ func allowedCommand(method, path string) bool {
 		case "observers":
 			return true
 		case "services":
-			return strings.HasPrefix(parts[3], "relay-tunnel-")
+			return strings.HasPrefix(parts[3], "relay-tunnel-") || entranceServiceResource.MatchString(parts[3])
 		case "chains":
 			return tunnelChainName.MatchString(parts[3])
 		default:

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"strconv"
+
 	"yagp/internal/buildinfo"
 	"yagp/internal/model"
 	"yagp/internal/repository"
@@ -38,7 +40,14 @@ type DashboardStats struct {
 
 type DashboardTraffic struct {
 	repository.TrafficTotals
+	// Keep the existing per-tunnel projection available to API clients.
 	Tunnels []repository.TunnelExitTraffic `json:"tunnels"`
+	Exits   []DashboardExitTraffic         `json:"exits"`
+}
+
+type DashboardExitTraffic struct {
+	Key string `json:"key"`
+	repository.EndpointExitTraffic
 }
 
 // NodeStats 节点统计
@@ -126,13 +135,40 @@ func (s *StatsService) GetDashboardStats() (*DashboardStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, tunnel := range stats.Traffic.Tunnels {
-		stats.Traffic.InputBytes += tunnel.InputBytes
-		stats.Traffic.OutputBytes += tunnel.OutputBytes
+	endpoints, err := s.tunnelRepo.EndpointExitTraffic()
+	if err != nil {
+		return nil, err
 	}
+	stats.Traffic.collectExits(endpoints)
 
 	stats.Version = buildinfo.Version
 	stats.Database = s.database
 
 	return stats, nil
+}
+
+func (t *DashboardTraffic) collectExits(endpoints []repository.EndpointExitTraffic) {
+	t.Exits = make([]DashboardExitTraffic, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		t.Exits = append(t.Exits, DashboardExitTraffic{
+			Key: "exit:" + strconv.FormatUint(uint64(endpoint.ID), 10), EndpointExitTraffic: endpoint,
+		})
+	}
+	for _, tunnel := range t.Tunnels {
+		if tunnel.TypedExit {
+			continue
+		}
+		t.Exits = append(t.Exits, DashboardExitTraffic{
+			Key: "tunnel:" + strconv.FormatUint(uint64(tunnel.ID), 10),
+			EndpointExitTraffic: repository.EndpointExitTraffic{
+				ID: tunnel.ID, Name: tunnel.Name, ExitNodeID: tunnel.ExitNodeID,
+				ExitNodeName: tunnel.ExitNodeName, ExitNodeStatus: tunnel.ExitNodeStatus,
+				TrafficTotals: tunnel.TrafficTotals, Running: tunnel.Status == model.TunnelStatusRunning, Measured: tunnel.Measured,
+			},
+		})
+	}
+	for _, exit := range t.Exits {
+		t.InputBytes += exit.InputBytes
+		t.OutputBytes += exit.OutputBytes
+	}
 }

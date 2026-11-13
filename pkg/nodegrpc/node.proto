@@ -172,12 +172,14 @@ message TransparentRedirectRequest {
   uint32 mark = 5;
   string docker_address = 6;
   bool require_active = 7;
+  repeated string relay_hosts = 8;
 }
 
 message TransparentRedirectReply {
   uint32 mark = 1;
   string docker_address = 2;
   bool active = 3;
+  bool multi_relay_supported = 4;
 }
 
 message TunnelProbeEndpoint {
