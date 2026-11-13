@@ -66,7 +66,11 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 	startResult, probeResult := make(chan error, 1), make(chan error, 1)
 	starts, probes := make(chan struct{}, 1), make(chan *nodegrpc.TunnelProbeRequest, 1)
 	configReads := make(chan *nodegrpc.CommandRequest, 1)
-	relayState := make(chan string, 1)
+	type exitRelayConfig struct {
+		state      string
+		admissions []gost.AdmissionConfig
+	}
+	relayConfig := make(chan exitRelayConfig, 1)
 	serviceChecks := make(chan struct{}, 1)
 	panel := startTestReportServer(t, f.db)
 	startTestReportStream(t, t.Context(), panel, exit, nodegrpc.NewDispatcher(tunnelProbeNode{
@@ -76,18 +80,19 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		},
 		execute: func(req *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
 			configReads <- req
-			state := <-relayState
-			if state == "api unavailable" {
+			exitRelay := <-relayConfig
+			if exitRelay.state == "api unavailable" {
 				return nil, status.Error(codes.Unavailable, "management API unavailable")
 			}
 			config := gost.GostConfig{}
-			if state != "" {
+			if exitRelay.state != "" {
 				config.Services = []gost.ServiceConfig{{
-					Name: tunnel.ServiceID, Addr: ":8443", Status: &gost.ServiceStatus{State: state},
+					Name: tunnel.ServiceID, Addr: ":8443", Status: &gost.ServiceStatus{State: exitRelay.state},
 					Handler:  &gost.HandlerConfig{Type: "relay", Auth: &gost.AuthConfig{Password: "secret-test-value"}},
 					Listener: &gost.ListenerConfig{Type: "tcp"}, Admission: "tunnel-allowlist",
+					Admissions: []string{"another-allowlist", "relay-denylist"},
 				}}
-				config.Admissions = []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true}}
+				config.Admissions = exitRelay.admissions
 			}
 			body, err := json.Marshal(config)
 			return &nodegrpc.CommandReply{StatusCode: http.StatusOK, Body: body}, err
@@ -115,15 +120,17 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		return detailed.Err()
 	}
 	for _, tt := range []struct {
-		name       string
-		prepare    error
-		probe      error
-		wantHTTP   int
-		wantDetail string
-		wantStage  string
-		checkExit  bool
-		relayState string
-		wantChecks map[string]string
+		name            string
+		prepare         error
+		probe           error
+		wantHTTP        int
+		wantDetail      string
+		wantStage       string
+		checkExit       bool
+		relayState      string
+		relayAdmissions []gost.AdmissionConfig
+		wantChecks      map[string]string
+		wantRelayPolicy string
 	}{
 		{name: "round trip", wantHTTP: http.StatusOK},
 		{name: "exit unavailable", prepare: status.Error(codes.Unavailable, "could not listen"), wantHTTP: http.StatusBadGateway, wantDetail: "无法在出口节点启动测试，请检查节点的 daemon 连接和运行状态", wantStage: "exit_listener"},
@@ -138,7 +145,25 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		{name: "relay unavailable", probe: status.Error(codes.Unavailable, "probe closed"), wantHTTP: http.StatusBadGateway, wantDetail: "测试数据未能通过隧道往返，请检查入口节点和出口 Relay 的运行状态", checkExit: true, wantStage: "exit_relay"},
 		{name: "relay failed", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "refused"}), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "failed", wantStage: "exit_relay", wantChecks: map[string]string{"relay_connection": "failed", "exit_relay": "failed"}},
 		{name: "exit Gost stopped", probe: status.Error(codes.Unavailable, "probe closed"), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "api unavailable", wantStage: "exit_relay", wantChecks: map[string]string{"exit_relay": "failed"}},
-		{name: "relay authentication", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_authentication"}), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake", wantChecks: map[string]string{"relay_connection": "passed", "relay_policy": "warning"}},
+		{
+			name: "relay authentication", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_authentication"}),
+			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake",
+			relayAdmissions: []gost.AdmissionConfig{
+				{Name: "tunnel-allowlist", Whitelist: true, Matchers: []string{"192.0.2.1", "2001:db8::/48"}},
+				{Name: "unrelated-allowlist", Whitelist: true, Matchers: []string{"198.51.100.10"}},
+				{Name: "relay-denylist", Matchers: []string{"198.51.100.11"}},
+				{Name: "another-allowlist", Whitelist: true, Matchers: []string{"203.0.113.0/24"}},
+			},
+			wantChecks:      map[string]string{"relay_connection": "passed", "relay_policy": "warning"},
+			wantRelayPolicy: "出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。当前配置的白名单条目：192.0.2.1、2001:db8::/48、203.0.113.0/24。",
+		},
+		{
+			name: "empty relay allowlist", probe: status.Error(codes.Unavailable, "probe closed"),
+			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_round_trip",
+			relayAdmissions: []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true}},
+			wantChecks:      map[string]string{"relay_policy": "warning"},
+			wantRelayPolicy: "出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。当前配置未列出白名单条目。",
+		},
 		{name: "relay target forbidden", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_target_forbidden"}), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake", wantChecks: map[string]string{"relay_connection": "passed"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,7 +172,7 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 				probeResult <- tt.probe
 			}
 			if tt.checkExit {
-				relayState <- tt.relayState
+				relayConfig <- exitRelayConfig{state: tt.relayState, admissions: tt.relayAdmissions}
 			}
 			reply := f.request(t, http.MethodPost, path, "", tt.wantHTTP)
 			result := handlerData[service.TunnelTestResult](t, reply)
@@ -162,14 +187,17 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 				if result.Success || result.FailureStage != tt.wantStage || result.Recommendation == "" {
 					t.Fatalf("probe result = %+v, want failure at %s", result, tt.wantStage)
 				}
-				checks := make(map[string]string)
+				checks := make(map[string]service.TunnelTestDiagnostic)
 				for _, check := range result.Diagnostics {
-					checks[check.Stage] = check.Status
+					checks[check.Stage] = check
 				}
 				for stage, want := range tt.wantChecks {
-					if checks[stage] != want {
-						t.Errorf("stage %s = %q, want %q", stage, checks[stage], want)
+					if checks[stage].Status != want {
+						t.Errorf("stage %s = %q, want %q", stage, checks[stage].Status, want)
 					}
+				}
+				if got := checks["relay_policy"].Message; got != tt.wantRelayPolicy {
+					t.Errorf("Relay policy message = %q, want %q", got, tt.wantRelayPolicy)
 				}
 				body, _ := json.Marshal(reply)
 				if bytes.Contains(body, []byte("secret-test-value")) {

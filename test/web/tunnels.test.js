@@ -796,7 +796,11 @@ describe('Relay tunnel configuration', () => {
             diagnostics: [
               { stage: 'entry_chain', status: 'passed', message: '已找到入口转发链。' },
               { stage: 'relay_round_trip', status: 'failed', message: '未收到出口回包。' },
-              { stage: 'relay_policy', status: 'warning', message: '请核对出口白名单。' },
+              {
+                stage: 'relay_policy',
+                status: 'warning',
+                message: '出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。当前配置的白名单条目：192.0.2.10、2001:db8::/32。'
+              },
               { stage: 'relay_connection', status: 'skipped', message: '当前协议不支持单独检查。' }
             ]
           }
@@ -822,6 +826,8 @@ describe('Relay tunnel configuration', () => {
     expect(checks.element.open).toBe(true)
     expect(checks.findAll('li').map(item => item.get('.ops-status').text())).toEqual(['通过', '失败', '需检查', '未验证'])
     expect(checks.text()).toContain('未收到出口回包。')
+    const relayPolicy = checks.findAll('li').find(item => item.get('strong').text() === '出口 Relay 访问策略')
+    expect(relayPolicy.get('p').text()).toBe('出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。当前配置的白名单条目：192.0.2.10、2001:db8::/32。')
 
     testTunnel.mockResolvedValueOnce({ data: {
       success: true,
