@@ -106,6 +106,10 @@ export function getNodeNftConfig(id) {
     return request.get(`/nodes/${id}/nft`, { silentError: true })
 }
 
+export function getNodeFirewallStatus(id) {
+    return request.get(`/nodes/${id}/firewall`, { silentError: true })
+}
+
 export function getNodeUpgradeStatus(id) {
     return request.get(`/nodes/${id}/upgrade`, { silentError: true })
 }

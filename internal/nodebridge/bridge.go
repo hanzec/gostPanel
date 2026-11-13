@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,17 +32,18 @@ import (
 const maxResponseBytes = 4 << 20
 
 type Config struct {
-	NodeID           uint64 `yaml:"node_id"`
-	Username         string `yaml:"username"`
-	Password         string `yaml:"password"`
-	AdminAddress     string `yaml:"admin_address"`
-	ObserverListen   string `yaml:"observer_listen"`
-	Host             string `yaml:"host"`
-	ReportCAFile     string `yaml:"report_ca_file"`
-	ReportCertSHA256 string `yaml:"report_cert_sha256,omitempty"`
-	NftConfigFile    string `yaml:"-"`
-	ConfigFile       string `yaml:"-"`
-	RuntimeLayout    int    `yaml:"-"`
+	NodeID           uint64         `yaml:"node_id"`
+	Username         string         `yaml:"username"`
+	Password         string         `yaml:"password"`
+	AdminAddress     string         `yaml:"admin_address"`
+	ObserverListen   string         `yaml:"observer_listen"`
+	Host             string         `yaml:"host"`
+	ReportCAFile     string         `yaml:"report_ca_file"`
+	ReportCertSHA256 string         `yaml:"report_cert_sha256,omitempty"`
+	Firewall         FirewallConfig `yaml:"firewall,omitempty"`
+	NftConfigFile    string         `yaml:"-"`
+	ConfigFile       string         `yaml:"-"`
+	RuntimeLayout    int            `yaml:"-"`
 }
 
 func Run(ctx context.Context, cfg Config) error {
@@ -104,6 +107,11 @@ func run(ctx context.Context, cfg Config, dial func(context.Context, string, str
 		},
 	}
 	defer control.client.CloseIdleConnections()
+	manager, firewallErr := NewFirewallManager(cfg.NodeID, cfg.Firewall)
+	control.firewall = manager
+	if firewallErr != nil {
+		log.Printf("configure firewall: %v", firewallErr)
+	}
 	if cfg.ConfigFile != "" {
 		restoreCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		err := control.restoreTransparentRedirect(restoreCtx)
@@ -127,7 +135,15 @@ func run(ctx context.Context, cfg Config, dial func(context.Context, string, str
 	healthpb.RegisterHealthServer(observation, ready)
 
 	channelCtx, cancelChannel := context.WithCancel(ctx)
-	defer cancelChannel()
+	var firewallWorker sync.WaitGroup
+	defer func() {
+		cancelChannel()
+		firewallWorker.Wait()
+	}()
+	if firewallErr == nil && runtime.GOOS == "linux" && manager.Status().Managed {
+		control.firewallChanged = make(chan struct{}, 1)
+		firewallWorker.Go(func() { control.maintainFirewall(channelCtx) })
+	}
 	go maintainCredentials(channelCtx, credentials)
 	go maintainPanelChannel(channelCtx, credentials, cfg.ConfigFile, &current, controlDispatcher(control))
 
@@ -148,8 +164,10 @@ func IsLoopbackAddress(address string) bool {
 
 type controlServer struct {
 	nodegrpc.UnimplementedV1Server
-	config Config
-	client *http.Client
+	config          Config
+	client          *http.Client
+	firewall        *FirewallManager
+	firewallChanged chan struct{}
 }
 
 func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRequest) (*nodegrpc.CommandReply, error) {
@@ -181,6 +199,12 @@ func (s *controlServer) Execute(ctx context.Context, command *nodegrpc.CommandRe
 	}
 	if len(body) > maxResponseBytes {
 		return nil, status.Error(codes.ResourceExhausted, "local Gost response is too large")
+	}
+	if res.StatusCode >= 200 && res.StatusCode < 300 && method != http.MethodGet && strings.HasPrefix(path, "/config/services") {
+		select {
+		case s.firewallChanged <- struct{}{}:
+		default:
+		}
 	}
 	return &nodegrpc.CommandReply{StatusCode: int32(res.StatusCode), Body: body}, nil
 }

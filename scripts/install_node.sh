@@ -228,13 +228,8 @@ if [[ "$action" == reenroll ]]; then
     if [[ "$manager" == systemd && "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
         "$base_path/yagp-daemon" update-runtime -c "$base_path/node.yaml" || die '节点已重新注册。服务迁移失败，请检查上面的日志。'
     fi
-    if [[ "$manager" != systemd || "$bridge_unit" == yagp-daemon || ! "$runtime_layout" =~ ^[1-9][0-9]*$ ]]; then
-        if [[ "$manager" == openrc && -x /etc/init.d/nftables ]]; then
-            rc-update add nftables boot
-        fi
-        if [[ "$manager" == openrc && "$runtime_layout" =~ ^[1-9][0-9]*$ && ! -f "$base_path/.runtime-layout" ]]; then
-            printf '%s\n' "$runtime_layout" > "$base_path/.runtime-layout"
-        fi
+    if [[ "$manager" == openrc && "$runtime_layout" =~ ^[1-9][0-9]*$ && ! -f "$base_path/.runtime-layout" ]]; then
+        printf '%s\n' "$runtime_layout" > "$base_path/.runtime-layout"
         if ! bridge_service start; then
             if [[ "$manager" == systemd ]]; then
                 die "节点已重新注册。服务启动失败，请查看日志: journalctl -u $bridge_unit"
@@ -312,7 +307,8 @@ command_background=true
 pidfile="/run/$name.pid"
 depend() {
     need net
-    use nftables docker
+    use docker
+    after nftables
 }
 EOF
         chmod 0755 "$unit_path"
@@ -321,9 +317,6 @@ EOF
 
 write_service "$bridge_unit" "yagp daemon $node_id" yagp-daemon -c node.yaml
 if [[ "$manager" == systemd ]]; then
-    if [[ $(systemctl show --property=LoadState --value nftables.service 2>/dev/null || true) == loaded ]]; then
-        systemctl enable nftables.service
-    fi
     gost_unit_path="/etc/systemd/system/$gost_unit.service"
     gost_unit_existed=false
     if [[ -e "$gost_unit_path" || -L "$gost_unit_path" ]]; then
@@ -341,9 +334,6 @@ if [[ "$manager" == systemd ]]; then
     fi
 else
     write_service "$gost_unit" "yagp node $node_id Gost" gost -C gost.yaml
-    if [[ -x /etc/init.d/nftables ]]; then
-        rc-update add nftables boot
-    fi
     for unit in "$gost_unit" "$bridge_unit"; do
         rc-update add "$unit" default
         rc-service "$unit" restart

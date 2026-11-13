@@ -141,10 +141,96 @@ systemd 服务启动失败时执行 `journalctl -u yagp-daemon -u yagp-gost`。�
 | 查看节点流量 | **节点清单**和**节点详情**按 GB 显示本期用量和上限。无当期数据时用量显示「未统计」，无上限时显示 `Unlimited`。 |
 | 查看实时流量 | **运行总览**。隧道流量按出口 Relay 统计，运行中的旧隧道在下次启动后开始采集。 |
 | 查看或重启 Gost | **节点详情 → Gost 服务**。需要 systemd 版守护进程，重启会中断活动连接。 |
-| 查看 nftables | **节点管理 → 配置 → nft 配置**。新版守护进程支持在线预览，旧版显示上次保存的规则。 |
+| 查看防火墙同步与 nftables | **节点管理 → 配置 → nft 配置**。可查看放行后端、同步结果以及节点的 nftables 规则。旧版守护进程显示上次保存的规则。 |
 | 限制 Relay 来源 IP | 新建隧道自动使用入口节点的来源 IP 生成白名单。入口暂无来源 IP 时，上报后自动生效。 |
 | 订阅 Clash 规则集 | **系统设置 → Clash 规则集**。可为多个 HTTPS 订阅命名，支持 `payload:` YAML 和文本规则集。 |
 | 配置 SMTP 和 Bark | **系统设置 → 通知管理**。测试使用当前表单参数，确认后保存。SMTP 465 使用隐式 TLS 1.2+，私有 CA 须加入面板运行环境的系统信任库。 |
+
+### 节点防火墙端口放行
+
+`yagp-daemon` 可以自动放行 Gost 转发和 Relay 的运行中监听端口。功能默认关闭。通过节点安装脚本部署时，配置文件位于 `/etc/yagp-daemon/<节点 ID>/node.yaml`。启用后，守护进程依据主机的 `/etc/os-release` 选择后端。
+
+#### Ubuntu 和 Ubuntu 衍生发行版
+
+守护进程使用 UFW。自动放行要求主机已安装、启用并运行 UFW。将以下内容写入节点的 `node.yaml`，然后重启 `yagp-daemon`。
+
+```yaml
+firewall:
+  enabled: true
+```
+
+UFW 缺失、停用或未运行时，自动放行不可用，面板会显示错误。UFW 的启停、重载和主机防火墙策略由管理员维护。
+
+守护进程在 UFW 的 IPv4 和已启用的 IPv6 入站用户链中管理自己的运行时规则。每个地址族的变更先校验，再提交对应的规则更新；如果第二个地址族更新失败，会尝试撤回第一个地址族的更新。管理员重载 UFW 后，守护进程会在下次同步时重建放行规则。
+
+如果 `/etc/default/ufw` 关闭了 IPv6，未指定监听 IP 的端口只放行 IPv4。绑定到具体 IPv6 地址的监听会报告同步错误。
+
+可用 `iptables -S ufw-user-input` 和 `ip6tables -S ufw6-user-input` 检查内核规则。守护进程添加的规则带有 `yagp daemon firewall <节点 ID>` 注释，`ufw status` 显示 UFW 保存的规则。
+
+停用时，将 `node.yaml` 中 `firewall` 下的 `enabled` 改为 `false` 并重启 `yagp-daemon`。管理员确认 SSH 和管理端口已由主机的持久规则放行后，可在维护窗口执行 `ufw reload`，清除守护进程添加的运行时放行规则。卸载或回退前同样清理这些规则。
+
+#### RHEL 系发行版
+
+RHEL、CentOS、Rocky Linux、AlmaLinux、Oracle Linux 和 OpenCloudOS 使用 firewalld。自动放行要求 firewalld 已启用并运行，且支持 policy。CentOS 7 等缺少 policy 接口的系统会报告后端不可用。
+
+由管理员创建专用的入站 policy。以下以节点 `42` 和入站区域 `public` 为例，按实际节点 ID 修改描述中的编号，并用 `firewall-cmd --get-active-zones` 确定实际承载 Gost 流量的区域。需要覆盖多个区域时，分别添加这些区域。此 policy 专用于 `yagp-daemon` 的运行时放行，主机自己的访问控制继续保留在原有区域或 policy 中。
+
+```bash
+firewall-cmd --permanent --new-policy=yagp-42
+firewall-cmd --permanent --policy=yagp-42 --set-description='yagp daemon firewall 42'
+firewall-cmd --permanent --policy=yagp-42 --set-priority=32767
+firewall-cmd --permanent --policy=yagp-42 --set-target=CONTINUE
+firewall-cmd --permanent --policy=yagp-42 --add-ingress-zone=public
+firewall-cmd --permanent --policy=yagp-42 --add-egress-zone=HOST
+firewall-cmd --check-config
+```
+
+确认 SSH 和管理端口已由主机的持久规则放行后，由管理员在维护窗口执行 `firewall-cmd --reload`。然后在节点的 `node.yaml` 中加入以下配置并重启 `yagp-daemon`。
+
+```yaml
+firewall:
+  enabled: true
+  policy: yagp-42
+```
+
+正优先级让区域中的显式规则先处理。firewalld 1.0 起，正优先级 policy 在区域的兜底动作之前执行。更早且支持 policy 的版本需要匹配区域使用 `default` 目标。可用 `firewall-cmd --info-policy=yagp-42` 查看当前规则。[firewalld policy 手册](https://firewalld.org/documentation/man-pages/firewalld.policies.html) · [firewalld 1.0 优先级行为](https://firewalld.org/2021/06/the-upcoming-1-0-0)
+
+守护进程根据 Gost 监听更新该 policy 的运行时放行规则。端口变更时先添加新规则，再移除旧规则，更新失败时尝试恢复原有放行。管理员重载 firewalld 后，下一次同步会重建这些规则。
+
+停用时，将 `firewall` 下的 `enabled` 改为 `false` 并重启 `yagp-daemon`。管理员按启用时的维护流程重载 firewalld，即可清除运行时放行。卸载、回退或更换 policy 前同样清理旧规则。
+
+#### 其他 Linux 发行版
+
+守护进程使用 nftables。将 `filter` 和 `input` 换成主机现有的 `inet` 表名和 `filter` 类型的 `input` 基链名，然后写入节点的 `node.yaml`。
+
+```yaml
+firewall:
+  enabled: true
+  table: filter
+  input_chain: input
+```
+
+重启 `yagp-daemon` 后，它会创建节点专用的放行链和监听集合。在主机持久化的 nftables 配置中声明该普通链，并在现有 `input` 基链中加入无条件跳转。以节点 `42` 为例，下面两段分别加入现有 `table inet filter` 和现有 `chain input`。跳转放在需要保留的主机访问控制之后、拒绝转发流量的兜底规则之前。
+
+```nft
+chain yagp_42_input {
+    comment "yagp daemon firewall 42"
+}
+```
+
+```nft
+jump yagp_42_input
+```
+
+用 `nft -c -f` 校验主机配置后，按现有的防火墙管理流程加载。守护进程的规则更新也会先校验，再作为一个事务提交。停用、切换主机表或卸载前，从当前规则和主机持久化配置中移除旧的跳转，即可撤销对应放行。
+
+#### 同步与状态
+
+主机仍由原有规则处理 SSH、管理入口和其他流量，其他防火墙链和流量配额仍可拒绝连接。Gost 监听绑定到指定 IP 时，放行匹配该 IP 和端口。回环监听与透明转发由原有机制处理。
+
+守护进程在启动、Gost 服务变更和每 15 秒检查时重建或同步自己的规则。节点重启后，Gost 从保存的配置恢复监听，守护进程据此同步放行规则。面板的 **节点管理 → 配置 → nft 配置** 显示放行后端、同步结果和最近的错误。回退到不支持防火墙同步的 daemon 前，从 `node.yaml` 移除 `firewall` 配置。
+
+### 双节点隧道
 
 创建双节点隧道时，先在 **端点管理** 为 A 创建**入口**，选择 TCP、UDP 或透明转发入口；为 B 创建**出口**，设置监听地址，并在 **目标与策略** 中选择隧道协议和目标类型。目标与策略随出口保存，入口无需填写目标。隧道协议用于 A 到 B 的 Relay 连接。
 
@@ -172,7 +258,7 @@ systemd 服务启动失败时执行 `journalctl -u yagp-daemon -u yagp-gost`。�
 
 入口需要支持透明转发的 `yagp-daemon` 和 nftables。面板提示守护程序版本过旧时，在入口节点的 **版本与升级** 中升级 `yagp-daemon`，等节点重新连接面板后再创建或启动隧道。Gost 监听和链就绪并保存后，守护程序才启用 IPv4 TCP 80/443 重定向。检测到 Docker bridge 时，规则也接管这些桥上的流量。同一节点可运行一条接管 80/443 的透明隧道。原先启用默认 Clash 规则集的隧道会保留原有分流行为。
 
-节点会避开现有 nftables 规则占用的 mark，并在启动时检查和加载已保存的规则版本。升级旧 systemd 节点后，可从节点详情执行运行环境更新以启用 nftables 开机加载。已有透明隧道在下次启动时接入自动管理。若仍加载手工配置的 `inet gost` 重定向表，先停用该配置再启动隧道。
+节点会避开现有 nftables 规则占用的 mark，并在启动时检查和加载已保存的规则版本。主机防火墙的启停和开机加载由管理员维护。已有透明隧道在下次启动时接入自动管理。若仍加载手工配置的 `inet gost` 重定向表，先停用该配置再启动隧道。
 
 停止或删除被隧道占用的端点时，先操作对应隧道。删除失败时，端点记录会保留，可排除故障后重试。
 

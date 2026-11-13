@@ -9,6 +9,7 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-gost/plugin v0.10.0
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/oschwald/maxminddb-golang/v2 v2.9.0
 	github.com/sigstore/sigstore-go v1.4.0
 	github.com/spf13/viper v1.21.0

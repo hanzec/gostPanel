@@ -4,6 +4,7 @@ package yagp.node.v1;
 
 option go_package = "yagp/pkg/nodegrpc";
 
+import "google/protobuf/timestamp.proto";
 import "observer.proto";
 
 message CommandRequest {
@@ -194,4 +195,13 @@ message TunnelProbeRequest {
 
 message TunnelProbeReply {
   int64 round_trip_ms = 1;
+}
+
+message FirewallStatus {
+  bool supported = 1;
+  bool managed = 2;
+  bool synchronized = 3;
+  .google.protobuf.Timestamp last_sync = 4;
+  optional string last_error = 5;
+  string backend = 6;
 }
