@@ -56,14 +56,17 @@ func (r *TunnelRepository) EndpointExitTraffic() ([]EndpointExitTraffic, error) 
 			MAX(relay_service_created_at) AS measured_at,
 			MAX(CASE WHEN deleted_at IS NULL AND status = ? THEN 1 ELSE 0 END) AS running`, model.TunnelStatusRunning).
 		Where("exit_rule_id IS NOT NULL").Group("exit_rule_id")
+	previousAssignments := r.DB.Model(&model.ExitRelayHistory{}).
+		Select("rule_id, SUM(input_bytes) AS input_bytes, SUM(output_bytes) AS output_bytes").Group("rule_id")
 	err := r.DB.Model(&model.GostRule{}).
 		Select(`rules.id, rules.name, rules.node_id AS exit_node_id, nodes.name AS exit_node_name, nodes.status AS exit_node_status,
-			rules.relay_input_bytes + COALESCE(history.input_bytes, 0) AS input_bytes,
-			rules.relay_output_bytes + COALESCE(history.output_bytes, 0) AS output_bytes,
+			rules.relay_input_bytes + COALESCE(history.input_bytes, 0) + COALESCE(previous.input_bytes, 0) AS input_bytes,
+			rules.relay_output_bytes + COALESCE(history.output_bytes, 0) + COALESCE(previous.output_bytes, 0) AS output_bytes,
 			COALESCE(history.running, 0) AS running,
-			(rules.relay_service_created_at > 0 OR COALESCE(history.measured_at, 0) > 0) AS measured`).
+			(rules.relay_service_created_at > 0 OR COALESCE(history.measured_at, 0) > 0 OR previous.rule_id IS NOT NULL) AS measured`).
 		Joins("JOIN nodes ON nodes.id = rules.node_id AND nodes.deleted_at IS NULL").
 		Joins("LEFT JOIN (?) AS history ON history.exit_rule_id = rules.id", history).
+		Joins("LEFT JOIN (?) AS previous ON previous.rule_id = rules.id", previousAssignments).
 		Where("rules.role = ?", model.EndpointRoleExit).
 		Order("rules.id").Scan(&traffic).Error
 	return traffic, err

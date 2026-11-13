@@ -313,6 +313,108 @@ func TestNodeHTTPUncappedTrafficIncludesExistingRelaySamples(t *testing.T) {
 	}
 }
 
+func TestNodeHTTPKeepsRelayTrafficOnOriginalNodeWhenExitMoves(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	f.registerForwarding()
+	f.engine.GET("/dashboard/stats", NewStatsHandler(service.NewStatsService(f.db)).GetDashboard)
+
+	mustSucceed := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	nodes := []model.GostNode{{Name: "original"}, {Name: "destination"}, {Name: "entry"}}
+	mustSucceed(f.db.Create(&nodes).Error)
+	original, destination, entry := nodes[0].ID, nodes[1].ID, nodes[2].ID
+	exit := model.GostRule{
+		NodeID: &original, Name: "movable exit", Role: model.EndpointRoleExit, ListenPort: 8443,
+		Targets: []string{"origin.example:443"},
+		// Samples collected before node attribution was introduced must stay with this node.
+		RelayTraffic: model.RelayTraffic{
+			InputBytes: 30, OutputBytes: 40, LastInputBytes: 30, LastOutputBytes: 40, ServiceCreatedAt: 100,
+		},
+		RelayCounterID: "relay-tunnel-1",
+	}
+	mustSucceed(f.db.Create(&exit).Error)
+	tunnels := repository.NewTunnelRepository(f.db)
+	rules := repository.NewRuleRepository(f.db)
+	newTunnel := func(nodeID uint) uint {
+		t.Helper()
+		tunnel := model.GostTunnel{Name: "link", EntryNodeID: entry, ExitNodeID: nodeID, ExitRuleID: &exit.ID}
+		mustSucceed(tunnels.Create(&tunnel))
+		return tunnel.ID
+	}
+	removeTunnel := func(tunnelID uint) {
+		t.Helper()
+		f.request(t, "DELETE", fmt.Sprintf("/tunnels/%d", tunnelID), "", 200)
+	}
+	moveExit := func(nodeID uint) {
+		t.Helper()
+		path := fmt.Sprintf("/rules/%d", exit.ID)
+		body := fmt.Sprintf(`{"name":"movable exit","node_id":%d,"protocol":"tcp","listen_port":8443}`, nodeID)
+		moved := handlerData[model.GostRule](t, f.request(t, "PUT", path, body, 200))
+		if moved.NodeID == nil || *moved.NodeID != nodeID {
+			t.Fatalf("exit is on node %v, want %d", moved.NodeID, nodeID)
+		}
+	}
+	checkUsage := func(want map[uint]uint64) {
+		t.Helper()
+		check := func(got nodeTrafficResponse) {
+			t.Helper()
+			used, measured := want[got.ID]
+			if (got.CurrentPeriodUsedBytes != nil) != measured {
+				t.Fatalf("node %q reported usage: %t, want %t", got.Name, got.CurrentPeriodUsedBytes != nil, measured)
+			}
+			if measured && *got.CurrentPeriodUsedBytes != used {
+				t.Fatalf("node %q usage = %d, want %d", got.Name, *got.CurrentPeriodUsedBytes, used)
+			}
+		}
+		page := handlerData[handlerPage[nodeTrafficResponse]](t, f.request(t, "GET", "/nodes", "", 200))
+		if len(page.List) != len(nodes) {
+			t.Fatalf("expected %d nodes, got %d", len(nodes), len(page.List))
+		}
+		for _, item := range page.List {
+			check(item)
+		}
+		for _, node := range nodes {
+			path := fmt.Sprintf("/nodes/%d", node.ID)
+			check(handlerData[nodeTrafficResponse](t, f.request(t, "GET", path, "", 200)))
+		}
+	}
+	checkDashboard := func(currentNode uint, input, output int64) {
+		t.Helper()
+		stats := handlerData[service.DashboardStats](t, f.request(t, "GET", "/dashboard/stats", "", 200))
+		want := repository.TrafficTotals{InputBytes: input, OutputBytes: output}
+		if len(stats.Traffic.Exits) != 1 || stats.Traffic.TrafficTotals != want {
+			t.Fatalf("dashboard traffic = %+v, want one exit totaling %+v", stats.Traffic, want)
+		}
+		got := stats.Traffic.Exits[0]
+		if got.ID != exit.ID || got.ExitNodeID != currentNode || !got.Measured || got.TrafficTotals != want {
+			t.Fatalf("dashboard exit = %+v, want exit %d on node %d totaling %+v", got, exit.ID, currentNode, want)
+		}
+	}
+
+	lastTunnel := newTunnel(original)
+	mustSucceed(tunnels.RecordRelayTraffic(lastTunnel, 10, 20, 10, 20, 90))
+	checkUsage(map[uint]uint64{original: 100})
+	removeTunnel(lastTunnel)
+	moveExit(destination)
+	checkUsage(map[uint]uint64{original: 100})
+	checkDashboard(destination, 40, 60)
+
+	lastTunnel = newTunnel(destination)
+	mustSucceed(rules.RecordExitRelayTraffic(exit.ID, fmt.Sprintf("relay-tunnel-%d", lastTunnel), 5, 8, 5, 8, 200))
+	checkUsage(map[uint]uint64{original: 100, destination: 13})
+	removeTunnel(lastTunnel)
+	moveExit(original)
+	lastTunnel = newTunnel(original)
+	mustSucceed(rules.RecordExitRelayTraffic(exit.ID, fmt.Sprintf("relay-tunnel-%d", lastTunnel), 2, 3, 2, 3, 300))
+	checkUsage(map[uint]uint64{original: 105, destination: 13})
+	checkDashboard(original, 47, 71)
+}
+
 type handlerReleaseTransport func(*http.Request) (*http.Response, error)
 
 func (call handlerReleaseTransport) RoundTrip(req *http.Request) (*http.Response, error) {

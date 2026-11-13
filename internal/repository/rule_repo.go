@@ -8,6 +8,7 @@ import (
 	"yagp/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrTrafficCounterOverflow = errors.New("traffic counter limit exceeded")
@@ -31,8 +32,32 @@ func (r *RuleRepository) Create(rule *model.GostRule) error {
 
 // Update 更新规则
 func (r *RuleRepository) Update(rule *model.GostRule) error {
-	return r.DB.Omit("relay_counter_id", "relay_input_bytes", "relay_output_bytes",
-		"relay_last_input_bytes", "relay_last_output_bytes", "relay_service_created_at").Save(rule).Error
+	return r.DB.Transaction(func(tx *gorm.DB) error {
+		var current model.GostRule
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("node_id", "relay_input_bytes", "relay_output_bytes", "relay_service_created_at").
+			First(&current, rule.ID).Error; err != nil {
+			return err
+		}
+		if current.NodeID != nil && (rule.NodeID == nil || *rule.NodeID != *current.NodeID) && current.RelayTraffic.ServiceCreatedAt > 0 {
+			history := model.ExitRelayHistory{
+				RuleID: rule.ID, NodeID: *current.NodeID,
+				InputBytes: current.RelayTraffic.InputBytes, OutputBytes: current.RelayTraffic.OutputBytes,
+			}
+			if err := tx.Create(&history).Error; err != nil {
+				return err
+			}
+			// A listener on the destination starts with a new counter checkpoint.
+			if err := tx.Model(rule).UpdateColumns(map[string]any{
+				"relay_counter_id": "", "relay_input_bytes": 0, "relay_output_bytes": 0,
+				"relay_last_input_bytes": 0, "relay_last_output_bytes": 0, "relay_service_created_at": 0,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Omit("relay_counter_id", "relay_input_bytes", "relay_output_bytes",
+			"relay_last_input_bytes", "relay_last_output_bytes", "relay_service_created_at").Save(rule).Error
+	})
 }
 
 // Delete 删除规则

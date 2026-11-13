@@ -54,7 +54,7 @@ func newHandlerHTTPFixture(t *testing.T) *handlerHTTPFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.SystemConfig{}, &model.GostRuleset{}); err != nil {
+	if err := db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.ExitRelayHistory{}, &model.OperationLog{}, &model.SystemConfig{}, &model.GostRuleset{}); err != nil {
 		t.Fatal(err)
 	}
 	engine := gin.New()

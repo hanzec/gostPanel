@@ -296,7 +296,7 @@ func newServiceTestDB(t *testing.T) *gorm.DB {
 	requireServiceError(t, err, nil)
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	requireServiceError(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.SystemConfig{}, &model.GostRuleset{}), nil)
+	requireServiceError(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.ExitRelayHistory{}, &model.OperationLog{}, &model.SystemConfig{}, &model.GostRuleset{}), nil)
 	return db
 }
 

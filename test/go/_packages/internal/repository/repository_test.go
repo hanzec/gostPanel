@@ -25,7 +25,7 @@ func openRepositoryDB(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = raw.Close() })
-	mustPersist(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.OperationLog{}, &model.SystemConfig{}))
+	mustPersist(t, db.AutoMigrate(&model.GostNode{}, &model.GostRule{}, &model.GostTunnel{}, &model.ExitRelayHistory{}, &model.OperationLog{}, &model.SystemConfig{}))
 	return db
 }
 

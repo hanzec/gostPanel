@@ -60,3 +60,33 @@ func TestDashboardTrafficKeepsOneRecordPerTunnel(t *testing.T) {
 		t.Fatalf("exit traffic = %+v, want %+v", traffic, want)
 	}
 }
+
+func TestRuleMoveRollsBackRelayArchiveWhenUpdateFails(t *testing.T) {
+	db := openRepositoryDB(t)
+	nodes := []model.GostNode{{Name: "source"}, {Name: "destination"}}
+	mustPersist(t, db.Create(&nodes).Error)
+	source, destination := nodes[0].ID, nodes[1].ID
+	rule := model.GostRule{Name: "exit", Role: model.EndpointRoleExit, NodeID: &source, ListenPort: 8443}
+	rules := NewRuleRepository(db)
+	mustPersist(t, rules.Create(&rule))
+	mustPersist(t, rules.RecordExitRelayTraffic(rule.ID, "relay-tunnel-1", 30, 40, 30, 40, 100))
+	mustPersist(t, db.Exec(`CREATE TRIGGER fail_exit_move BEFORE UPDATE OF node_id ON rules
+		BEGIN SELECT RAISE(ABORT, 'rule update failed'); END`).Error)
+
+	rule.NodeID = &destination
+	if err := rules.Update(&rule); err == nil {
+		t.Fatal("expected the reassignment to fail")
+	}
+	stored, err := rules.FindByID(rule.ID)
+	mustPersist(t, err)
+	if stored.NodeID == nil || *stored.NodeID != source ||
+		stored.RelayTraffic != (model.RelayTraffic{InputBytes: 30, OutputBytes: 40, LastInputBytes: 30, LastOutputBytes: 40, ServiceCreatedAt: 100}) ||
+		stored.RelayCounterID != "relay-tunnel-1" {
+		t.Fatalf("reassignment changed stored rule and checkpoint: %+v", stored)
+	}
+	usage, err := NewNodeRepository(db).RelayUsageByNode(t.Context(), []uint{source, destination})
+	mustPersist(t, err)
+	if len(usage) != 1 || usage[source] != 70 {
+		t.Fatalf("failed reassignment changed node usage: %v", usage)
+	}
+}
