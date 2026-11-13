@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"time"
 
 	"yagp/pkg/logger"
@@ -41,8 +42,11 @@ func Logger() gin.HandlerFunc {
 				fields["authentik_groups"] = groups
 			}
 			logger.WithFields(fields).Warnf(logFormat, statusCode, method, path, clientIP, latency, bodySize)
-		} else if statusCode >= 400 {
+		} else if statusCode >= http.StatusBadRequest {
 			logger.Warnf(logFormat,
+				statusCode, method, path, clientIP, latency, bodySize)
+		} else if method == http.MethodGet {
+			logger.Debugf(logFormat,
 				statusCode, method, path, clientIP, latency, bodySize)
 		} else {
 			logger.Infof(logFormat,
