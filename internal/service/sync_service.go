@@ -79,7 +79,7 @@ func (s *RuleSyncService) Stop() {
 
 // syncAll 同步所有节点的规则状态
 func (s *RuleSyncService) syncAll() {
-	nodes, _, err := s.nodeRepo.List(nil)
+	nodes, _, err := s.nodeRepo.List(nil, "")
 	if err != nil {
 		logger.Errorf("[Sync] 获取节点列表失败: %v", err)
 		return

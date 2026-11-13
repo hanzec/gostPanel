@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"time"
 
 	"yagp/internal/model"
 	"yagp/pkg/response"
@@ -17,12 +16,10 @@ type nodeTrafficResponse struct {
 	CurrentPeriodUsedBytes *uint64 `json:"traffic_current_period_used_bytes"`
 }
 
-func withCurrentTrafficUsage(node model.GostNode, now time.Time) nodeTrafficResponse {
+func withCurrentTrafficUsage(node model.GostNode, usage map[uint]uint64) nodeTrafficResponse {
 	result := nodeTrafficResponse{GostNode: node}
-	if node.TrafficLimitBytes > 0 &&
-		(node.TrafficQuotaState == model.TrafficQuotaActive || node.TrafficQuotaState == model.TrafficQuotaBlocked) &&
-		node.TrafficQuotaWindowStart == model.TrafficQuotaWindow(node.TrafficResetPeriod, now) {
-		result.CurrentPeriodUsedBytes = &node.TrafficQuotaUsedBytes
+	if bytes, ok := usage[node.ID]; ok {
+		result.CurrentPeriodUsedBytes = &bytes
 	}
 	return result
 }

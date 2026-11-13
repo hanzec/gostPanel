@@ -14,6 +14,7 @@ import (
 
 	"yagp/internal/buildinfo"
 	"yagp/internal/model"
+	"yagp/internal/repository"
 	"yagp/internal/service"
 	"yagp/pkg/gost"
 	"yagp/pkg/nodegrpc"
@@ -208,7 +209,6 @@ func TestNodeHTTPCurrentPeriodTraffic(t *testing.T) {
 		{"empty", 100, model.TrafficQuotaActive, currentWindow, 0, true},
 		{"previous", 100, model.TrafficQuotaActive, currentWindow - 1, 42, false},
 		{"pending", 100, model.TrafficQuotaPending, currentWindow, 42, false},
-		{"disabled", 0, model.TrafficQuotaActive, currentWindow, 42, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := model.GostNode{
@@ -237,6 +237,79 @@ func TestNodeHTTPCurrentPeriodTraffic(t *testing.T) {
 			}
 			check(page.List[0])
 		})
+	}
+}
+
+func TestNodeHTTPUncappedTrafficIncludesExistingRelaySamples(t *testing.T) {
+	f := newHandlerHTTPFixture(t)
+	f.registerNodes()
+	nodes := []model.GostNode{
+		{Name: "shared exit", TrafficResetPeriod: "monthly", TrafficQuotaState: model.TrafficQuotaPending, TrafficQuotaUsedBytes: 999},
+		{Name: "entry with observer traffic"},
+		{Name: "zero-byte exit"},
+		{Name: "unsampled node"},
+		{Name: "capped exit", TrafficLimitBytes: 500, TrafficQuotaState: model.TrafficQuotaActive, TrafficQuotaUsedBytes: 66},
+	}
+	mustSucceed := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustSucceed(f.db.Create(&nodes).Error)
+	shared, entry, zero, unsampled, capped := nodes[0].ID, nodes[1].ID, nodes[2].ID, nodes[3].ID, nodes[4].ID
+	mustSucceed(f.db.Model(&nodes[4]).Update("traffic_quota_window_start", 0).Error)
+	// A shared exit may have counted traffic per tunnel before it started counting per endpoint.
+	exits := []model.GostRule{
+		{NodeID: &shared, Name: "shared", Role: model.EndpointRoleExit, ListenPort: 8001},
+		{NodeID: &zero, Name: "observed zero", Role: model.EndpointRoleExit, ListenPort: 8002},
+		{NodeID: &capped, Name: "quota", Role: model.EndpointRoleExit, ListenPort: 8003},
+		{NodeID: &shared, Name: "archived", Role: model.EndpointRoleExit, ListenPort: 8004},
+	}
+	mustSucceed(f.db.Create(&exits).Error)
+	rules := repository.NewRuleRepository(f.db)
+	mustSucceed(rules.RecordExitRelayTraffic(exits[0].ID, "relay-tunnel-1", 30, 40, 30, 40, 100))
+	mustSucceed(rules.RecordExitRelayTraffic(exits[1].ID, "relay-tunnel-4", 0, 0, 0, 0, 100))
+	mustSucceed(rules.RecordExitRelayTraffic(exits[2].ID, "relay-tunnel-5", 70, 80, 70, 80, 100))
+	mustSucceed(rules.RecordExitRelayTraffic(exits[3].ID, "relay-tunnel-6", 5, 5, 5, 5, 100))
+	tunnels := []model.GostTunnel{
+		{Name: "archived link", EntryNodeID: entry, ExitNodeID: shared, ExitRuleID: &exits[0].ID},
+		{Name: "existing link sharing the exit", EntryNodeID: entry, ExitNodeID: shared, ExitRuleID: &exits[0].ID},
+		{Name: "another link sharing the exit", EntryNodeID: entry, ExitNodeID: shared, ExitRuleID: &exits[0].ID},
+		{Name: "legacy link", EntryNodeID: entry, ExitNodeID: shared},
+		{Name: "unsampled link", EntryNodeID: entry, ExitNodeID: unsampled},
+	}
+	mustSucceed(f.db.Create(&tunnels).Error)
+	tunnelRepo := repository.NewTunnelRepository(f.db)
+	mustSucceed(tunnelRepo.RecordRelayTraffic(tunnels[0].ID, 10, 20, 10, 20, 100))
+	mustSucceed(tunnelRepo.Delete(tunnels[0].ID))
+	mustSucceed(tunnelRepo.RecordRelayTraffic(tunnels[3].ID, 1, 2, 1, 2, 100))
+	nodeRepo := repository.NewNodeRepository(f.db)
+	mustSucceed(nodeRepo.UpdateStats(shared, 3, 4))
+	mustSucceed(nodeRepo.UpdateStats(entry, 7, 8))
+	// Archived counters stay attributed to the node after an exit is removed.
+	mustSucceed(f.db.Delete(&exits[3]).Error)
+
+	want := map[uint]uint64{shared: 120, entry: 15, zero: 0, capped: 66}
+	check := func(got nodeTrafficResponse) {
+		t.Helper()
+		used, measured := want[got.ID]
+		if (got.CurrentPeriodUsedBytes != nil) != measured {
+			t.Fatalf("node %q reported usage: %t, want %t", got.Name, got.CurrentPeriodUsedBytes != nil, measured)
+		}
+		if measured && *got.CurrentPeriodUsedBytes != used {
+			t.Fatalf("node %q usage = %d, want %d", got.Name, *got.CurrentPeriodUsedBytes, used)
+		}
+	}
+	page := handlerData[handlerPage[nodeTrafficResponse]](t, f.request(t, "GET", "/nodes", "", 200))
+	if len(page.List) != len(nodes) {
+		t.Fatalf("expected %d nodes, got %d", len(nodes), len(page.List))
+	}
+	for _, item := range page.List {
+		check(item)
+	}
+	for _, node := range nodes {
+		check(handlerData[nodeTrafficResponse](t, f.request(t, "GET", fmt.Sprintf("/nodes/%d", node.ID), "", 200)))
 	}
 }
 

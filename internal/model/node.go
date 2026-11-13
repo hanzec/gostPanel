@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"gorm.io/gorm"
@@ -36,6 +37,16 @@ type NodeAddressMapping struct {
 	ConnectIP string `json:"connect_ip"`
 }
 
+type NodeTags []string
+
+// MarshalJSON exposes untagged legacy rows as an empty array.
+func (tags NodeTags) MarshalJSON() ([]byte, error) {
+	if tags == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]string(tags))
+}
+
 // GostNode Gost 节点模型
 type GostNode struct {
 	ID        uint       `gorm:"primaryKey" json:"id"`
@@ -49,6 +60,7 @@ type GostNode struct {
 	IPv6      string     `gorm:"column:ipv6;size:45" json:"ipv6"`
 	Region    string     `gorm:"-" json:"region"`
 	Addresses []string   `gorm:"serializer:json;type:text" json:"addresses,omitempty"`
+	Tags      NodeTags   `gorm:"serializer:json;type:text" json:"tags"`
 
 	// Nil means the daemon has not reported its local interfaces.
 	LocalAddresses []string `gorm:"serializer:json;type:text" json:"local_addresses"`

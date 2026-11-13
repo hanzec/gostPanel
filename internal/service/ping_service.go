@@ -77,7 +77,7 @@ func (s *NodeHealthService) checkAll() {
 // checkNodes 检测所有节点
 // 使用 Gost API 的 /config 接口进行健康检查
 func (s *NodeHealthService) checkNodes() {
-	nodes, _, err := s.nodeRepo.List(nil)
+	nodes, _, err := s.nodeRepo.List(nil, "")
 	if err != nil {
 		logger.Errorf("获取节点列表失败: %v", err)
 		return

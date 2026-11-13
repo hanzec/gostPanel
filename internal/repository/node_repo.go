@@ -30,8 +30,12 @@ func (r *NodeRepository) Create(node *model.GostNode) error {
 }
 
 // Update 更新节点元数据，不覆盖并发完成的注册或健康检查。
-func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string, addressMappings []model.NodeAddressMapping) error {
+func (r *NodeRepository) Update(node *model.GostNode, trafficLimitBytes *int64, trafficResetPeriod *string, addressMappings []model.NodeAddressMapping, tags model.NodeTags) error {
 	fields := []string{"Name", "Remark"}
+	if tags != nil {
+		node.Tags = tags
+		fields = append(fields, "Tags")
+	}
 	if addressMappings != nil {
 		node.AddressMappings = addressMappings
 		fields = append(fields, "AddressMappings")
@@ -200,11 +204,18 @@ func (r *NodeRepository) FindByIDWithRelations(id uint) (*model.GostNode, error)
 }
 
 // List 查询节点列表
-func (r *NodeRepository) List(opt *QueryOption) ([]model.GostNode, int64, error) {
+func (r *NodeRepository) List(opt *QueryOption, tag string) ([]model.GostNode, int64, error) {
 	var nodes []model.GostNode
 	var total int64
 
 	db := r.DB.Model(&model.GostNode{})
+	if tag != "" {
+		if db.Dialector.Name() == "mysql" {
+			db = db.Where("JSON_CONTAINS(nodes.tags, JSON_QUOTE(?))", tag)
+		} else {
+			db = db.Where("EXISTS (SELECT 1 FROM json_each(nodes.tags) WHERE value = ?)", tag)
+		}
+	}
 
 	// 应用条件过滤（统计总数前）
 	db = ApplyConditions(db, opt)

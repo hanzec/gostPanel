@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"yagp/internal/model"
 )
@@ -16,6 +18,7 @@ import (
 // CreateNodeReq 创建节点请求
 type CreateNodeReq struct {
 	Name               string              `json:"name" binding:"required,min=1,max=100"` // 节点名称
+	Tags               NodeTags            `json:"tags"`
 	AddressMappings    NodeAddressMappings `json:"address_mappings"`
 	Remark             string              `json:"remark"` // 备注
 	TrafficLimitBytes  *int64              `json:"traffic_limit_bytes" binding:"omitempty,gte=0,lte=9007199254740991"`
@@ -25,6 +28,7 @@ type CreateNodeReq struct {
 // UpdateNodeReq 更新节点请求
 type UpdateNodeReq struct {
 	Name               string              `json:"name" binding:"required,min=1,max=100"` // 节点名称
+	Tags               NodeTags            `json:"tags"`
 	AddressMappings    NodeAddressMappings `json:"address_mappings"`
 	Remark             string              `json:"remark"` // 备注
 	TrafficLimitBytes  *int64              `json:"traffic_limit_bytes" binding:"omitempty,gte=0,lte=9007199254740991"`
@@ -42,6 +46,7 @@ type NodeListReq struct {
 	PageSize int    `form:"pageSize" binding:"omitempty,min=1,max=100"` // 每页数量
 	Status   string `form:"status"`                                     // 状态筛选
 	Keyword  string `form:"keyword"`                                    // 关键词搜索
+	Tag      string `form:"tag"`                                        // 标签筛选
 }
 
 // SetDefaults 设置默认值
@@ -52,6 +57,40 @@ func (r *NodeListReq) SetDefaults() {
 	if r.PageSize == 0 {
 		r.PageSize = 10
 	}
+	r.Tag = strings.TrimSpace(r.Tag)
+}
+
+// NodeTags normalizes labels at the JSON boundary. Nil preserves existing tags.
+type NodeTags []string
+
+func (t *NodeTags) UnmarshalJSON(data []byte) error {
+	const maxTags, maxTagLength = 20, 32
+	var raw []string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("标签必须为字符串数组: %w", err)
+	}
+	if raw == nil {
+		*t = nil
+		return nil
+	}
+	tags := make(NodeTags, 0, min(len(raw), maxTags))
+	seen := make(map[string]bool, cap(tags))
+	for _, value := range raw {
+		tag := strings.TrimSpace(value)
+		if tag == "" || utf8.RuneCountInString(tag) > maxTagLength || strings.ContainsFunc(tag, unicode.IsControl) {
+			return fmt.Errorf("标签需包含 1 至 %d 个字符，且不能包含控制字符", maxTagLength)
+		}
+		if seen[tag] {
+			continue
+		}
+		if len(tags) == maxTags {
+			return fmt.Errorf("每个节点最多可添加 %d 个标签", maxTags)
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	*t = tags
+	return nil
 }
 
 // NodeAddressMappings normalizes IP pairs at the JSON boundary. Nil preserves existing pairs.
