@@ -23,12 +23,13 @@ const (
 
 type TunnelTestResult struct {
 	Success        bool                   `json:"success"`
+	Partial        bool                   `json:"partial,omitempty"`
 	LatencyMS      int64                  `json:"latency_ms"`
 	FailureStage   string                 `json:"failure_stage,omitempty"`
 	Diagnostics    []TunnelTestDiagnostic `json:"diagnostics"`
 	Recommendation string                 `json:"recommendation,omitempty"`
 
-	relayTargetChecked bool
+	relayTargetError string
 }
 
 type TunnelTestDiagnostic struct {
@@ -54,8 +55,8 @@ func (r *TunnelTestResult) fail(stage, message, recommendation string) {
 	r.Recommendation = recommendation
 }
 
-// Test verifies a round trip from the entry node through its saved relay chain
-// to a temporary listener on the exit node.
+// Test probes the saved relay chain using a temporary listener on the exit node.
+// A relay with a destination policy may reject the temporary target after authenticating.
 func (s *TunnelService) Test(ctx context.Context, id uint) (*TunnelTestResult, error) {
 	tunnel, err := s.GetByID(id)
 	if err != nil {
@@ -91,6 +92,9 @@ func (s *TunnelService) Test(ctx context.Context, id uint) (*TunnelTestResult, e
 		if result.recordEntryFailure(err, businessErr) {
 			// The probe may have consumed its deadline. Give this read-only check its own budget.
 			result.inspectExitRelay(ctx, tunnel, exitClient)
+		}
+		if result.Partial {
+			return result, nil
 		}
 		logger.Warnf("隧道 %d 测试在 %s 阶段失败（%s）", id, result.FailureStage, status.Code(err))
 		return result, businessErr
@@ -247,10 +251,10 @@ func (r *TunnelTestResult) recordGostEvidence(outcome string) {
 	case "relay_authentication":
 		r.fail("relay_handshake", "Gost Relay 拒绝了认证。", "请核对入口转发链与出口 Relay 的认证配置。")
 	case "relay_target_unreachable":
-		r.relayTargetChecked = true
+		r.relayTargetError = outcome
 		r.fail("relay_handshake", "Gost Relay 报告无法连接临时测试目标。", "请检查出口 Gost 能否访问 daemon 所在网络命名空间的回环地址，以及出口是否限制了回环访问。")
 	case "relay_target_forbidden":
-		r.relayTargetChecked = true
+		r.relayTargetError = outcome
 		r.fail("relay_handshake", "出口 Relay 的目标策略拒绝了临时回环测试目标（127.0.0.1）。", "请通过入口使用出口目标策略允许的业务地址验证转发。")
 	case "relay_handshake":
 		r.fail("relay_handshake", "Gost 报告传输握手失败。", "请核对两端传输协议及其参数，例如 WebSocket 路径。")

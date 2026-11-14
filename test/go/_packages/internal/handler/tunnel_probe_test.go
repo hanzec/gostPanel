@@ -68,6 +68,7 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 	configReads := make(chan *nodegrpc.CommandRequest, 1)
 	type exitRelayConfig struct {
 		state      string
+		bypass     string
 		admissions []gost.AdmissionConfig
 	}
 	relayConfig := make(chan exitRelayConfig, 1)
@@ -91,6 +92,7 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 					Handler:  &gost.HandlerConfig{Type: "relay", Auth: &gost.AuthConfig{Password: "secret-test-value"}},
 					Listener: &gost.ListenerConfig{Type: "tcp"}, Admission: "tunnel-allowlist",
 					Admissions: []string{"another-allowlist", "relay-denylist"},
+					Bypass:     exitRelay.bypass,
 				}}
 				config.Admissions = exitRelay.admissions
 			}
@@ -119,6 +121,8 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		}
 		return detailed.Err()
 	}
+	targetForbidden := probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_target_forbidden"})
+	allowedSource := []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true, Matchers: []string{"192.0.2.1"}}}
 	for _, tt := range []struct {
 		name               string
 		prepare            error
@@ -128,7 +132,9 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		wantStage          string
 		checkExit          bool
 		relayState         string
+		relayBypass        string
 		relayAdmissions    []gost.AdmissionConfig
+		wantPartial        bool
 		wantChecks         map[string]string
 		wantRelayPolicy    string
 		wantRecommendation string
@@ -160,18 +166,31 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		},
 		{
 			name: "connection closed with no Relay response", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable"}),
-			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_round_trip",
+			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", relayBypass: "tunnel-1-bypass", wantStage: "relay_round_trip",
 			relayAdmissions: []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true}},
 			wantChecks:      map[string]string{"relay_connection": "passed", "relay_policy": "skipped"},
 			wantRelayPolicy: "出口 Relay 启用了来源白名单，本次探测未能确认来源准入结果。当前配置未列出白名单条目。",
 		},
 		{
-			name: "relay target forbidden", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_target_forbidden"}),
+			name: "relay target forbidden without observed target policy", probe: targetForbidden,
 			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake",
-			relayAdmissions:    []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true, Matchers: []string{"192.0.2.1"}}},
-			wantChecks:         map[string]string{"relay_connection": "passed", "relay_policy": "passed", "relay_handshake": "failed"},
+			relayAdmissions: allowedSource,
+			wantChecks:      map[string]string{"relay_connection": "passed", "relay_policy": "passed", "relay_handshake": "failed", "relay_round_trip": "failed"},
+			wantRelayPolicy: "本次探测已通过出口 Relay 的来源白名单检查。当前配置的白名单条目：192.0.2.1。",
+		},
+		{
+			name: "relay target forbidden by configured policy", probe: targetForbidden,
+			wantHTTP: http.StatusOK, checkExit: true, relayState: "running", relayBypass: "tunnel-1-bypass",
+			relayAdmissions:    allowedSource,
+			wantPartial:        true,
+			wantChecks:         map[string]string{"relay_connection": "passed", "relay_policy": "passed", "relay_handshake": "passed", "relay_round_trip": "skipped"},
 			wantRelayPolicy:    "本次探测已通过出口 Relay 的来源白名单检查。当前配置的白名单条目：192.0.2.1。",
 			wantRecommendation: "请通过入口使用出口目标策略允许的业务地址验证转发。",
+		},
+		{
+			name: "target policy does not conceal an exit service failure", probe: targetForbidden,
+			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "failed", relayBypass: "tunnel-1-bypass", wantStage: "exit_relay",
+			wantChecks: map[string]string{"exit_relay": "failed"},
 		},
 		{
 			name: "relay target unreachable", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"gost_error": "relay_target_unreachable"}),
@@ -187,40 +206,48 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 				probeResult <- tt.probe
 			}
 			if tt.checkExit {
-				relayConfig <- exitRelayConfig{state: tt.relayState, admissions: tt.relayAdmissions}
+				relayConfig <- exitRelayConfig{state: tt.relayState, bypass: tt.relayBypass, admissions: tt.relayAdmissions}
 			}
 			reply := f.request(t, http.MethodPost, path, "", tt.wantHTTP)
 			result := handlerData[service.TunnelTestResult](t, reply)
-			if tt.wantHTTP == http.StatusOK {
+			if result.Partial != tt.wantPartial {
+				t.Fatalf("probe partial = %v, want %v", result.Partial, tt.wantPartial)
+			}
+			switch {
+			case tt.wantPartial:
+				if result.Success || result.LatencyMS != 0 || result.FailureStage != "" {
+					t.Fatalf("probe result = %+v, want partial verification", result)
+				}
+			case tt.wantHTTP == http.StatusOK:
 				if !result.Success || result.LatencyMS != 23 {
 					t.Fatalf("probe result = %+v", result)
 				}
-			} else {
+			default:
 				if tt.wantDetail != "" && reply.Message != tt.wantDetail {
 					t.Fatalf("message = %q, want %q", reply.Message, tt.wantDetail)
 				}
 				if result.Success || result.FailureStage != tt.wantStage || result.Recommendation == "" {
 					t.Fatalf("probe result = %+v, want failure at %s", result, tt.wantStage)
 				}
-				if tt.wantRecommendation != "" && result.Recommendation != tt.wantRecommendation {
-					t.Errorf("recommendation = %q, want %q", result.Recommendation, tt.wantRecommendation)
+			}
+			if tt.wantRecommendation != "" && result.Recommendation != tt.wantRecommendation {
+				t.Errorf("recommendation = %q, want %q", result.Recommendation, tt.wantRecommendation)
+			}
+			checks := make(map[string]service.TunnelTestDiagnostic)
+			for _, check := range result.Diagnostics {
+				checks[check.Stage] = check
+			}
+			for stage, want := range tt.wantChecks {
+				if checks[stage].Status != want {
+					t.Errorf("stage %s = %q, want %q", stage, checks[stage].Status, want)
 				}
-				checks := make(map[string]service.TunnelTestDiagnostic)
-				for _, check := range result.Diagnostics {
-					checks[check.Stage] = check
-				}
-				for stage, want := range tt.wantChecks {
-					if checks[stage].Status != want {
-						t.Errorf("stage %s = %q, want %q", stage, checks[stage].Status, want)
-					}
-				}
-				if got := checks["relay_policy"].Message; got != tt.wantRelayPolicy {
-					t.Errorf("Relay policy message = %q, want %q", got, tt.wantRelayPolicy)
-				}
-				body, _ := json.Marshal(reply)
-				if bytes.Contains(body, []byte("secret-test-value")) {
-					t.Fatal("probe exposed raw log text or credentials")
-				}
+			}
+			if got := checks["relay_policy"].Message; got != tt.wantRelayPolicy {
+				t.Errorf("Relay policy message = %q, want %q", got, tt.wantRelayPolicy)
+			}
+			body, _ := json.Marshal(reply)
+			if bytes.Contains(body, []byte("secret-test-value")) {
+				t.Fatal("probe exposed raw log text or credentials")
 			}
 			select {
 			case req := <-configReads:
