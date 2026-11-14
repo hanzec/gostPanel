@@ -67,6 +67,13 @@ func (r *TunnelTestResult) checkExitRelay(tunnel *model.GostTunnel, relay gost.S
 	} else {
 		r.record("exit_relay", "warning", "出口 Relay 的配置存在，但 Gost 未提供可确认的运行状态。")
 	}
+	if r.relayTargetError == "relay_target_forbidden" && relay.Bypass != "" {
+		// The Relay checks its target policy after processing authentication.
+		r.Partial = true
+		r.FailureStage = ""
+		r.record("relay_handshake", "passed", "出口 Relay 已响应请求并通过认证检查。")
+		r.record("relay_round_trip", "skipped", "出口目标策略拒绝了临时回环测试目标（127.0.0.1），数据往返未验证。")
+	}
 
 	var whitelistEntries []string
 	whitelistEnabled := false
@@ -80,7 +87,7 @@ func (r *TunnelTestResult) checkExitRelay(tunnel *model.GostTunnel, relay gost.S
 		state := "skipped"
 		message := "出口 Relay 启用了来源白名单，本次探测未能确认来源准入结果。"
 		// Gost closes rejected connections before processing the Relay request.
-		if r.relayTargetChecked {
+		if r.relayTargetError != "" {
 			state = "passed"
 			message = "本次探测已通过出口 Relay 的来源白名单检查。"
 		}

@@ -34,15 +34,15 @@
             <p class="ops-muted">正在检查两端状态和 Relay 数据往返。</p>
           </div>
         </div>
-        <div v-else-if="result" class="tunnel-test-result-card" :class="result.success ? 'is-passed' : 'is-failed'">
+        <div v-else-if="result" class="tunnel-test-result-card" :class="resultStatus.tone">
           <div class="tunnel-test-result">
             <el-icon class="tunnel-test-result-icon" aria-hidden="true">
-              <SuccessFilled v-if="result.success" />
-              <CircleCloseFilled v-else />
+              <component :is="resultStatus.icon" />
             </el-icon>
             <div>
-              <h3>{{ result.success ? '隧道转发正常' : '测试失败' }}</h3>
+              <h3>{{ resultStatus.title }}</h3>
               <p v-if="result.success" class="tunnel-test-latency ops-muted">往返耗时 <strong class="ops-mono">{{ result.latency_ms }} ms</strong></p>
+              <p v-else-if="result.partial" class="ops-muted">{{ roundTripCheck?.message }}</p>
               <template v-else>
                 <p v-if="stageLabels[result.failure_stage]" class="tunnel-test-stage">失败环节 · {{ stageLabels[result.failure_stage] }}</p>
                 <p v-if="result.message" class="ops-muted">{{ result.message }}</p>
@@ -141,6 +141,14 @@ const checkStatuses = {
   skipped: { label: '未验证', tone: 'is-muted' }
 }
 
+const resultStatus = computed(() => {
+  if (props.result?.success) return { title: '隧道转发正常', tone: 'is-passed', icon: SuccessFilled }
+  if (props.result?.partial) return { title: 'Relay 握手通过', tone: 'is-partial', icon: InfoFilled }
+  return { title: '测试失败', tone: 'is-failed', icon: CircleCloseFilled }
+})
+
+const roundTripCheck = computed(() => props.result?.diagnostics?.find(check => check.stage === 'relay_round_trip'))
+
 const checkCounts = computed(() => {
   const checks = props.result?.diagnostics ?? []
   return Object.entries(checkStatuses)
@@ -192,6 +200,7 @@ const checkCounts = computed(() => {
 }
 .tunnel-test-result-card.is-passed { --result-ink: var(--ops-success); }
 .tunnel-test-result-card.is-failed { --result-ink: var(--ops-danger); }
+.tunnel-test-result-card.is-partial,
 .tunnel-test-result.is-blocked { --result-ink: var(--ops-warning); }
 .tunnel-test-result {
   display: grid;

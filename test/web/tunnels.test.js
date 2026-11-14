@@ -784,6 +784,36 @@ describe('Relay tunnel configuration', () => {
     expect(testTunnel).toHaveBeenCalledTimes(2)
   })
 
+  it('shows Relay handshake success when the target policy prevents the round-trip test', async () => {
+    const roundTripMessage = '出口目标策略拒绝了临时回环测试目标（127.0.0.1），数据往返未验证。'
+    const recommendation = '请通过入口使用出口目标策略允许的业务地址验证转发。'
+    testTunnel.mockResolvedValueOnce({ data: {
+      success: false,
+      partial: true,
+      latency_ms: 0,
+      recommendation,
+      diagnostics: [
+        { stage: 'relay_handshake', status: 'passed', message: '入口已通过出口 Relay 握手。' },
+        { stage: 'relay_round_trip', status: 'skipped', message: roundTripMessage }
+      ]
+    } })
+    const wrapper = mountInventory(Tunnels)
+    await flushPromises()
+    await button(row(wrapper, relay.name), '测试').trigger('click')
+    const popup = dialog(wrapper)
+    await button(popup, '开始测试').trigger('click')
+    await flushPromises()
+
+    const status = popup.get('[role="status"]')
+    expect(status.get('.tunnel-test-result-card').classes()).toContain('is-partial')
+    expect(status.get('.tunnel-test-result h3').text()).toBe('Relay 握手通过')
+    expect(status.get('.tunnel-test-result p').text()).toBe(roundTripMessage)
+    expect(status.text()).toContain(recommendation)
+    expect(status.text()).not.toContain('往返耗时')
+    const checks = popup.get('[aria-labelledby="tunnel-test-checks-title"]')
+    expect(checks.findAll('li').map(item => item.get('.ops-status').text())).toEqual(['通过', '未验证'])
+  })
+
   it('shows the failed stage, next check and diagnostic evidence, then replaces them on retry', async () => {
     testTunnel.mockRejectedValueOnce({
       response: {
