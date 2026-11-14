@@ -70,9 +70,9 @@ func (r *TunnelTestResult) checkExitRelay(tunnel *model.GostTunnel, relay gost.S
 	if r.relayTargetError == "relay_target_forbidden" && relay.Bypass != "" {
 		// The Relay checks its target policy after processing authentication.
 		r.Partial = true
-		r.FailureStage = ""
 		r.record("relay_handshake", "passed", "出口 Relay 已响应请求并通过认证检查。")
-		r.record("relay_round_trip", "skipped", "出口目标策略拒绝了临时回环测试目标（127.0.0.1），数据往返未验证。")
+		r.fail("exit_target_policy", "出口目标策略拒绝了临时回环测试目标（127.0.0.1）。", tunnelProbeTargetRecommendation)
+		r.record("relay_round_trip", "skipped", "临时测试目标未获放行，未执行测试数据往返。")
 	}
 
 	var whitelistEntries []string

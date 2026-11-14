@@ -137,6 +137,7 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		wantPartial        bool
 		wantChecks         map[string]string
 		wantRelayPolicy    string
+		wantTargetPolicy   string
 		wantRecommendation string
 	}{
 		{name: "round trip", wantHTTP: http.StatusOK},
@@ -183,8 +184,10 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 			wantHTTP: http.StatusOK, checkExit: true, relayState: "running", relayBypass: "tunnel-1-bypass",
 			relayAdmissions:    allowedSource,
 			wantPartial:        true,
-			wantChecks:         map[string]string{"relay_connection": "passed", "relay_policy": "passed", "relay_handshake": "passed", "relay_round_trip": "skipped"},
+			wantStage:          "exit_target_policy",
+			wantChecks:         map[string]string{"relay_connection": "passed", "relay_policy": "passed", "relay_handshake": "passed", "relay_round_trip": "skipped", "exit_target_policy": "failed"},
 			wantRelayPolicy:    "本次探测已通过出口 Relay 的来源白名单检查。当前配置的白名单条目：192.0.2.1。",
+			wantTargetPolicy:   "出口目标策略拒绝了临时回环测试目标（127.0.0.1）。",
 			wantRecommendation: "请通过入口使用出口目标策略允许的业务地址验证转发。",
 		},
 		{
@@ -215,8 +218,8 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 			}
 			switch {
 			case tt.wantPartial:
-				if result.Success || result.LatencyMS != 0 || result.FailureStage != "" {
-					t.Fatalf("probe result = %+v, want partial verification", result)
+				if result.Success || result.LatencyMS != 0 || result.FailureStage != tt.wantStage {
+					t.Fatalf("probe result = %+v, want partial verification limited by %s", result, tt.wantStage)
 				}
 			case tt.wantHTTP == http.StatusOK:
 				if !result.Success || result.LatencyMS != 23 {
@@ -244,6 +247,12 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 			}
 			if got := checks["relay_policy"].Message; got != tt.wantRelayPolicy {
 				t.Errorf("Relay policy message = %q, want %q", got, tt.wantRelayPolicy)
+			}
+			if got := checks["exit_target_policy"].Message; got != tt.wantTargetPolicy {
+				t.Errorf("exit target policy message = %q, want %q", got, tt.wantTargetPolicy)
+			}
+			if tt.wantPartial && checks["relay_round_trip"].Message != "临时测试目标未获放行，未执行测试数据往返。" {
+				t.Errorf("unexpected skipped round-trip message: %q", checks["relay_round_trip"].Message)
 			}
 			body, _ := json.Marshal(reply)
 			if bytes.Contains(body, []byte("secret-test-value")) {

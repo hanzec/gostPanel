@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	tunnelTestTimeout = 11 * time.Second
-	tunnelProbeEntry  = "入口节点"
-	tunnelProbeExit   = "出口节点"
+	tunnelTestTimeout               = 11 * time.Second
+	tunnelProbeEntry                = "入口节点"
+	tunnelProbeExit                 = "出口节点"
+	tunnelProbeTargetRecommendation = "请通过入口使用出口目标策略允许的业务地址验证转发。"
 )
 
 type TunnelTestResult struct {
@@ -255,7 +256,7 @@ func (r *TunnelTestResult) recordGostEvidence(outcome string) {
 		r.fail("relay_handshake", "Gost Relay 报告无法连接临时测试目标。", "请检查出口 Gost 能否访问 daemon 所在网络命名空间的回环地址，以及出口是否限制了回环访问。")
 	case "relay_target_forbidden":
 		r.relayTargetError = outcome
-		r.fail("relay_handshake", "出口 Relay 的目标策略拒绝了临时回环测试目标（127.0.0.1）。", "请通过入口使用出口目标策略允许的业务地址验证转发。")
+		r.fail("relay_handshake", "出口 Relay 的目标策略拒绝了临时回环测试目标（127.0.0.1）。", tunnelProbeTargetRecommendation)
 	case "relay_handshake":
 		r.fail("relay_handshake", "Gost 报告传输握手失败。", "请核对两端传输协议及其参数，例如 WebSocket 路径。")
 	case "relay_tls":

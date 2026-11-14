@@ -42,10 +42,10 @@
             <div>
               <h3>{{ resultStatus.title }}</h3>
               <p v-if="result.success" class="tunnel-test-latency ops-muted">往返耗时 <strong class="ops-mono">{{ result.latency_ms }} ms</strong></p>
-              <p v-else-if="result.partial" class="ops-muted">{{ roundTripCheck?.message }}</p>
               <template v-else>
                 <p v-if="stageLabels[result.failure_stage]" class="tunnel-test-stage">失败环节 · {{ stageLabels[result.failure_stage] }}</p>
-                <p v-if="result.message" class="ops-muted">{{ result.message }}</p>
+                <p v-if="failureMessage" class="ops-muted">{{ failureMessage }}</p>
+                <p v-if="result.partial" class="ops-muted">{{ failureMessage ? 'Relay 数据往返未验证。' : roundTripCheck?.message }}</p>
               </template>
             </div>
           </div>
@@ -131,6 +131,7 @@ const stageLabels = {
   relay_handshake: 'Relay 握手或转发',
   exit_relay: '出口 Relay 服务',
   relay_policy: '出口 Relay 访问策略',
+  exit_target_policy: '出口 Relay 目标策略',
   relay_quota: '出口流量配额'
 }
 
@@ -148,6 +149,9 @@ const resultStatus = computed(() => {
 })
 
 const roundTripCheck = computed(() => props.result?.diagnostics?.find(check => check.stage === 'relay_round_trip'))
+const failureMessage = computed(() => props.result?.message || props.result?.diagnostics?.find(check =>
+  check.stage === props.result.failure_stage && check.status === 'failed'
+)?.message)
 
 const checkCounts = computed(() => {
   const checks = props.result?.diagnostics ?? []
