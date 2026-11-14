@@ -785,15 +785,18 @@ describe('Relay tunnel configuration', () => {
   })
 
   it('shows Relay handshake success when the target policy prevents the round-trip test', async () => {
-    const roundTripMessage = '出口目标策略拒绝了临时回环测试目标（127.0.0.1），数据往返未验证。'
+    const policyMessage = '出口目标策略拒绝了临时回环测试目标（127.0.0.1）。'
+    const roundTripMessage = '临时测试目标未获放行，未执行测试数据往返。'
     const recommendation = '请通过入口使用出口目标策略允许的业务地址验证转发。'
     testTunnel.mockResolvedValueOnce({ data: {
       success: false,
       partial: true,
       latency_ms: 0,
+      failure_stage: 'exit_target_policy',
       recommendation,
       diagnostics: [
         { stage: 'relay_handshake', status: 'passed', message: '入口已通过出口 Relay 握手。' },
+        { stage: 'exit_target_policy', status: 'failed', message: policyMessage },
         { stage: 'relay_round_trip', status: 'skipped', message: roundTripMessage }
       ]
     } })
@@ -807,11 +810,16 @@ describe('Relay tunnel configuration', () => {
     const status = popup.get('[role="status"]')
     expect(status.get('.tunnel-test-result-card').classes()).toContain('is-partial')
     expect(status.get('.tunnel-test-result h3').text()).toBe('Relay 握手通过')
-    expect(status.get('.tunnel-test-result p').text()).toBe(roundTripMessage)
+    expect(status.get('.tunnel-test-stage').text()).toBe('失败环节 · 出口 Relay 目标策略')
+    expect(status.text()).toContain(policyMessage)
+    expect(status.text()).toContain('Relay 数据往返未验证。')
     expect(status.text()).toContain(recommendation)
     expect(status.text()).not.toContain('往返耗时')
     const checks = popup.get('[aria-labelledby="tunnel-test-checks-title"]')
-    expect(checks.findAll('li').map(item => item.get('.ops-status').text())).toEqual(['通过', '未验证'])
+    expect(checks.findAll('li').map(item => item.get('.ops-status').text())).toEqual(['通过', '失败', '未验证'])
+    expect(checks.get('li.is-danger strong').text()).toBe('出口 Relay 目标策略')
+    expect(checks.get('li.is-danger p').text()).toBe(policyMessage)
+    expect(checks.text()).toContain(roundTripMessage)
   })
 
   it('shows the failed stage, next check and diagnostic evidence, then replaces them on retry', async () => {
