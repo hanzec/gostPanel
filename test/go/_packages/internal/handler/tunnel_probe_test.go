@@ -120,17 +120,18 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 		return detailed.Err()
 	}
 	for _, tt := range []struct {
-		name            string
-		prepare         error
-		probe           error
-		wantHTTP        int
-		wantDetail      string
-		wantStage       string
-		checkExit       bool
-		relayState      string
-		relayAdmissions []gost.AdmissionConfig
-		wantChecks      map[string]string
-		wantRelayPolicy string
+		name               string
+		prepare            error
+		probe              error
+		wantHTTP           int
+		wantDetail         string
+		wantStage          string
+		checkExit          bool
+		relayState         string
+		relayAdmissions    []gost.AdmissionConfig
+		wantChecks         map[string]string
+		wantRelayPolicy    string
+		wantRecommendation string
 	}{
 		{name: "round trip", wantHTTP: http.StatusOK},
 		{name: "exit unavailable", prepare: status.Error(codes.Unavailable, "could not listen"), wantHTTP: http.StatusBadGateway, wantDetail: "无法在出口节点启动测试，请检查节点的 daemon 连接和运行状态", wantStage: "exit_listener"},
@@ -154,17 +155,31 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 				{Name: "relay-denylist", Matchers: []string{"198.51.100.11"}},
 				{Name: "another-allowlist", Whitelist: true, Matchers: []string{"203.0.113.0/24"}},
 			},
-			wantChecks:      map[string]string{"relay_connection": "passed", "relay_policy": "warning"},
-			wantRelayPolicy: "出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。当前配置的白名单条目：192.0.2.1、2001:db8::/48、203.0.113.0/24。",
+			wantChecks:      map[string]string{"relay_connection": "passed", "relay_policy": "skipped"},
+			wantRelayPolicy: "出口 Relay 启用了来源白名单，本次探测未能确认来源准入结果。当前配置的白名单条目：192.0.2.1、2001:db8::/48、203.0.113.0/24。",
 		},
 		{
-			name: "empty relay allowlist", probe: status.Error(codes.Unavailable, "probe closed"),
+			name: "connection closed with no Relay response", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable"}),
 			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_round_trip",
 			relayAdmissions: []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true}},
-			wantChecks:      map[string]string{"relay_policy": "warning"},
-			wantRelayPolicy: "出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。当前配置未列出白名单条目。",
+			wantChecks:      map[string]string{"relay_connection": "passed", "relay_policy": "skipped"},
+			wantRelayPolicy: "出口 Relay 启用了来源白名单，本次探测未能确认来源准入结果。当前配置未列出白名单条目。",
 		},
-		{name: "relay target forbidden", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_target_forbidden"}), wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake", wantChecks: map[string]string{"relay_connection": "passed"}},
+		{
+			name: "relay target forbidden", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"relay_tcp": "reachable", "gost_error": "relay_target_forbidden"}),
+			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake",
+			relayAdmissions:    []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true, Matchers: []string{"192.0.2.1"}}},
+			wantChecks:         map[string]string{"relay_connection": "passed", "relay_policy": "passed", "relay_handshake": "failed"},
+			wantRelayPolicy:    "本次探测已通过出口 Relay 的来源白名单检查。当前配置的白名单条目：192.0.2.1。",
+			wantRecommendation: "请通过入口使用出口目标策略允许的业务地址验证转发。",
+		},
+		{
+			name: "relay target unreachable", probe: probeError(codes.Unavailable, "relay_read", map[string]string{"gost_error": "relay_target_unreachable"}),
+			wantHTTP: http.StatusBadGateway, checkExit: true, relayState: "running", wantStage: "relay_handshake",
+			relayAdmissions: []gost.AdmissionConfig{{Name: "tunnel-allowlist", Whitelist: true, Matchers: []string{"192.0.2.1"}}},
+			wantChecks:      map[string]string{"relay_policy": "passed", "relay_handshake": "failed"},
+			wantRelayPolicy: "本次探测已通过出口 Relay 的来源白名单检查。当前配置的白名单条目：192.0.2.1。",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			startResult <- tt.prepare
@@ -186,6 +201,9 @@ func TestTunnelProbeHTTPUsesSavedChainAndNodeSessions(t *testing.T) {
 				}
 				if result.Success || result.FailureStage != tt.wantStage || result.Recommendation == "" {
 					t.Fatalf("probe result = %+v, want failure at %s", result, tt.wantStage)
+				}
+				if tt.wantRecommendation != "" && result.Recommendation != tt.wantRecommendation {
+					t.Errorf("recommendation = %q, want %q", result.Recommendation, tt.wantRecommendation)
 				}
 				checks := make(map[string]service.TunnelTestDiagnostic)
 				for _, check := range result.Diagnostics {

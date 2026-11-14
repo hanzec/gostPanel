@@ -223,6 +223,17 @@ func TestTunnelProbeThroughGostRelay(t *testing.T) {
 		Handler:  &gost.HandlerConfig{Type: "relay", Auth: &gost.AuthConfig{Username: "probe", Password: "relay-password"}},
 	}
 	startTunnelProbeTestRelay(t, binary, dir, relay, chain, control)
+	writeConfig := func(t *testing.T, method, path string, config any) {
+		t.Helper()
+		body, err := json.Marshal(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply, err := control.Execute(t.Context(), &nodegrpc.CommandRequest{Method: method, Path: path, Body: body})
+		if err != nil || reply.GetStatusCode() != http.StatusOK {
+			t.Fatalf("update live Gost configuration at %s: %v %s", path, err, reply.GetBody())
+		}
+	}
 	probe := func() (*nodegrpc.TunnelProbeReply, error) {
 		endpoint, err := control.StartTunnelProbe(context.Background(), &emptypb.Empty{})
 		if err != nil {
@@ -246,17 +257,8 @@ func TestTunnelProbeThroughGostRelay(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			node.Connector.Auth.Password = tc.password
 			node.Dialer = gost.RelayDialer("ws", map[string]string{"path": tc.path})
-			body, err := json.Marshal(chain)
-			if err != nil {
-				t.Fatal(err)
-			}
-			reply, err := control.Execute(t.Context(), &nodegrpc.CommandRequest{
-				Method: http.MethodPut, Path: "/config/chains/" + chain.Name, Body: body,
-			})
-			if err != nil || reply.GetStatusCode() != http.StatusOK {
-				t.Fatalf("update live Gost chain: %v %s", err, reply.GetBody())
-			}
-			_, err = probe()
+			writeConfig(t, http.MethodPut, "/config/chains/"+chain.Name, chain)
+			_, err := probe()
 			if tc.failure == "" {
 				if err != nil {
 					t.Fatalf("probe through restored Gost Relay: %v", err)
@@ -277,6 +279,33 @@ func TestTunnelProbeThroughGostRelay(t *testing.T) {
 	if info.GetMetadata()["gost_error"] != "relay_target_unreachable" || info.GetMetadata()["relay_tcp"] != "reachable" {
 		t.Fatalf("unexpected diagnostics for closed test target: %v", info.GetMetadata())
 	}
+	t.Run("source admission and target policy", func(t *testing.T) {
+		relay.Admission = gost.TunnelRelayAllowlistName(relay.Name)
+		relay.Bypass = "tunnel-1-bypass"
+		relay.Listener = gost.RelayListener("tcp", nil)
+		node.Dialer = gost.RelayDialer("tcp", nil)
+		admission := gost.AdmissionConfig{Name: relay.Admission, Whitelist: true, Matchers: []string{"127.0.0.1"}}
+		writeConfig(t, http.MethodPost, "/config/admissions", admission)
+		writeConfig(t, http.MethodPost, "/config/bypasses", map[string]any{
+			"name": relay.Bypass, "whitelist": true, "matchers": []string{"example.com"},
+		})
+		writeConfig(t, http.MethodPut, "/config/services/"+relay.Name, relay)
+		writeConfig(t, http.MethodPut, "/config/chains/"+chain.Name, chain)
+
+		_, err := probe()
+		info := requireTunnelProbeFailure(t, err, codes.Unavailable, "relay_read")
+		if info.GetMetadata()["gost_error"] != "relay_target_forbidden" || info.GetMetadata()["relay_tcp"] != "reachable" {
+			t.Fatalf("unexpected diagnostics for an allowed source and forbidden target: %v", info.GetMetadata())
+		}
+
+		admission.Matchers = []string{"192.0.2.1"}
+		writeConfig(t, http.MethodPut, "/config/admissions/"+admission.Name, admission)
+		_, err = probe()
+		info = requireTunnelProbeFailure(t, err, codes.Unavailable, "relay_write", "relay_read")
+		if info.GetMetadata()["gost_error"] != "" || info.GetMetadata()["relay_tcp"] != "reachable" {
+			t.Fatalf("unexpected diagnostics for a denied source: %v", info.GetMetadata())
+		}
+	})
 	reply, err := control.Execute(context.Background(), &nodegrpc.CommandRequest{
 		Method: http.MethodDelete, Path: "/config/services/" + relay.Name,
 	})

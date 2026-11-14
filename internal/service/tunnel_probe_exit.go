@@ -77,16 +77,19 @@ func (r *TunnelTestResult) checkExitRelay(tunnel *model.GostTunnel, relay gost.S
 		}
 	}
 	if whitelistEnabled {
-		message := "出口 Relay 启用了来源白名单，请核对出口实际看到的入口源 IP，尤其是经过 NAT 时。"
+		state := "skipped"
+		message := "出口 Relay 启用了来源白名单，本次探测未能确认来源准入结果。"
+		// Gost closes rejected connections before processing the Relay request.
+		if r.relayTargetChecked {
+			state = "passed"
+			message = "本次探测已通过出口 Relay 的来源白名单检查。"
+		}
 		if len(whitelistEntries) == 0 {
 			message += "当前配置未列出白名单条目。"
 		} else {
 			message += "当前配置的白名单条目：" + strings.Join(whitelistEntries, "、") + "。"
 		}
-		r.record("relay_policy", "warning", message)
-		if r.FailureStage == "relay_round_trip" {
-			r.Recommendation = "请先核对出口实际看到的入口源 IP 是否在 Relay 白名单内，再核对两端的协议与认证设置。"
-		}
+		r.record("relay_policy", state, message)
 	}
 	if tunnel.ExitNode.TrafficQuotaState == model.TrafficQuotaBlocked {
 		r.record("relay_quota", "warning", "面板显示出口节点的流量配额已阻断，请确认此 Relay 端口是否受限。")
